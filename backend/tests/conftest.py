@@ -23,6 +23,7 @@ def temp_data_dir(tmp_path, monkeypatch):
     import backend.services.tasks as task_svc
     import backend.services.graph as graph_svc
     import backend.services.agents as agent_svc
+    import backend.services.skills as skills_svc
     import backend.core.auth as auth_mod
 
     monkeypatch.setattr(doc_svc, "DOCUMENTS_FILE", tmp_path / "documents.json")
@@ -30,6 +31,7 @@ def temp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(graph_svc, "GRAPH_FILE", tmp_path / "graph.json")
     monkeypatch.setattr(agent_svc, "AGENTS_FILE", tmp_path / "agents.json")
     monkeypatch.setattr(auth_mod, "AUTH_FILE", tmp_path / "auth.json")
+    monkeypatch.setattr(skills_svc, "DATA_DIR", tmp_path)
 
     # Init files
     (tmp_path / "graph.json").write_text('{"nodes": [], "edges": []}')
@@ -44,7 +46,7 @@ def temp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "ensure_data_dir", patched_ensure)
 
     # Patch each service's ensure_data_dir reference
-    for svc_mod in [doc_svc, task_svc, graph_svc, agent_svc, auth_mod]:
+    for svc_mod in [doc_svc, task_svc, graph_svc, agent_svc, auth_mod, skills_svc]:
         monkeypatch.setattr(svc_mod, "ensure_data_dir", patched_ensure)
 
     yield tmp_path

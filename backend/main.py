@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .core.errors import NexsysError, nexsys_error_handler, generic_error_handler
 from .core.auth import init_auth
-from .api import documents, tasks, graph, agents
+from .api import documents, tasks, graph, agents, webhooks, skills
 
 app = FastAPI(
     title="NEXSYS",
@@ -29,6 +29,8 @@ app.include_router(documents.router)
 app.include_router(tasks.router)
 app.include_router(graph.router)
 app.include_router(agents.router)
+app.include_router(webhooks.router)
+app.include_router(skills.router)
 
 
 @app.get("/api/health")
@@ -39,5 +41,9 @@ def health():
 @app.on_event("startup")
 def startup():
     token = init_auth()
+    # Create default skills
+    from .services.skills import create_default_skills
+    create_default_skills()
     print(f"[NEXSYS] Auth token: {token}")
     print(f"[NEXSYS] API running at http://127.0.0.1:8420")
+    print(f"[NEXSYS] Skills loaded")
