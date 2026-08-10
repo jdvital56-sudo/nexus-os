@@ -1,59 +1,65 @@
-import type { Screen } from '../types'
+import { Link, useLocation } from 'react-router-dom';
+import { 
+  LayoutDashboard, 
+  Brain, 
+  Sparkles, 
+  Bot, 
+  FileText, 
+  Settings, 
+  Activity,
+  Network,
+  Calendar
+} from 'lucide-react';
 
-const items: { screen: Screen; label: string; icon: string }[] = [
-  { screen: 'home', label: 'Home', icon: '◉' },
-  { screen: 'graph', label: 'Graph', icon: '◎' },
-  { screen: 'documents', label: 'Documents', icon: '◫' },
-  { screen: 'tasks', label: 'Tasks', icon: '☑' },
-  { screen: 'agents', label: 'Agents', icon: '◈' },
-  { screen: 'memory', label: 'Memory', icon: '◉' },
-  { screen: 'pipeline', label: 'Pipeline', icon: '▷' },
-  { screen: 'activity', label: 'Activity', icon: '▦' },
-  { screen: 'settings', label: 'Settings', icon: '⚙' },
-]
+const menuItems = [
+  { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/memory', label: 'Memory Graph', icon: Brain },
+  { path: '/skills', label: 'Skills', icon: Sparkles },
+  { path: '/agents', label: 'Agents', icon: Bot },
+  { path: '/dream-review', label: 'Dream Review', icon: Calendar },
+  { path: '/graph', label: 'Knowledge Graph', icon: Network },
+  { path: '/activity', label: 'Activity', icon: Activity },
+  { path: '/settings', label: 'Settings', icon: Settings },
+];
 
-interface Props {
-  current: Screen
-  onNavigate: (s: Screen) => void
-}
+export default function Sidebar() {
+  const location = useLocation();
 
-export default function Sidebar({ current, onNavigate }: Props) {
   return (
-    <nav style={{
-      width: 200,
-      background: '#0f1520',
-      borderRight: '1px solid #1e2a3a',
-      padding: '16px 0',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 2,
-    }}>
-      <div style={{ padding: '0 16px 16px', borderBottom: '1px solid #1e2a3a', marginBottom: 8 }}>
-        <div style={{ fontSize: 18, fontWeight: 800, color: '#22d3ee' }}>NEXSYS</div>
-        <div style={{ fontSize: 11, color: '#6d7f97' }}>v0.1.0 · Operator</div>
+    <aside className="w-64 bg-darker border-r border-gray-800 h-screen fixed left-0 top-0 overflow-y-auto">
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-primary">NEXUS OS</h1>
+        <p className="text-xs text-gray-500 mt-1">Claude Code Operating System</p>
       </div>
-      {items.map(item => (
-        <button
-          key={item.screen}
-          onClick={() => onNavigate(item.screen)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '10px 16px',
-            border: 'none',
-            background: current === item.screen ? '#1a2434' : 'transparent',
-            color: current === item.screen ? '#22d3ee' : '#95a6bd',
-            cursor: 'pointer',
-            fontSize: 14,
-            textAlign: 'left',
-            width: '100%',
-          }}
-        >
-          <span style={{ fontSize: 16 }}>{item.icon}</span>
-          {item.label}
-        </button>
-      ))}
-    </nav>
-  )
+      
+      <nav className="mt-6">
+        {menuItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = location.pathname === item.path;
+          
+          return (
+            <Link
+              key={item.path}
+              to={item.path}
+              className={`flex items-center px-6 py-3 text-sm transition-colors ${
+                isActive
+                  ? 'bg-primary/10 text-primary border-r-2 border-primary'
+                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+              }`}
+            >
+              <Icon className="w-5 h-5 mr-3" />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
+      
+      <div className="absolute bottom-0 left-0 right-0 p-6 border-t border-gray-800">
+        <div className="flex items-center space-x-3">
+          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+          <span className="text-xs text-gray-400">System Online</span>
+        </div>
+      </div>
+    </aside>
+  );
 }

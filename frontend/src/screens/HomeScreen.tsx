@@ -1,56 +1,168 @@
-import { useEffect, useState } from 'react'
-import { getHealth, getGraphStats, getDocuments, getTasks, getAgents, getMemoryStats } from '../lib/api'
-import OrbitalGraph from '../components/OrbitalGraph'
+import { useState } from 'react';
+import { DollarSign, Clock, TrendingUp, AlertCircle } from 'lucide-react';
+import { analyticsApi, systemApi } from '../lib/api';
+import { useApi } from '../hooks/useApi';
+import type { AnalyticsData, SystemStatus } from '../types';
+
+// Mock data for demo (will be replaced with real API calls)
+const mockAnalytics: AnalyticsData = {
+  totalSpent: 247.83,
+  timeSaved: 127,
+  moneySaved: 8940,
+  netRoi: 3512,
+  apiUsage: [
+    { provider: 'Claude API', tokensUsed: 2.4M, cost: 124.50, limit: 500 },
+    { provider: 'OpenAI API', tokensUsed: 1.8M, cost: 89.20, limit: 300 },
+    { provider: 'Gemini API', tokensUsed: 3.1M, cost: 34.13, limit: 1000 },
+  ],
+};
+
+const mockSystemStatus: SystemStatus = {
+  dreamCadenceEnabled: true,
+  nextDreamReview: 'Today at 3:00 AM',
+  obsidianConnected: true,
+  apolloConnected: true,
+  googleCalendarConnected: false,
+  telegramConnected: true,
+};
 
 export default function HomeScreen() {
-  const [health, setHealth] = useState<string>('checking...')
-  const [stats, setStats] = useState<any>({})
-  const [counts, setCounts] = useState({ docs: 0, tasks: 0, agents: 0, memories: 0 })
+  const [period, setPeriod] = useState('7d');
+  
+  // In production, uncomment these:
+  // const { data: analytics } = useApi<AnalyticsData>(() => analyticsApi.getOverview(), [period]);
+  // const { data: systemStatus } = useApi<SystemStatus>(() => systemApi.getStatus(), []);
+  
+  const analytics = mockAnalytics;
+  const systemStatus = mockSystemStatus;
 
-  useEffect(() => {
-    getHealth().then(r => setHealth(r.status)).catch(() => setHealth('error'))
-    getGraphStats().then(setStats).catch(() => {})
-    Promise.all([getDocuments(), getTasks(), getAgents(), getMemoryStats()]).then(([d, t, a, m]) => {
-      setCounts({ docs: d.length, tasks: t.length, agents: a.length, memories: m.active || 0 })
-    }).catch(() => {})
-  }, [])
-
-  const cards = [
-    { label: 'Memories', value: counts.memories, color: '#f5b642' },
-    { label: 'Graph Nodes', value: stats.nodes || 0, color: '#22d3ee' },
-    { label: 'Documents', value: counts.docs, color: '#a78bfa' },
-    { label: 'Tasks', value: counts.tasks, color: '#2dd4bf' },
-    { label: 'Agents', value: counts.agents, color: '#f472b6' },
-    { label: 'Edges', value: stats.edges || 0, color: '#38bdf8' },
-  ]
+  const statCards = [
+    {
+      title: 'Total Spent on AI',
+      value: `$${analytics.totalSpent.toFixed(2)}`,
+      icon: DollarSign,
+      color: 'text-red-400',
+      bgColor: 'bg-red-400/10',
+    },
+    {
+      title: 'Time Saved',
+      value: `${analytics.timeSaved}h`,
+      icon: Clock,
+      color: 'text-blue-400',
+      bgColor: 'bg-blue-400/10',
+    },
+    {
+      title: 'Money Saved',
+      value: `$${analytics.moneySaved.toLocaleString()}`,
+      icon: TrendingUp,
+      color: 'text-green-400',
+      bgColor: 'bg-green-400/10',
+    },
+    {
+      title: 'Net ROI',
+      value: `${((analytics.netRoi / analytics.totalSpent) * 100).toFixed(0)}%`,
+      icon: TrendingUp,
+      color: 'text-purple-400',
+      bgColor: 'bg-purple-400/10',
+    },
+  ];
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
-          <h1 style={{ fontSize: 28, fontWeight: 800, color: '#fff' }}>NEXSYS</h1>
-          <p style={{ color: '#6d7f97', fontSize: 13 }}>Operator · Local · {health}</p>
+    <div className="p-8">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-white mb-2">Dashboard</h1>
+        <p className="text-gray-400">Overview of your AI operations and ROI</p>
+      </div>
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        {statCards.map((stat) => {
+          const Icon = stat.icon;
+          return (
+            <div key={stat.title} className="bg-dark rounded-xl p-6 border border-gray-800">
+              <div className="flex items-center justify-between mb-4">
+                <div className={`${stat.bgColor} p-3 rounded-lg`}>
+                  <Icon className={`w-6 h-6 ${stat.color}`} />
+                </div>
+              </div>
+              <h3 className="text-gray-400 text-sm mb-1">{stat.title}</h3>
+              <p className="text-2xl font-bold text-white">{stat.value}</p>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* API Usage Table */}
+      <div className="bg-dark rounded-xl p-6 border border-gray-800 mb-8">
+        <h2 className="text-xl font-bold text-white mb-4">API Usage & Costs</h2>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="text-left text-gray-400 text-sm">
+                <th className="pb-4 font-medium">Provider</th>
+                <th className="pb-4 font-medium">Tokens Used</th>
+                <th className="pb-4 font-medium">Cost</th>
+                <th className="pb-4 font-medium">Limit</th>
+                <th className="pb-4 font-medium">Usage</th>
+              </tr>
+            </thead>
+            <tbody>
+              {analytics.apiUsage.map((usage, index) => (
+                <tr key={usage.provider} className="border-t border-gray-800">
+                  <td className="py-4 text-white">{usage.provider}</td>
+                  <td className="py-4 text-gray-400">{usage.tokensUsed}</td>
+                  <td className="py-4 text-white">${usage.cost.toFixed(2)}</td>
+                  <td className="py-4 text-gray-400">${usage.limit}</td>
+                  <td className="py-4">
+                    <div className="w-32 bg-gray-800 rounded-full h-2">
+                      <div 
+                        className="bg-primary h-2 rounded-full" 
+                        style={{ width: `${Math.min((usage.cost / usage.limit) * 100, 100)}%` }}
+                      />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}>
-        {cards.map(c => (
-          <div key={c.label} style={{
-            background: '#0f1520',
-            border: '1px solid #1e2a3a',
-            borderRadius: 12,
-            padding: '16px 20px',
-          }}>
-            <div style={{ fontSize: 12, color: '#6d7f97', textTransform: 'uppercase', letterSpacing: 1 }}>{c.label}</div>
-            <div style={{ fontSize: 32, fontWeight: 800, color: c.color, marginTop: 4 }}>{c.value}</div>
+      {/* System Status */}
+      <div className="bg-dark rounded-xl p-6 border border-gray-800">
+        <h2 className="text-xl font-bold text-white mb-4">System Status</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="flex items-center space-x-3 p-4 bg-darker rounded-lg">
+            <div className={`w-3 h-3 rounded-full ${systemStatus.dreamCadenceEnabled ? 'bg-green-500' : 'bg-gray-500'}`} />
+            <span className="text-gray-300">Dream Cadence</span>
           </div>
-        ))}
-      </div>
-
-      <div style={{ background: '#0f1520', border: '1px solid #1e2a3a', borderRadius: 12, padding: 16 }}>
-        <div style={{ fontSize: 13, color: '#6d7f97', marginBottom: 8 }}>Knowledge Graph</div>
-        <OrbitalGraph />
+          <div className="flex items-center space-x-3 p-4 bg-darker rounded-lg">
+            <div className={`w-3 h-3 rounded-full ${systemStatus.obsidianConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+            <span className="text-gray-300">Obsidian Vault</span>
+          </div>
+          <div className="flex items-center space-x-3 p-4 bg-darker rounded-lg">
+            <div className={`w-3 h-3 rounded-full ${systemStatus.apolloConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+            <span className="text-gray-300">Apollo.io</span>
+          </div>
+          <div className="flex items-center space-x-3 p-4 bg-darker rounded-lg">
+            <div className={`w-3 h-3 rounded-full ${systemStatus.googleCalendarConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+            <span className="text-gray-300">Google Calendar</span>
+          </div>
+          <div className="flex items-center space-x-3 p-4 bg-darker rounded-lg">
+            <div className={`w-3 h-3 rounded-full ${systemStatus.telegramConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+            <span className="text-gray-300">Telegram Bot</span>
+          </div>
+        </div>
+        
+        {systemStatus.dreamCadenceEnabled && (
+          <div className="mt-4 p-4 bg-primary/10 rounded-lg border border-primary/20">
+            <div className="flex items-center space-x-2">
+              <AlertCircle className="w-5 h-5 text-primary" />
+              <span className="text-primary text-sm">Next Dream Review: {systemStatus.nextDreamReview}</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
-  )
+  );
 }

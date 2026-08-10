@@ -1,72 +1,52 @@
-const BASE = '/api'
+import axios from 'axios';
 
-async function fetchJSON<T>(url: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${url}`, {
-    headers: { 'Content-Type': 'application/json', ...opts?.headers },
-    ...opts,
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(err.error || res.statusText)
-  }
-  return res.json()
-}
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
-// Health
-export const getHealth = () => fetchJSON<{ status: string }>('/health')
+const api = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
 
-// Graph
-export const getGraphStats = () => fetchJSON<any>('/graph/stats')
-export const getGraphNodes = (params?: Record<string, string>) => {
-  const q = params ? '?' + new URLSearchParams(params).toString() : ''
-  return fetchJSON<any[]>(`/graph/nodes${q}`)
-}
-export const getGraphNeighbors = (id: string, depth = 1) =>
-  fetchJSON<any>(`/graph/neighbors/${id}?depth=${depth}`)
-export const searchGraph = (q: string) => fetchJSON<any[]>(`/graph/search?q=${encodeURIComponent(q)}`)
+export const analyticsApi = {
+  getOverview: () => api.get('/analytics/overview'),
+  getApiUsage: () => api.get('/analytics/api-usage'),
+  getRoi: (period: string) => api.get(`/analytics/roi?period=${period}`),
+};
 
-// Documents
-export const getDocuments = (params?: Record<string, string>) => {
-  const q = params ? '?' + new URLSearchParams(params).toString() : ''
-  return fetchJSON<any[]>(`/documents${q}`)
-}
-export const getDocument = (id: string) => fetchJSON<any>(`/documents/${id}`)
-export const createDocument = (data: any) => fetchJSON<any>('/documents', { method: 'POST', body: JSON.stringify(data) })
+export const dreamReviewApi = {
+  getLatest: () => api.get('/dream-review/latest'),
+  getHistory: () => api.get('/dream-review/history'),
+  triggerReview: () => api.post('/dream-review/trigger'),
+};
 
-// Tasks
-export const getTasks = (params?: Record<string, string>) => {
-  const q = params ? '?' + new URLSearchParams(params).toString() : ''
-  return fetchJSON<any[]>(`/tasks${q}`)
-}
-export const createTask = (data: any) => fetchJSON<any>('/tasks', { method: 'POST', body: JSON.stringify(data) })
+export const skillsApi = {
+  getAll: () => api.get('/skills'),
+  getById: (id: string) => api.get(`/skills/${id}`),
+  create: (data: any) => api.post('/skills', data),
+  update: (id: string, data: any) => api.put(`/skills/${id}`, data),
+  delete: (id: string) => api.delete(`/skills/${id}`),
+  autoGenerate: () => api.post('/skills/auto-generate'),
+};
 
-// Agents
-export const getAgents = (params?: Record<string, string>) => {
-  const q = params ? '?' + new URLSearchParams(params).toString() : ''
-  return fetchJSON<any[]>(`/agents${q}`)
-}
-export const runAgent = (id: string, task: string) =>
-  fetchJSON<any>(`/agents/${id}/run`, { method: 'POST', body: JSON.stringify({ task, context: {} }) })
+export const memoryApi = {
+  getGraph: () => api.get('/memory/graph'),
+  search: (query: string) => api.get(`/memory/search?q=${query}`),
+  getNode: (id: string) => api.get(`/memory/nodes/${id}`),
+};
 
-// Memory
-export const getMemoryStats = () => fetchJSON<any>('/memory/stats')
-export const getMemoryFacts = (params?: Record<string, string>) => {
-  const q = params ? '?' + new URLSearchParams(params).toString() : ''
-  return fetchJSON<any[]>(`/memory/facts${q}`)
-}
-export const addMemoryFact = (data: any) => fetchJSON<any>('/memory/facts', { method: 'POST', body: JSON.stringify(data) })
-export const recallMemory = (q: string) => fetchJSON<any[]>(`/memory/recall?q=${encodeURIComponent(q)}`)
+export const agentsApi = {
+  getAll: () => api.get('/agents'),
+  getStatus: (id: string) => api.get(`/agents/${id}/status`),
+  activate: (id: string) => api.post(`/agents/${id}/activate`),
+  deactivate: (id: string) => api.post(`/agents/${id}/deactivate`),
+};
 
-// Pipeline
-export const getPipelineStatus = () => fetchJSON<any>('/pipeline/status')
-export const createContent = (data: any) => fetchJSON<any>('/pipeline/content', { method: 'POST', body: JSON.stringify(data) })
-export const advanceContent = (id: string, text?: string) =>
-  fetchJSON<any>(`/pipeline/content/${id}/advance`, { method: 'POST', body: JSON.stringify({ content_text: text || '' }) })
+export const systemApi = {
+  getStatus: () => api.get('/system/status'),
+  runSetupWizard: () => api.post('/system/setup-wizard'),
+  checkConnections: () => api.get('/system/connections'),
+};
 
-// Skills
-export const getSkills = () => fetchJSON<any[]>('/skills')
-export const runSkill = (id: string, params?: Record<string, any>) =>
-  fetchJSON<any>(`/skills/${id}/run`, { method: 'POST', body: JSON.stringify({ params: params || {} }) })
-
-// Webhooks
-export const sendWebhook = (data: any) => fetchJSON<any>('/webhooks', { method: 'POST', body: JSON.stringify(data) })
+export default api;
