@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .core.errors import NexsysError, nexsys_error_handler, generic_error_handler
 from .core.auth import init_auth
-from .api import documents, tasks, graph, agents, webhooks, skills
+from .api import documents, tasks, graph, agents, webhooks, skills, calendar, obsidian, pipeline
 
 app = FastAPI(
     title="NEXSYS",
@@ -31,6 +31,9 @@ app.include_router(graph.router)
 app.include_router(agents.router)
 app.include_router(webhooks.router)
 app.include_router(skills.router)
+app.include_router(calendar.router)
+app.include_router(obsidian.router)
+app.include_router(pipeline.router)
 
 
 @app.get("/api/health")
