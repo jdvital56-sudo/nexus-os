@@ -1,9 +1,37 @@
+# NEXSYS Backend Dependencies
+# Core Framework
 fastapi==0.115.12
-uvicorn==0.34.3
+uvicorn[standard]==0.34.3
 pydantic==2.11.5
-networkx==3.5
-python-multipart==0.0.20
-passlib[bcrypt]==1.7.4
+pydantic-settings==2.7.1
+
+# Database
+sqlalchemy==2.0.37
+alembic==1.15.2
+
+# Vector Store
+chromadb==0.6.3
+
+# Security
 python-jose[cryptography]==3.5.0
-pytest==8.4.1
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.20
+
+# Environment Variables
+python-dotenv==1.0.1
+
+# HTTP Client
 httpx==0.28.1
+
+# Utilities
+networkx==3.5
+
+# Testing
+pytest==8.4.1
+pytest-asyncio==0.25.3
+pytest-cov==6.0.0
+
+# Code Quality (optional, for development)
+# ruff==0.9.6
+# black==25.1.0
+# mypy==1.15.0

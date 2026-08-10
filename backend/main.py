@@ -1,20 +1,45 @@
 """NEXSYS — FastAPI application entry point."""
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from .core.config import (
+    API_HOST, 
+    API_PORT, 
+    CORS_ORIGINS, 
+    LOG_LEVEL, 
+    LOG_FILE,
+    DATA_DIR,
+    ensure_data_dir
+)
 from .core.errors import NexsysError, nexsys_error_handler, generic_error_handler
 from .core.auth import init_auth
 from .api import documents, tasks, graph, agents, webhooks, skills, calendar, obsidian, pipeline, memory, events, vector_search, fireflies
+
+# Configure logging
+log_config = {
+    "level": getattr(logging, LOG_LEVEL, logging.INFO),
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+}
+if LOG_FILE:
+    log_config["filename"] = str(LOG_FILE)
+    logging.basicConfig(**log_config)
+else:
+    logging.basicConfig(**log_config)
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="NEXSYS",
     description="Local-first AI agent operating system",
     version="0.1.0",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
 )
 
-# CORS — allow frontend dev server
+# CORS — configurable origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -47,12 +72,28 @@ def health():
 
 @app.on_event("startup")
 def startup():
+    """Initialize application on startup."""
+    ensure_data_dir()
     token = init_auth()
+    
     # Create default skills
     try:
         from .services.skills import create_default_skills
         create_default_skills()
-    except Exception:
-        pass  # may fail in test environment
-    print(f"[NEXSYS] Auth token: {token}")
-    print(f"[NEXSYS] API running at http://127.0.0.1:8420")
+        logger.info("Default skills created successfully")
+    except Exception as e:
+        logger.warning(f"Failed to create default skills: {e}")
+    
+    # Log startup info (without exposing token in production)
+    logger.info(f"NEXSYS v0.1.0 starting on {API_HOST}:{API_PORT}")
+    logger.info(f"CORS allowed origins: {', '.join(CORS_ORIGINS)}")
+    
+    # Only print token in development (check via environment)
+    import os
+    if os.getenv("NEXSYS_ENV", "development") == "development":
+        print(f"[NEXSYS] Auth token: {token}")
+    else:
+        print(f"[NEXSYS] Auth token initialized (check {DATA_DIR / 'auth.json'})")
+    
+    print(f"[NEXSYS] API running at http://{API_HOST}:{API_PORT}")
+    print(f"[NEXSYS] Docs available at http://{API_HOST}:{API_PORT}/api/docs")
