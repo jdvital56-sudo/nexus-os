@@ -80,9 +80,9 @@ def delete_agent(agent_id: str) -> bool:
 
 
 def run_agent(agent_id: str, task: str, context: dict | None = None) -> AgentRunResult:
-    """Stub — execute agent cycle (Orient-Observe-Think-Act-Verify).
-    Currently returns a placeholder. Real implementation in Phase 3.
-    """
+    """Execute agent cycle (Orient-Observe-Think-Act-Verify)."""
+    from .agent_engine import execute_cycle
+    
     agent = get_agent(agent_id)
     # Update status to running
     agents = _load()
@@ -94,13 +94,8 @@ def run_agent(agent_id: str, task: str, context: dict | None = None) -> AgentRun
             _save(agents)
             break
 
-    # Placeholder output
-    output = (
-        f"[{agent.role.value.upper()}] Agent '{agent.name}' received task: {task}\n"
-        f"Context: {json.dumps(context or {})}\n"
-        f"Status: Orient-Observe-Think-Act-Verify cycle NOT YET IMPLEMENTED\n"
-        f"This is a stub. Phase 3 will wire real execution."
-    )
+    # Execute real cycle
+    result = execute_cycle(agent, task, context)
 
     # Update status back to idle
     agents = _load()
@@ -113,8 +108,8 @@ def run_agent(agent_id: str, task: str, context: dict | None = None) -> AgentRun
 
     return AgentRunResult(
         agent_id=agent_id,
-        status="completed",
-        output=output,
-        duration_ms=0,
+        status=result["status"],
+        output=result["output"],
+        duration_ms=result["duration_ms"],
         tokens_used=None,
     )

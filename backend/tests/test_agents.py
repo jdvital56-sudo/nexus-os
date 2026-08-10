@@ -51,7 +51,7 @@ def test_run_agent(client):
     data = r.json()
     assert data["agent_id"] == aid
     assert data["status"] == "completed"
-    assert "stub" in data["output"].lower() or "not yet implemented" in data["output"].lower()
+    assert "cycle complete" in data["output"].lower() or "not yet" in data["output"].lower()
 
 
 def test_create_agent_invalid_role(client):
