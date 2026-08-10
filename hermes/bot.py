@@ -11,7 +11,7 @@ from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 from backend.core.config import settings
-from backend.services.llm import LLMClient
+from backend.services.llm import LLMService
 from backend.services.apollo_client import ApolloClient
 from backend.services.google_calendar import GoogleCalendarClient
 from backend.agents.persona_manager import PersonaManager
@@ -29,7 +29,7 @@ class HermesAgent:
     def __init__(self):
         self.bot_token = settings.telegram_bot_token
         self.allowed_user_id = settings.telegram_allowed_user_id
-        self.llm = LLMClient()
+        self.llm = LLMService()
         self.apollo = ApolloClient() if settings.apollo_api_key else None
         self.calendar = GoogleCalendarClient()
         self.persona_manager = PersonaManager()

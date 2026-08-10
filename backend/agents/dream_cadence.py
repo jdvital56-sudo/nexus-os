@@ -12,7 +12,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from backend.core.config import settings
-from backend.services.llm import LLMClient
+from backend.services.llm import LLMService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ class DreamCadence:
     ]
     
     def __init__(self):
-        self.llm = LLMClient()
+        self.llm = LLMService()
         self.scheduler = AsyncIOScheduler()
         self.cron_schedule = os.getenv("NIGHT_ANALYSIS_CRON", "0 3 * * *")
         
