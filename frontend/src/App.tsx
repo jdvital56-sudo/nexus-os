@@ -9,6 +9,7 @@ import AgentsScreen from './screens/AgentsScreen'
 import MemoryScreen from './screens/MemoryScreen'
 import ActivityScreen from './screens/ActivityScreen'
 import SettingsScreen from './screens/SettingsScreen'
+import PipelineScreen from './screens/PipelineScreen'
 
 const screens: Record<Screen, () => JSX.Element> = {
   home: HomeScreen,
@@ -19,6 +20,7 @@ const screens: Record<Screen, () => JSX.Element> = {
   memory: MemoryScreen,
   activity: ActivityScreen,
   settings: SettingsScreen,
+  pipeline: PipelineScreen,
 }
 
 export default function App() {

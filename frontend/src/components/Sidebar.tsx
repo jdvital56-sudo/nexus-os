@@ -7,6 +7,7 @@ const items: { screen: Screen; label: string; icon: string }[] = [
   { screen: 'tasks', label: 'Tasks', icon: '☑' },
   { screen: 'agents', label: 'Agents', icon: '◈' },
   { screen: 'memory', label: 'Memory', icon: '◉' },
+  { screen: 'pipeline', label: 'Pipeline', icon: '▷' },
   { screen: 'activity', label: 'Activity', icon: '▦' },
   { screen: 'settings', label: 'Settings', icon: '⚙' },
 ]

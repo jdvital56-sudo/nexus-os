@@ -63,6 +63,40 @@ def start(host: str = "127.0.0.1", port: int = 8420, frontend: bool = True):
 
 
 @app.command()
+def import_docs(path: str, source: str = "file"):
+    """Import documents from a directory of markdown files."""
+    init()
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from backend.services.documents import import_markdown_dir
+    try:
+        docs = import_markdown_dir(path)
+        typer.echo(f"[NEXSYS] Imported {len(docs)} documents from {path}")
+        for d in docs[:5]:
+            typer.echo(f"  - {d.title} ({len(d.tags)} tags)")
+        if len(docs) > 5:
+            typer.echo(f"  ... and {len(docs) - 5} more")
+    except Exception as e:
+        typer.echo(f"[NEXSYS] Error: {e}")
+
+
+@app.command()
+def memory_stats():
+    """Show memory system statistics."""
+    init()
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from backend.services.memory import get_stats
+    stats = get_stats()
+    typer.echo(f"\n[NEXSYS Memory]\n")
+    typer.echo(f"  Total facts: {stats['total']}")
+    typer.echo(f"  Active: {stats['active']}")
+    typer.echo(f"  Expired: {stats['expired']}")
+    typer.echo(f"  Avg confidence: {stats['avg_confidence']}")
+    typer.echo(f"\n  By layer:")
+    for layer, count in stats.get('by_layer', {}).items():
+        typer.echo(f"    {layer}: {count}")
+
+
+@app.command()
 def doctor():
     """Health check — verify NEXSYS installation."""
     checks = []

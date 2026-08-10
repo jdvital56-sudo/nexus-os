@@ -47,3 +47,26 @@ export const getAgents = (params?: Record<string, string>) => {
 }
 export const runAgent = (id: string, task: string) =>
   fetchJSON<any>(`/agents/${id}/run`, { method: 'POST', body: JSON.stringify({ task, context: {} }) })
+
+// Memory
+export const getMemoryStats = () => fetchJSON<any>('/memory/stats')
+export const getMemoryFacts = (params?: Record<string, string>) => {
+  const q = params ? '?' + new URLSearchParams(params).toString() : ''
+  return fetchJSON<any[]>(`/memory/facts${q}`)
+}
+export const addMemoryFact = (data: any) => fetchJSON<any>('/memory/facts', { method: 'POST', body: JSON.stringify(data) })
+export const recallMemory = (q: string) => fetchJSON<any[]>(`/memory/recall?q=${encodeURIComponent(q)}`)
+
+// Pipeline
+export const getPipelineStatus = () => fetchJSON<any>('/pipeline/status')
+export const createContent = (data: any) => fetchJSON<any>('/pipeline/content', { method: 'POST', body: JSON.stringify(data) })
+export const advanceContent = (id: string, text?: string) =>
+  fetchJSON<any>(`/pipeline/content/${id}/advance`, { method: 'POST', body: JSON.stringify({ content_text: text || '' }) })
+
+// Skills
+export const getSkills = () => fetchJSON<any[]>('/skills')
+export const runSkill = (id: string, params?: Record<string, any>) =>
+  fetchJSON<any>(`/skills/${id}/run`, { method: 'POST', body: JSON.stringify({ params: params || {} }) })
+
+// Webhooks
+export const sendWebhook = (data: any) => fetchJSON<any>('/webhooks', { method: 'POST', body: JSON.stringify(data) })

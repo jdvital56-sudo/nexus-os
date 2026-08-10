@@ -57,4 +57,4 @@ export interface Agent {
   created_at: string
 }
 
-export type Screen = 'home' | 'graph' | 'documents' | 'tasks' | 'agents' | 'memory' | 'activity' | 'settings'
+export type Screen = 'home' | 'graph' | 'documents' | 'tasks' | 'agents' | 'memory' | 'activity' | 'pipeline' | 'settings'
