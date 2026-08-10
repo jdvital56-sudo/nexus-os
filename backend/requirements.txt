@@ -1,0 +1,9 @@
+fastapi==0.115.12
+uvicorn==0.34.3
+pydantic==2.11.5
+networkx==3.5
+python-multipart==0.0.20
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.5.0
+pytest==8.4.1
+httpx==0.28.1
