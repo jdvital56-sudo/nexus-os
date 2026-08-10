@@ -196,16 +196,260 @@ def verify_reviewer(ctx: AgentContext, act_results: list[dict]) -> dict:
     return {"tasks_created": tasks_created, "total_issues": len(act_results)}
 
 
-# === Generic stub for other roles ===
+# === Builder ===
 
-def generic_cycle(ctx: AgentContext) -> dict:
-    """Generic cycle stub for roles not yet implemented."""
-    ctx.log_msg(f"Orient: role '{ctx.agent.role.value}' — generic cycle")
-    ctx.log_msg(f"Observe: task = '{ctx.task}'")
-    ctx.log_msg(f"Think: this role is not yet fully implemented")
-    ctx.log_msg(f"Act: logging task as pending")
-    ctx.log_msg(f"Verify: no changes made")
-    return {"status": "stub", "message": f"Role '{ctx.agent.role.value}' not yet fully implemented"}
+def orient_builder(ctx: AgentContext) -> dict:
+    """Builder: Check tasks, identify what needs to be built."""
+    tasks = task_svc.list_tasks(status="todo")
+    in_progress = task_svc.list_tasks(status="in_progress")
+    ctx.log_msg(f"Orient: {len(tasks)} todo tasks, {len(in_progress)} in progress")
+    return {"todo": len(tasks), "in_progress": len(in_progress), "tasks": [t.model_dump() for t in tasks[:5]]}
+
+
+def observe_builder(ctx: AgentContext, orient_data: dict) -> list:
+    """Builder: Collect buildable tasks."""
+    buildable = []
+    for t in orient_data.get("tasks", []):
+        if "build" in t["title"].lower() or "create" in t["title"].lower() or "implement" in t["title"].lower():
+            buildable.append(t)
+    ctx.log_msg(f"Observe: {len(buildable)} buildable tasks found")
+    return buildable
+
+
+def think_builder(ctx: AgentContext, tasks: list) -> list[dict]:
+    """Builder: Plan build steps."""
+    actions = []
+    for t in tasks:
+        actions.append({
+            "action": "build",
+            "task_id": t["id"],
+            "title": t["title"],
+            "plan": f"Implement: {t['title']}",
+        })
+    ctx.log_msg(f"Think: planned {len(actions)} builds")
+    return actions
+
+
+def act_builder(ctx: AgentContext, actions: list[dict]) -> list[dict]:
+    """Builder: Mark tasks as in_progress, create implementation notes."""
+    results = []
+    for action in actions:
+        if action["action"] == "build":
+            try:
+                task_svc.update_task(action["task_id"], task_svc.TaskUpdate(status=task_svc.TaskStatus.IN_PROGRESS))
+                graph_svc.add_node(GraphNode(
+                    id=f"build:{action['task_id']}",
+                    label=f"Build: {action['title']}",
+                    node_type=NodeType.DECISION,
+                    metadata={"task_id": action["task_id"], "status": "in_progress"},
+                ))
+                results.append({"task_id": action["task_id"], "status": "started"})
+                ctx.log_msg(f"Act: started building '{action['title']}'")
+            except Exception as e:
+                results.append({"task_id": action["task_id"], "status": "error", "error": str(e)})
+    return results
+
+
+def verify_builder(ctx: AgentContext, act_results: list[dict]) -> dict:
+    """Builder: Verify builds."""
+    started = sum(1 for r in act_results if r["status"] == "started")
+    ctx.log_msg(f"Verify: {started} builds started")
+    return {"builds_started": started}
+
+
+# === Researcher ===
+
+def orient_researcher(ctx: AgentContext) -> dict:
+    """Researcher: Identify knowledge gaps."""
+    stats = graph_svc.get_stats()
+    from . import memory as mem_svc
+    mem_stats = mem_svc.get_stats()
+    active = mem_stats.get('active', 0)
+    ctx.log_msg(f"Orient: graph has {stats.nodes} nodes, memory has {active} active facts")
+    return {"graph": stats.model_dump(), "memory": mem_stats}
+
+
+def observe_researcher(ctx: AgentContext, orient_data: dict) -> list:
+    """Researcher: Find sparse areas in the graph."""
+    nodes = graph_svc.list_nodes(limit=100)
+    sparse = []
+    for node in nodes:
+        try:
+            neighbors = graph_svc.get_neighbors(node.id, depth=1)
+            if len(neighbors["edges"]) < 2:
+                sparse.append({"id": node.id, "label": node.label, "connections": len(neighbors["edges"])})
+        except Exception:
+            pass
+    ctx.log_msg(f"Observe: {len(sparse)} sparse nodes found")
+    return sparse[:10]
+
+
+def think_researcher(ctx: AgentContext, sparse: list) -> list[dict]:
+    """Researcher: Plan research tasks."""
+    actions = []
+    for node in sparse:
+        actions.append({
+            "action": "research",
+            "node_id": node["id"],
+            "label": node["label"],
+            "connections": node["connections"],
+        })
+    ctx.log_msg(f"Think: {len(actions)} research tasks planned")
+    return actions
+
+
+def act_researcher(ctx: AgentContext, actions: list[dict]) -> list[dict]:
+    """Researcher: Create research tasks and notes."""
+    results = []
+    for action in actions:
+        if action["action"] == "research":
+            try:
+                task = task_svc.create_task(task_svc.TaskCreate(
+                    title=f"Research: {action['label']}",
+                    description=f"Node '{action['node_id']}' has only {action['connections']} connections. Find related information.",
+                    assigned_agent="librarian",
+                    tags=["research", "auto"],
+                ))
+                results.append({"node_id": action["node_id"], "status": "task_created", "task_id": task.id})
+                ctx.log_msg(f"Act: created research task for '{action['label']}'")
+            except Exception as e:
+                results.append({"node_id": action["node_id"], "status": "error", "error": str(e)})
+    return results
+
+
+def verify_researcher(ctx: AgentContext, act_results: list[dict]) -> dict:
+    """Researcher: Summarize research plan."""
+    tasks_created = sum(1 for r in act_results if r.get("status") == "task_created")
+    ctx.log_msg(f"Verify: {tasks_created} research tasks created")
+    return {"research_tasks": tasks_created}
+
+
+# === Monitor ===
+
+def orient_monitor(ctx: AgentContext) -> dict:
+    """Monitor: Check system health."""
+    stats = graph_svc.get_stats()
+    tasks = task_svc.list_tasks()
+    blocked = [t for t in tasks if t.status.value == "blocked"]
+    overdue = [t for t in tasks if t.status.value == "in_progress"]  # simplified
+    ctx.log_msg(f"Orient: {stats.nodes} nodes, {len(tasks)} tasks, {len(blocked)} blocked")
+    return {"graph": stats.model_dump(), "total_tasks": len(tasks), "blocked": len(blocked), "in_progress": len(overdue)}
+
+
+def observe_monitor(ctx: AgentContext, orient_data: dict) -> list:
+    """Monitor: Detect anomalies."""
+    issues = []
+    if orient_data["blocked"] > 3:
+        issues.append({"type": "too_many_blocked", "count": orient_data["blocked"], "severity": "warning"})
+    if orient_data["in_progress"] > 10:
+        issues.append({"type": "too_many_in_progress", "count": orient_data["in_progress"], "severity": "warning"})
+    if orient_data["graph"]["nodes"] == 0:
+        issues.append({"type": "empty_graph", "severity": "info"})
+    ctx.log_msg(f"Observe: {len(issues)} issues detected")
+    return issues
+
+
+def think_monitor(ctx: AgentContext, issues: list) -> list[dict]:
+    """Monitor: Decide actions for issues."""
+    actions = []
+    for issue in issues:
+        if issue["type"] == "too_many_blocked":
+            actions.append({"action": "alert", "message": f"{issue['count']} tasks are blocked. Review and unblock.", "severity": issue["severity"]})
+        elif issue["type"] == "empty_graph":
+            actions.append({"action": "alert", "message": "Knowledge graph is empty. Import data.", "severity": "info"})
+    ctx.log_msg(f"Think: {len(actions)} actions planned")
+    return actions
+
+
+def act_monitor(ctx: AgentContext, actions: list[dict]) -> list[dict]:
+    """Monitor: Create alert tasks."""
+    results = []
+    for action in actions:
+        if action["action"] == "alert":
+            try:
+                task = task_svc.create_task(task_svc.TaskCreate(
+                    title=f"[MONITOR] {action['message'][:50]}",
+                    description=action["message"],
+                    priority=task_svc.TaskPriority.HIGH if action["severity"] == "warning" else task_svc.TaskPriority.MEDIUM,
+                    tags=["monitor", "alert", "auto"],
+                ))
+                results.append({"status": "alert_created", "task_id": task.id})
+                ctx.log_msg(f"Act: alert created — {action['message'][:40]}")
+            except Exception as e:
+                results.append({"status": "error", "error": str(e)})
+    return results
+
+
+def verify_monitor(ctx: AgentContext, act_results: list[dict]) -> dict:
+    """Monitor: Report health status."""
+    alerts = sum(1 for r in act_results if r.get("status") == "alert_created")
+    ctx.log_msg(f"Verify: {alerts} alerts created, system check complete")
+    return {"alerts_created": alerts, "status": "healthy" if alerts == 0 else "attention_needed"}
+
+
+# === Jarvis (orchestrator) ===
+
+def orient_jarvis(ctx: AgentContext) -> dict:
+    """Jarvis: Read full system state."""
+    stats = graph_svc.get_stats()
+    tasks = task_svc.list_tasks()
+    from . import memory as mem_svc
+    mem_stats = mem_svc.get_stats()
+    agents = ["librarian", "reviewer", "builder", "researcher", "monitor"]
+    active = mem_stats.get('active', 0)
+    ctx.log_msg(f"Orient: {stats.nodes} nodes, {len(tasks)} tasks, {active} memories")
+    return {"graph": stats.model_dump(), "tasks": len(tasks), "memory": mem_stats, "agents": agents}
+
+
+def observe_jarvis(ctx: AgentContext, orient_data: dict) -> list:
+    """Jarvis: Identify what needs attention across all agents."""
+    tasks = task_svc.list_tasks(status="todo")
+    critical = [t for t in tasks if t.priority.value in ("high", "critical")]
+    ctx.log_msg(f"Observe: {len(critical)} high-priority tasks")
+    return [t.model_dump() for t in critical[:5]]
+
+
+def think_jarvis(ctx: AgentContext, critical_tasks: list) -> list[dict]:
+    """Jarvis: Decide which agent handles each task."""
+    actions = []
+    for t in critical_tasks:
+        # Route based on tags
+        assigned = "librarian"  # default
+        if "review" in t.get("tags", []):
+            assigned = "reviewer"
+        elif "build" in t.get("tags", []) or "implement" in t.get("tags", []):
+            assigned = "builder"
+        elif "research" in t.get("tags", []):
+            assigned = "researcher"
+        actions.append({
+            "action": "delegate",
+            "task_id": t["id"],
+            "title": t["title"],
+            "assign_to": assigned,
+        })
+    ctx.log_msg(f"Think: {len(actions)} tasks delegated")
+    return actions
+
+
+def act_jarvis(ctx: AgentContext, actions: list[dict]) -> list[dict]:
+    """Jarvis: Delegate tasks to other agents."""
+    results = []
+    for action in actions:
+        if action["action"] == "delegate":
+            try:
+                task_svc.update_task(action["task_id"], task_svc.TaskUpdate(assigned_agent=action["assign_to"]))
+                results.append({"task_id": action["task_id"], "delegated_to": action["assign_to"], "status": "delegated"})
+                ctx.log_msg(f"Act: delegated '{action['title'][:30]}' to {action['assign_to']}")
+            except Exception as e:
+                results.append({"task_id": action["task_id"], "status": "error", "error": str(e)})
+    return results
+
+
+def verify_jarvis(ctx: AgentContext, act_results: list[dict]) -> dict:
+    """Jarvis: Summarize orchestration."""
+    delegated = sum(1 for r in act_results if r.get("status") == "delegated")
+    ctx.log_msg(f"Verify: {delegated} tasks delegated to agents")
+    return {"delegated": delegated, "status": "orchestrated"}
 
 
 # === Main executor ===
@@ -224,6 +468,34 @@ ROLE_CYCLES = {
         "think": think_reviewer,
         "act": act_reviewer,
         "verify": verify_reviewer,
+    },
+    AgentRole.BUILDER: {
+        "orient": orient_builder,
+        "observe": observe_builder,
+        "think": think_builder,
+        "act": act_builder,
+        "verify": verify_builder,
+    },
+    AgentRole.RESEARCHER: {
+        "orient": orient_researcher,
+        "observe": observe_researcher,
+        "think": think_researcher,
+        "act": act_researcher,
+        "verify": verify_researcher,
+    },
+    AgentRole.MONITOR: {
+        "orient": orient_monitor,
+        "observe": observe_monitor,
+        "think": think_monitor,
+        "act": act_monitor,
+        "verify": verify_monitor,
+    },
+    AgentRole.JARVIS: {
+        "orient": orient_jarvis,
+        "observe": observe_jarvis,
+        "think": think_jarvis,
+        "act": act_jarvis,
+        "verify": verify_jarvis,
     },
 }
 

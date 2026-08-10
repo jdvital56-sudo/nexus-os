@@ -60,12 +60,12 @@ def test_reviewer_cycle(client):
     assert "Orient" in data["output"]
 
 
-def test_builder_stub(client):
-    """Builder role not yet implemented — should return stub."""
+def test_builder_cycle(client):
+    """Builder role should execute a real cycle."""
     r = client.post("/api/agents", json={"name": "Build", "role": "builder"})
     agent_id = r.json()["id"]
 
     r = client.post(f"/api/agents/{agent_id}/run", json={"task": "build something", "context": {}})
     data = r.json()
     assert data["status"] == "completed"
-    assert "not yet" in data["output"].lower() or "stub" in data["output"].lower()
+    assert "builder" in data["output"].lower()
