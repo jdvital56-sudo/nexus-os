@@ -183,8 +183,28 @@ def demote(fact_id: str, to_layer: MemoryLayer) -> MemoryFact:
 def recall(query: str, limit: int = 5) -> list[MemoryFact]:
     """Semantic recall — find facts matching a query.
 
-    Simple text search for now. Will be replaced with vector search when Pinecone is connected.
+    Uses vector search when available, falls back to text search.
     """
+    # Try vector search first
+    try:
+        from .vector_store import search_vectors
+        results = search_vectors(query, limit=limit, min_score=0.3)
+        if results:
+            # Map vector results back to memory facts
+            facts = []
+            for r in results:
+                if r["id"].startswith("memory:"):
+                    fact_id = r["id"].replace("memory:", "")
+                    try:
+                        facts.append(get_fact(fact_id))
+                    except FileNotFoundError:
+                        pass
+            if facts:
+                return facts
+    except Exception:
+        pass
+
+    # Fallback to text search
     facts = get_facts(active_only=True, limit=200)
     query_lower = query.lower()
 

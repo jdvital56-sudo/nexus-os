@@ -25,6 +25,7 @@ def temp_data_dir(tmp_path, monkeypatch):
     import backend.services.agents as agent_svc
     import backend.services.skills as skills_svc
     import backend.services.memory as mem_svc
+    import backend.services.vector_store as vec_svc
     import backend.core.auth as auth_mod
 
     monkeypatch.setattr(doc_svc, "DOCUMENTS_FILE", tmp_path / "documents.json")
@@ -34,11 +35,13 @@ def temp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(auth_mod, "AUTH_FILE", tmp_path / "auth.json")
     monkeypatch.setattr(skills_svc, "DATA_DIR", tmp_path)
     monkeypatch.setattr(mem_svc, "MEMORY_FILE", tmp_path / "memory.json")
+    monkeypatch.setattr(vec_svc, "VECTORS_FILE", tmp_path / "vectors.json")
 
     # Init files
     (tmp_path / "graph.json").write_text('{"nodes": [], "edges": []}')
     (tmp_path / "auth.json").write_text('{}')
     (tmp_path / "memory.json").write_text('[]')
+    (tmp_path / "vectors.json").write_text('{"ids": [], "texts": [], "vectors": [], "metadata": []}')
     for f in ["documents.json", "tasks.json", "agents.json"]:
         (tmp_path / f).write_text("[]")
 
@@ -49,7 +52,7 @@ def temp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "ensure_data_dir", patched_ensure)
 
     # Patch each service's ensure_data_dir reference
-    for svc_mod in [doc_svc, task_svc, graph_svc, agent_svc, auth_mod, skills_svc, mem_svc]:
+    for svc_mod in [doc_svc, task_svc, graph_svc, agent_svc, auth_mod, skills_svc, mem_svc, vec_svc]:
         if hasattr(svc_mod, 'ensure_data_dir'):
             monkeypatch.setattr(svc_mod, "ensure_data_dir", patched_ensure)
 
