@@ -5,13 +5,14 @@ import networkx as nx
 from ..core.config import GRAPH_FILE, ensure_data_dir
 from ..core.errors import NotFoundError
 from ..models.schemas import GraphNode, GraphEdge, GraphStats, NodeType, EdgeType
+from ..core.jsonio import read_json, write_json
 
 
 def _load_graph() -> nx.DiGraph:
     ensure_data_dir()
     G = nx.DiGraph()
     if GRAPH_FILE.exists():
-        data = json.loads(GRAPH_FILE.read_text())
+        data = read_json(GRAPH_FILE, {"nodes": [], "edges": []})
         for n in data.get("nodes", []):
             G.add_node(n["id"], **n)
         for e in data.get("edges", []):
@@ -25,7 +26,7 @@ def _save_graph(G: nx.DiGraph):
         "nodes": [dict(G.nodes[n]) for n in G.nodes],
         "edges": [dict(G.edges[e]) for e in G.edges],
     }
-    GRAPH_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    write_json(GRAPH_FILE, data)
 
 
 def get_stats() -> GraphStats:

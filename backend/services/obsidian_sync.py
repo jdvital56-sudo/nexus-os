@@ -11,6 +11,7 @@ from ..core.config import DATA_DIR, ensure_data_dir
 from ..models.schemas import DocumentCreate, DocType, GraphNode, GraphEdge, NodeType, EdgeType
 from . import documents as doc_svc
 from . import graph as graph_svc
+from ..core.jsonio import read_json, write_json
 
 
 SYNC_STATE_FILE = DATA_DIR / "obsidian_sync_state.json"
@@ -19,14 +20,14 @@ SYNC_STATE_FILE = DATA_DIR / "obsidian_sync_state.json"
 def _load_sync_state() -> dict:
     ensure_data_dir()
     if SYNC_STATE_FILE.exists():
-        return json.loads(SYNC_STATE_FILE.read_text())
+        return read_json(SYNC_STATE_FILE, {})
     return {"synced_files": {}, "last_sync": None}
 
 
 def _save_sync_state(state: dict):
     ensure_data_dir()
     state["last_sync"] = datetime.utcnow().isoformat()
-    SYNC_STATE_FILE.write_text(json.dumps(state, indent=2))
+    write_json(SYNC_STATE_FILE, state)
 
 
 def scan_vault(vault_path: str) -> dict:

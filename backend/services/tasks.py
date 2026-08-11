@@ -4,18 +4,19 @@ import uuid
 from ..core.config import TASKS_FILE, ensure_data_dir
 from ..core.errors import NotFoundError
 from ..models.schemas import Task, TaskCreate, TaskUpdate, TaskStatus
+from ..core.jsonio import read_json, write_json
 
 
 def _load() -> list[dict]:
     ensure_data_dir()
     if TASKS_FILE.exists():
-        return json.loads(TASKS_FILE.read_text())
+        return read_json(TASKS_FILE, [])
     return []
 
 
 def _save(tasks: list[dict]):
     ensure_data_dir()
-    TASKS_FILE.write_text(json.dumps(tasks, indent=2, ensure_ascii=False))
+    write_json(TASKS_FILE, tasks)
 
 
 def list_tasks(status: str | None = None, assigned_agent: str | None = None) -> list[Task]:

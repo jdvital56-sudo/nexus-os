@@ -5,18 +5,19 @@ from datetime import datetime
 from ..core.config import AGENTS_FILE, ensure_data_dir
 from ..core.errors import NotFoundError
 from ..models.schemas import Agent, AgentCreate, AgentUpdate, AgentRole, AgentStatus, AgentRunResult
+from ..core.jsonio import read_json, write_json
 
 
 def _load() -> list[dict]:
     ensure_data_dir()
     if AGENTS_FILE.exists():
-        return json.loads(AGENTS_FILE.read_text())
+        return read_json(AGENTS_FILE, [])
     return []
 
 
 def _save(agents: list[dict]):
     ensure_data_dir()
-    AGENTS_FILE.write_text(json.dumps(agents, indent=2, ensure_ascii=False))
+    write_json(AGENTS_FILE, agents)
 
 
 def list_agents(role: str | None = None) -> list[Agent]:

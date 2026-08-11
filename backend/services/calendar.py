@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from ..core.config import DATA_DIR, ensure_data_dir
+from ..core.jsonio import read_json, write_json
 
 CREDENTIALS_FILE = DATA_DIR / "google_credentials.json"
 TOKEN_FILE = DATA_DIR / "google_token.json"
@@ -102,7 +103,7 @@ def _get_credentials():
 
     if creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        TOKEN_FILE.write_text(creds.to_json())
+        TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
 
     return creds if creds.valid else None
 
@@ -111,7 +112,7 @@ def _read_cached_events() -> list[dict]:
     """Read events from local cache (for offline/ mock mode)."""
     cache_file = DATA_DIR / "calendar_cache.json"
     if cache_file.exists():
-        return json.loads(cache_file.read_text())
+        return read_json(cache_file, {})
     return []
 
 
@@ -119,7 +120,7 @@ def cache_events(events: list[dict]):
     """Cache events locally for offline access."""
     ensure_data_dir()
     cache_file = DATA_DIR / "calendar_cache.json"
-    cache_file.write_text(json.dumps(events, indent=2, ensure_ascii=False))
+    write_json(cache_file, events)
 
 
 def create_event_from_task(task: dict, duration_minutes: int = 60) -> dict | None:

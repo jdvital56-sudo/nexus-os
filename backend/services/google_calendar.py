@@ -47,7 +47,7 @@ class GoogleCalendarClient:
                     self.creds = flow.run_local_server(port=0)
                 
                 # Save the credentials for the next run
-                with open(TOKEN_FILE, 'w') as token:
+                with open(TOKEN_FILE, 'w', encoding='utf-8') as token:
                     token.write(self.creds.to_json())
             
             self.service = build('calendar', 'v3', credentials=self.creds)

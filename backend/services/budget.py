@@ -10,6 +10,7 @@ import logging
 from datetime import datetime, timezone
 
 from ..core.config import DATA_DIR, ensure_data_dir, settings
+from ..core.jsonio import read_json, write_json
 
 logger = logging.getLogger(__name__)
 
@@ -41,16 +42,13 @@ def _today() -> str:
 def _load() -> dict:
     ensure_data_dir()
     if SPEND_FILE.exists():
-        try:
-            return json.loads(SPEND_FILE.read_text())
-        except json.JSONDecodeError:
-            logger.warning("Файл расходов повреждён, начинаю день заново")
+        return read_json(SPEND_FILE, {}) or {}
     return {}
 
 
 def _save(data: dict) -> None:
     ensure_data_dir()
-    SPEND_FILE.write_text(json.dumps(data, indent=2))
+    write_json(SPEND_FILE, data)
 
 
 def estimate_cost(model: str, usage: dict) -> float:

@@ -19,6 +19,7 @@ from enum import Enum
 from typing import Any
 from pydantic import BaseModel, Field
 from ..core.config import DATA_DIR, ensure_data_dir
+from ..core.jsonio import read_json, write_json
 
 
 class MemoryLayer(str, Enum):
@@ -59,13 +60,13 @@ MEMORY_FILE = DATA_DIR / "memory.json"
 def _load() -> list[dict]:
     ensure_data_dir()
     if MEMORY_FILE.exists():
-        return json.loads(MEMORY_FILE.read_text())
+        return read_json(MEMORY_FILE, [])
     return []
 
 
 def _save(facts: list[dict]):
     ensure_data_dir()
-    MEMORY_FILE.write_text(json.dumps(facts, indent=2, ensure_ascii=False))
+    write_json(MEMORY_FILE, facts)
 
 
 def add_fact(
