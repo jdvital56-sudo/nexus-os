@@ -519,3 +519,79 @@ async def test_new_persona_can_be_used_immediately():
     await svc.drain()
 
     assert "Веста" in llm.calls[0][1]
+
+
+# --- Второй мозг: диалог читает память (PR-9) ---
+
+
+class ContextCapturingLLM(FakeLLM):
+    """Запоминает, какой контекст получил."""
+
+    async def generate_response(
+        self, user_message: str, context: str = "", kind: str = "interactive",
+        json_mode: bool = False
+    ) -> str:
+        self.calls.append((user_message, context))
+        return self.reply
+
+
+def make_remembering_service(llm):
+    return ConversationService(
+        llm=llm, semantic_dedup=False, extract_entities=False, use_memory=True
+    )
+
+
+@pytest.mark.asyncio
+async def test_known_facts_reach_the_model():
+    """Ключевое: Hermes не только пишет в память, но и читает из неё."""
+    mem_svc.add_fact("Nexus OS — личная операционная система фаундера", layer=MemoryLayer.CANON)
+    llm = ContextCapturingLLM("ответ")
+    svc = make_remembering_service(llm)
+
+    await svc.handle("telegram", "42", "что такое Nexus OS?")
+    await svc.drain()
+
+    context = llm.calls[0][1]
+    assert "личная операционная система" in context
+
+
+@pytest.mark.asyncio
+async def test_empty_memory_gives_clean_context():
+    llm = ContextCapturingLLM("ответ")
+    svc = make_remembering_service(llm)
+
+    await svc.handle("telegram", "42", "первый вопрос вообще")
+    await svc.drain()
+
+    context = llm.calls[0][1]
+    assert context.startswith("Persona:")
+    assert "из памяти" not in context
+
+
+@pytest.mark.asyncio
+async def test_memory_can_be_switched_off():
+    mem_svc.add_fact("секретный факт про Одессу", layer=MemoryLayer.CANON)
+    llm = ContextCapturingLLM("ответ")
+    svc = ConversationService(
+        llm=llm, semantic_dedup=False, extract_entities=False, use_memory=False
+    )
+
+    await svc.handle("telegram", "42", "расскажи про Одессу")
+    await svc.drain()
+
+    assert "секретный факт" not in llm.calls[0][1]
+
+
+@pytest.mark.asyncio
+async def test_broken_recall_does_not_break_dialog(monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("векторный стор недоступен")
+
+    monkeypatch.setattr(mem_svc, "recall", boom)
+    llm = ContextCapturingLLM("ответ несмотря ни на что")
+    svc = make_remembering_service(llm)
+
+    reply = await svc.handle("telegram", "42", "вопрос")
+    await svc.drain()
+
+    assert reply == "ответ несмотря ни на что"

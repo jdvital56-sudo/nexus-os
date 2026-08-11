@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 # Сколько последних фактов INBOX просматриваем в поисках дубля
 _DEDUP_SCAN_LIMIT = 200
 
+# Сколько фактов подмешиваем в запрос — больше не значит лучше,
+# длинный контекст размывает ответ и стоит денег
+_RECALL_LIMIT = 5
+
 # Порог косинусной близости, выше которого считаем факт повтором
 _DEDUP_SIMILARITY = 0.95
 
@@ -56,11 +60,13 @@ class ConversationService:
         *,
         semantic_dedup: bool = True,
         extract_entities: bool = True,
+        use_memory: bool = True,
     ):
         self.llm = llm or LLMService()
         self.persona_manager = persona_manager or PersonaManager()
         self.semantic_dedup = semantic_dedup
         self.extract_entities = extract_entities
+        self.use_memory = use_memory
         self._tasks: set[asyncio.Task] = set()
         # Клиенты под персоны создаются лениво и переиспользуются
         self._llm_cache: dict[tuple[str, str, str], LLMService] = {}
@@ -91,14 +97,40 @@ class ConversationService:
         self._emit_message(channel, "user", selected["name"], text)
 
         llm = self._llm_for(selected, channel=channel)
+        context = await asyncio.to_thread(self._build_context, text, selected["name"])
         reply = await llm.generate_response(
-            text, context=f"Persona: {selected['name']}", kind=budget.INTERACTIVE
+            text, context=context, kind=budget.INTERACTIVE
         )
 
         self._emit_message(channel, "assistant", selected["name"], reply)
         self._spawn(self._remember(channel, user_id, text, reply, selected["name"]))
         self._spawn(self._extract(channel, user_id, text, reply, llm))
         return reply
+
+    def _build_context(self, text: str, persona_name: str) -> str:
+        """Подмешивает в запрос то, что система уже знает.
+
+        Без этого Hermes писал бы в память, но никогда из неё не читал —
+        каждое сообщение обрабатывалось бы с чистого листа.
+        """
+        parts = [f"Persona: {persona_name}"]
+
+        if not self.use_memory:
+            return parts[0]
+
+        try:
+            facts = memory_svc.recall(text, limit=_RECALL_LIMIT)
+        except Exception:
+            logger.debug("Recall недоступен", exc_info=True)
+            return parts[0]
+
+        if facts:
+            known = "\n".join(f"- {f.content[:300]}" for f in facts)
+            parts.append(
+                "Что тебе уже известно из памяти (используй, если уместно; "
+                "не ссылайся на «память» вслух):\n" + known
+            )
+        return "\n\n".join(parts)
 
     @staticmethod
     def _emit_message(channel: str, role: str, persona: str, text: str) -> None:

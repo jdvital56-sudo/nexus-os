@@ -13,6 +13,7 @@ Key distinction:
 Each memory fact has: source, confidence, TTL (time-to-live), created/updated timestamps.
 """
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta
 from enum import Enum
@@ -21,6 +22,8 @@ from pydantic import BaseModel, Field
 from ..core.config import DATA_DIR, ensure_data_dir
 from ..core.jsonio import read_json, write_json
 from ..core import eventbus
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryLayer(str, Enum):
@@ -56,6 +59,15 @@ class MemoryFact(BaseModel):
 
 
 MEMORY_FILE = DATA_DIR / "memory.json"
+
+# Насколько слой ценен при вспоминании. Сырой диалог из INBOX — самый
+# шумный: там лежит каждое сообщение дословно, включая сам вопрос.
+LAYER_WEIGHTS = {
+    MemoryLayer.INBOX: 0.4,
+    MemoryLayer.OPERATIONAL: 1.0,
+    MemoryLayer.CANON: 1.5,
+    MemoryLayer.MEMORY: 1.5,
+}
 
 
 def _load() -> list[dict]:
@@ -93,6 +105,10 @@ def add_fact(
     facts.append(fact.model_dump())
     _save(facts)
 
+    # Индексируем здесь, а не у вызывающего: иначе факты, добавленные не
+    # через диалог, оставались бы невидимыми для recall()
+    _index_fact(fact)
+
     eventbus.emit(
         eventbus.MEMORY_FACT_ADDED,
         {
@@ -103,6 +119,21 @@ def add_fact(
         },
     )
     return fact
+
+
+def _index_fact(fact: "MemoryFact") -> None:
+    """Кладёт факт в векторный индекс. Молча уступает, если он недоступен."""
+    try:
+        from .vector_store import add_vector
+
+        text = f"[{fact.source}] {fact.content}" if fact.source else fact.content
+        add_vector(
+            f"memory:{fact.id}",
+            text,
+            {"type": "memory", "layer": fact.layer.value, "confidence": fact.confidence},
+        )
+    except Exception:
+        logger.debug("Факт %s не проиндексирован", fact.id, exc_info=True)
 
 
 def get_facts(
@@ -243,6 +274,11 @@ def recall(query: str, limit: int = 5) -> list[MemoryFact]:
 
         # Confidence boost
         score *= (0.5 + fact.confidence * 0.5)
+
+        # Слой важнее совпадения слов: выводы и канон полезнее сырого диалога.
+        # Без этого recall возвращал эхо самого вопроса — ведь каждое
+        # сообщение лежит в INBOX дословно и совпадает с запросом лучше всего.
+        score *= LAYER_WEIGHTS.get(fact.layer, 1.0)
 
         if score > 0:
             scored.append((score, fact))

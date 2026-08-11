@@ -4,12 +4,17 @@ This is the real execution loop for NEXSYS agents.
 Each agent role implements the 5 phases differently.
 """
 import json
+import logging
 import time
 from datetime import datetime
+from ..core import eventbus
 from ..models.schemas import Agent, AgentRole, AgentStatus, GraphNode, NodeType
+from . import budget
 from . import graph as graph_svc
 from . import documents as doc_svc
 from . import tasks as task_svc
+
+logger = logging.getLogger(__name__)
 
 
 class AgentContext:
@@ -409,12 +414,43 @@ def observe_jarvis(ctx: AgentContext, orient_data: dict) -> list:
     return [t.model_dump() for t in critical[:5]]
 
 
-def think_jarvis(ctx: AgentContext, critical_tasks: list) -> list[dict]:
-    """Jarvis: Decide which agent handles each task."""
+JARVIS_AGENTS = {
+    "librarian": "связывает документы, наводит порядок в графе знаний",
+    "reviewer": "проверяет качество, ищет несвязанные и подозрительные узлы",
+    "builder": "делает: пишет, собирает, реализует",
+    "researcher": "изучает вопрос, собирает данные и источники",
+    "monitor": "следит за здоровьем системы и застрявшими задачами",
+}
+
+_JARVIS_PROMPT = """Ты Jarvis, оркестратор Nexus OS. Твоя работа — решить,
+кто из агентов возьмёт каждую задачу, и объяснить почему.
+
+Состояние системы:
+{state}
+
+Что известно из памяти:
+{memory}
+
+Задачи, требующие внимания:
+{tasks}
+
+Агенты:
+{agents}
+
+Для каждой задачи выбери исполнителя и коротко обоснуй выбор — по сути
+задачи, а не по формальным признакам. Если задача бессмысленна или
+дублирует другую, поставь assign_to: null и объясни.
+
+Верни СТРОГО JSON:
+{{"decisions": [{{"task_id": "...", "assign_to": "librarian|reviewer|builder|researcher|monitor|null", "reason": "..."}}],
+  "summary": "одно предложение: что происходит в системе"}}"""
+
+
+def _think_jarvis_fallback(critical_tasks: list) -> list[dict]:
+    """Запасной маршрут по тегам — когда модель недоступна или без бюджета."""
     actions = []
     for t in critical_tasks:
-        # Route based on tags
-        assigned = "librarian"  # default
+        assigned = "librarian"
         if "review" in t.get("tags", []):
             assigned = "reviewer"
         elif "build" in t.get("tags", []) or "implement" in t.get("tags", []):
@@ -426,9 +462,96 @@ def think_jarvis(ctx: AgentContext, critical_tasks: list) -> list[dict]:
             "task_id": t["id"],
             "title": t["title"],
             "assign_to": assigned,
+            "reason": "маршрут по тегам (LLM недоступен)",
         })
-    ctx.log_msg(f"Think: {len(actions)} tasks delegated")
     return actions
+
+
+def think_jarvis(ctx: AgentContext, critical_tasks: list) -> list[dict]:
+    """Jarvis: решает, кто возьмёт задачу — рассуждением, а не по тегам.
+
+    Раньше здесь был if/elif по тегам: «review» → reviewer и так далее.
+    Это не мышление, а таблица маршрутизации. Теперь решение принимает
+    модель, глядя на состояние системы и память, и обязана обосновать
+    выбор — обоснование ложится в память (I-6).
+    """
+    if not critical_tasks:
+        ctx.log_msg("Think: задач, требующих внимания, нет")
+        return []
+
+    try:
+        actions, summary = _think_with_llm(ctx, critical_tasks)
+    except budget.BudgetExceeded as e:
+        ctx.log_msg(f"Think: бюджет исчерпан ({e}) — маршрут по тегам")
+        return _think_jarvis_fallback(critical_tasks)
+    except Exception as e:
+        logger.warning("Jarvis не смог подумать через LLM: %s", e)
+        ctx.log_msg("Think: LLM недоступен — маршрут по тегам")
+        return _think_jarvis_fallback(critical_tasks)
+
+    ctx.log_msg(f"Think: {len(actions)} решений — {summary}")
+    return actions
+
+
+def _think_with_llm(ctx: AgentContext, critical_tasks: list) -> tuple[list[dict], str]:
+    """Собирает контекст, спрашивает модель, разбирает решения."""
+    import asyncio
+    import json
+
+    from . import memory as mem_svc
+    from .llm import LLMService
+
+    stats = graph_svc.get_stats()
+    all_tasks = task_svc.list_tasks()
+    titles = " ".join(t.get("title", "") for t in critical_tasks)
+    facts = mem_svc.recall(titles, limit=5) if titles.strip() else []
+
+    state = (
+        f"Граф: {stats.nodes} узлов, {stats.edges} связей. "
+        f"Задач всего: {len(all_tasks)}."
+    )
+    memory_block = "\n".join(f"- {f.content[:200]}" for f in facts) or "пока ничего"
+    tasks_block = "\n".join(
+        f"- id={t['id']} | {t['title']} | приоритет {t.get('priority')} | теги {t.get('tags')}"
+        for t in critical_tasks
+    )
+    agents_block = "\n".join(f"- {name}: {what}" for name, what in JARVIS_AGENTS.items())
+
+    prompt = _JARVIS_PROMPT.format(
+        state=state, memory=memory_block, tasks=tasks_block, agents=agents_block
+    )
+
+    llm = LLMService()
+    raw = asyncio.run(llm.generate_response(prompt, kind=budget.BACKGROUND, json_mode=True))
+
+    text = raw.strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        text = text[start : end + 1]
+    data = json.loads(text)
+
+    known_ids = {t["id"] for t in critical_tasks}
+    titles_by_id = {t["id"]: t["title"] for t in critical_tasks}
+
+    actions = []
+    for d in data.get("decisions", []):
+        task_id = str(d.get("task_id", ""))
+        assign_to = d.get("assign_to")
+        # Модель может выдумать id задачи или несуществующего агента
+        if task_id not in known_ids:
+            continue
+        if assign_to not in JARVIS_AGENTS:
+            ctx.log_msg(f"Think: задача {task_id} оставлена без исполнителя")
+            continue
+        actions.append({
+            "action": "delegate",
+            "task_id": task_id,
+            "title": titles_by_id[task_id],
+            "assign_to": assign_to,
+            "reason": str(d.get("reason", ""))[:300],
+        })
+
+    return actions, str(data.get("summary", ""))[:200]
 
 
 def act_jarvis(ctx: AgentContext, actions: list[dict]) -> list[dict]:
@@ -500,6 +623,35 @@ ROLE_CYCLES = {
 }
 
 
+def _remember_run(agent: Agent, task: str, actions, verify_result, cost_usd: float) -> None:
+    """Кладёт итог прогона в память — иначе агент ничего о себе не помнит (I-6).
+
+    Пишем обоснования решений, а не сухую статистику: именно они пригодятся
+    завтра, когда придётся понять, почему система поступила так.
+    """
+    from . import memory as mem_svc
+
+    try:
+        lines = [f"Прогон агента {agent.name} ({agent.role.value}). Задача: {task}"]
+        for a in actions if isinstance(actions, list) else []:
+            reason = a.get("reason")
+            if reason:
+                lines.append(f"- {a.get('title', a.get('task_id', ''))} → "
+                             f"{a.get('assign_to', '?')}: {reason}")
+        lines.append(f"Итог: {verify_result}")
+        if cost_usd:
+            lines.append(f"Стоимость прогона: ${cost_usd}")
+
+        mem_svc.add_fact(
+            "\n".join(lines),
+            layer=mem_svc.MemoryLayer.INBOX,
+            source=f"agent:{agent.id}",
+            tags=["agent-run", agent.role.value],
+        )
+    except Exception:
+        logger.warning("Не удалось записать прогон агента в память", exc_info=True)
+
+
 def execute_cycle(agent: Agent, task: str, context: dict | None = None) -> dict:
     """Execute the full Orient-Observe-Think-Act-Verify cycle for an agent."""
     ctx = AgentContext(agent, task, context)
@@ -516,6 +668,13 @@ def execute_cycle(agent: Agent, task: str, context: dict | None = None) -> dict:
             "result": result,
             "duration_ms": ctx.duration_ms,
         }
+
+    spent_before = budget.spent_today()
+    eventbus.emit(
+        eventbus.AGENT_RUN_STARTED,
+        {"agent_id": agent.id, "trigger": (context or {}).get("trigger", "manual")},
+        source=eventbus.SOURCE_JARVIS,
+    )
 
     try:
         ctx.log_msg(f"=== Starting {agent.role.value} cycle ===")
@@ -536,6 +695,19 @@ def execute_cycle(agent: Agent, task: str, context: dict | None = None) -> dict:
         verify_result = cycle["verify"](ctx, act_results)
 
         ctx.log_msg(f"=== Cycle complete ===")
+
+        cost = round(budget.spent_today() - spent_before, 6)
+        _remember_run(agent, task, actions, verify_result, cost)
+        eventbus.emit(
+            eventbus.AGENT_RUN_FINISHED,
+            {
+                "agent_id": agent.id,
+                "trigger": (context or {}).get("trigger", "manual"),
+                "summary": str(verify_result)[:200],
+                "cost_usd": cost,
+            },
+            source=eventbus.SOURCE_JARVIS,
+        )
 
         return {
             "agent_id": agent.id,
