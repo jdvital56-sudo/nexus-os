@@ -67,10 +67,7 @@ class HermesAgent:
             llm=self.llm, persona_manager=self.persona_manager
         )
         self.application = None
-        
-        # Context compression settings
-        self.compression_threshold = float(os.getenv("CONTEXT_COMPRESSION_THRESHOLD", "0.8"))
-        
+
         # Paths
         self.obsidian_vault = os.getenv("OBSIDIAN_VAULT_PATH", "")
         self.artifacts_path = os.getenv("HERMES_ARTIFACTS_PATH", "./artifacts")
@@ -134,7 +131,6 @@ class HermesAgent:
             "Apollo": "✅" if settings.apollo_api_key else "❌",
             "Google Calendar": "✅" if os.path.exists("credentials.json") else "❌",
             "Obsidian Vault": "✅" if os.path.exists(self.obsidian_vault) else "❌",
-            "Compression": f"{self.compression_threshold:.2f}"
         }
         
         status_text = "🔧 Статус системы:\n\n"
