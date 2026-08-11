@@ -7,7 +7,7 @@
 """
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from ..core.config import DATA_DIR, ensure_data_dir, settings
 from ..core.eventbus import SYSTEM_BUDGET as SYSTEM_BUDGET_EVENT
@@ -115,6 +115,18 @@ def check(kind: str = INTERACTIVE) -> bool:
         budget,
     )
     return False
+
+
+def history(days: int = 14) -> list[dict]:
+    """Траты по дням, старые слева. Дни без вызовов показываем нулём —
+    иначе на графике образуется дыра, и провал выглядит как пропуск данных."""
+    data = _load()
+    today = datetime.now(timezone.utc).date()
+    out = []
+    for back in range(days - 1, -1, -1):
+        day = (today - timedelta(days=back)).strftime("%Y-%m-%d")
+        out.append({"date": day, "spent_usd": round(float(data.get(day, 0.0)), 4)})
+    return out
 
 
 def status() -> dict:

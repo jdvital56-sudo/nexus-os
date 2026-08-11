@@ -1,16 +1,53 @@
-export interface AnalyticsData {
-  totalSpent: number;
-  timeSaved: number; // hours
-  moneySaved: number;
-  netRoi: number;
-  apiUsage: ApiUsage[];
+// Сводка для дашборда — то, что бэкенд знает на самом деле (GET /api/system/status).
+// Прежние AnalyticsData/ApiUsage описывали придуманные числа («сэкономлено $8940»)
+// и удалены вместе с ними.
+export interface SpendDay {
+  date: string;
+  spent_usd: number;
 }
 
-export interface ApiUsage {
-  provider: string;
-  tokensUsed: string | number;
-  cost: number;
-  limit: number;
+export interface SystemSpend {
+  spent_usd: number;
+  budget_usd: number;
+  throttled: boolean;
+  history: SpendDay[];
+}
+
+export interface Integration {
+  key: string;
+  label: string;
+  connected: boolean;
+  detail: string;
+}
+
+export interface DreamState {
+  cron: string;
+  last_run_at: string | null;
+  last_run_id: string | null;
+  last_cost_usd: number | null;
+  has_brief: boolean;
+  new_findings: number;
+}
+
+export interface AutopilotState {
+  enabled: boolean;
+  interval_min: number;
+  max_runs_per_day: number;
+  quiet_hours: [number, number];
+}
+
+export interface SystemStatusResponse {
+  spend: SystemSpend;
+  integrations: Integration[];
+  dream: DreamState;
+  autopilot: AutopilotState;
+}
+
+export interface WalletSummary {
+  active_count: number;
+  monthly_total_usd: number;
+  due_soon: Array<{ id: string; name: string; days_left: number; cost: number; cancel_url?: string }>;
+  low_balance: Array<{ id: string; name: string; balance: number }>;
 }
 
 export interface DreamReview {
@@ -99,11 +136,3 @@ export interface Agent {
   avgResponseTime: number;
 }
 
-export interface SystemStatus {
-  dreamCadenceEnabled: boolean;
-  nextDreamReview: string;
-  obsidianConnected: boolean;
-  apolloConnected: boolean;
-  googleCalendarConnected: boolean;
-  telegramConnected: boolean;
-}
