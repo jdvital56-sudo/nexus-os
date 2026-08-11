@@ -6,6 +6,7 @@ import pytest
 from backend.services import memory as mem_svc
 from backend.services.conversation import ConversationService
 from backend.services.memory import MemoryLayer
+from backend.services import budget as budget_mod
 
 
 class FakeLLM:
@@ -22,9 +23,13 @@ class FakeLLM:
         return self.reply
 
 
-def make_service(llm: FakeLLM | None = None) -> ConversationService:
+def make_service(llm: FakeLLM | None = None, extract_entities: bool = False) -> ConversationService:
     # semantic_dedup=False — тесты не должны зависеть от векторного стора
-    return ConversationService(llm=llm or FakeLLM(), semantic_dedup=False)
+    return ConversationService(
+        llm=llm or FakeLLM(),
+        semantic_dedup=False,
+        extract_entities=extract_entities,
+    )
 
 
 @pytest.mark.asyncio
@@ -342,3 +347,102 @@ async def test_normal_message_is_not_treated_as_skill(default_skills):
 
     assert reply == "обычный ответ"
     assert len(llm.calls) == 1
+
+
+# --- Извлечение сущностей в граф (PR-7) ---
+
+
+class ExtractingLLM(FakeLLM):
+    """Отвечает JSON-ом на промпт извлечения и обычным текстом на диалог."""
+
+    def __init__(self):
+        super().__init__("обычный ответ")
+        self.background_calls = 0
+
+    async def generate_response(
+        self, user_message: str, context: str = "", kind: str = "interactive"
+    ) -> str:
+        if kind == "background":
+            self.background_calls += 1
+            return (
+                '{"entities": [{"name": "Одесса", "type": "concept"}],'
+                ' "relations": []}'
+            )
+        return await super().generate_response(user_message, context, kind)
+
+
+@pytest.mark.asyncio
+async def test_dialog_fills_graph_in_background():
+    """DoD PR-7: после диалога в графе появляются узлы."""
+    from backend.services import graph as graph_svc
+
+    svc = make_service(ExtractingLLM(), extract_entities=True)
+
+    await svc.handle("telegram", "42", "я переезжаю в Одессу")
+    await svc.drain()
+
+    assert "Одесса" in [n.label for n in graph_svc.list_nodes()]
+
+
+@pytest.mark.asyncio
+async def test_reply_does_not_wait_for_extraction():
+    """Латентность ответа не зависит от извлечения (I-5)."""
+    from backend.services import graph as graph_svc
+
+    svc = make_service(ExtractingLLM(), extract_entities=True)
+
+    reply = await svc.handle("telegram", "42", "я переезжаю в Одессу")
+
+    # Ответ уже у пользователя, граф ещё пуст
+    assert reply == "обычный ответ"
+    assert graph_svc.list_nodes() == []
+
+    await svc.drain()
+
+
+@pytest.mark.asyncio
+async def test_extraction_can_be_switched_off():
+    from backend.services import graph as graph_svc
+
+    llm = ExtractingLLM()
+    svc = make_service(llm, extract_entities=False)
+
+    await svc.handle("telegram", "42", "я переезжаю в Одессу")
+    await svc.drain()
+
+    assert llm.background_calls == 0
+    assert graph_svc.list_nodes() == []
+
+
+@pytest.mark.asyncio
+async def test_exhausted_budget_stops_extraction_but_not_dialog(monkeypatch):
+    """Бюджет глушит фон, диалог продолжает работать (I-4)."""
+    from backend.core.config import settings
+    from backend.services import graph as graph_svc
+
+    monkeypatch.setattr(settings, "daily_llm_budget_usd", 0.0)
+    monkeypatch.setattr(budget_mod, "spent_today", lambda: 1.0)
+
+    svc = make_service(ExtractingLLM(), extract_entities=True)
+
+    reply = await svc.handle("telegram", "42", "я переезжаю в Одессу")
+    await svc.drain()
+
+    assert reply == "обычный ответ"
+    assert graph_svc.list_nodes() == []
+
+
+@pytest.mark.asyncio
+async def test_extraction_failure_does_not_break_dialog(monkeypatch):
+    async def boom(*args, **kwargs):
+        raise RuntimeError("модель недоступна")
+
+    monkeypatch.setattr(
+        "backend.services.entity_extraction.extract_from_dialog", boom
+    )
+    svc = make_service(ExtractingLLM(), extract_entities=True)
+
+    reply = await svc.handle("telegram", "42", "сообщение")
+    await svc.drain()
+
+    assert reply == "обычный ответ"

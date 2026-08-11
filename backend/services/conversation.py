@@ -12,6 +12,7 @@ from typing import Any
 
 from ..agents.persona_manager import PersonaManager
 from . import budget
+from . import entity_extraction
 from . import memory as memory_svc
 from . import skills as skills_svc
 from .llm import LLMService
@@ -53,10 +54,12 @@ class ConversationService:
         persona_manager: PersonaManager | None = None,
         *,
         semantic_dedup: bool = True,
+        extract_entities: bool = True,
     ):
         self.llm = llm or LLMService()
         self.persona_manager = persona_manager or PersonaManager()
         self.semantic_dedup = semantic_dedup
+        self.extract_entities = extract_entities
         self._tasks: set[asyncio.Task] = set()
         # Клиенты под персоны создаются лениво и переиспользуются
         self._llm_cache: dict[tuple[str, str], LLMService] = {}
@@ -88,7 +91,32 @@ class ConversationService:
         )
 
         self._spawn(self._remember(channel, user_id, text, reply, selected["name"]))
+        self._spawn(self._extract(channel, user_id, text, reply))
         return reply
+
+    async def _extract(self, channel: str, user_id: str, text: str, reply: str) -> None:
+        """Достаёт сущности из диалога в граф. Тихо уступает бюджету (I-4)."""
+        if not self.extract_entities:
+            return
+        try:
+            result = await entity_extraction.extract_from_dialog(
+                self.llm,
+                text,
+                reply,
+                source=f"{channel}:{user_id}",
+                semantic=self.semantic_dedup,
+            )
+            if result["nodes_added"] or result["edges_added"]:
+                logger.info(
+                    "Граф пополнен из %s: +%d узлов, +%d рёбер",
+                    channel,
+                    result["nodes_added"],
+                    result["edges_added"],
+                )
+        except budget.BudgetExceeded as e:
+            logger.warning("Извлечение сущностей отложено: %s", e)
+        except Exception:
+            logger.exception("Извлечение сущностей из %s не удалось", channel)
 
     async def _try_skill(self, text: str) -> str | None:
         """Исполняет скилл, если сообщение — явный вызов. Иначе None.
