@@ -11,7 +11,7 @@ from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 from backend.core.config import settings
-from backend.services.llm import LLMService
+from backend.services.llm import LLMService, TranscriptionUnavailable
 from backend.services.apollo_client import ApolloClient
 from backend.services.google_calendar import GoogleCalendarClient
 from backend.services.conversation import ConversationService
@@ -194,7 +194,12 @@ class HermesAgent:
             )
             await update.message.reply_text(response)
 
-
+        except TranscriptionUnavailable as e:
+            # Честная причина вместо «что-то пошло не так»
+            logger.warning(f"Voice transcription disabled: {e}")
+            await update.message.reply_text(
+                f"🎤 {e}.\nДобавьте ключ в .env или пришлите текстом."
+            )
         except Exception as e:
             logger.error(f"Error processing voice: {e}")
             await update.message.reply_text("⚠️ Не удалось распознать голосовое сообщение.")

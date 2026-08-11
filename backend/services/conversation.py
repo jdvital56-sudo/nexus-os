@@ -13,6 +13,7 @@ from typing import Any
 from ..agents.persona_manager import PersonaManager
 from . import budget
 from . import memory as memory_svc
+from . import skills as skills_svc
 from .llm import LLMService
 from .memory import MemoryLayer
 
@@ -23,6 +24,15 @@ _DEDUP_SCAN_LIMIT = 200
 
 # Порог косинусной близости, выше которого считаем факт повтором
 _DEDUP_SIMILARITY = 0.95
+
+# Явный вызов скилла: «/skill publish-post topic=Запуск platform=telegram»
+_SKILL_TRIGGER = re.compile(
+    r"^\s*(?:/skill|скилл|запусти\s+скилл)\s+(?P<skill_id>[\w-]+)\s*(?P<args>.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Аргументы скилла в виде key=value; значение — до следующего ключа или конца
+_SKILL_ARG = re.compile(r"(?P<key>\w+)=(?P<value>.*?)(?=\s+\w+=|$)", re.DOTALL)
 
 
 def _normalize(text: str) -> str:
@@ -66,6 +76,11 @@ class ConversationService:
         if not text or not text.strip():
             raise ValueError("Пустое сообщение")
 
+        skill_reply = await self._try_skill(text)
+        if skill_reply is not None:
+            self._spawn(self._remember(channel, user_id, text, skill_reply, "Skill"))
+            return skill_reply
+
         selected = self._select_persona(text, persona)
         llm = self._llm_for(selected, channel=channel)
         reply = await llm.generate_response(
@@ -74,6 +89,51 @@ class ConversationService:
 
         self._spawn(self._remember(channel, user_id, text, reply, selected["name"]))
         return reply
+
+    async def _try_skill(self, text: str) -> str | None:
+        """Исполняет скилл, если сообщение — явный вызов. Иначе None.
+
+        Триггер разбирается без LLM: вызов скилла должен быть предсказуемым
+        и не стоить денег.
+        """
+        match = _SKILL_TRIGGER.match(text)
+        if not match:
+            return None
+
+        skill_id = match.group("skill_id")
+        params = {
+            m.group("key"): m.group("value").strip()
+            for m in _SKILL_ARG.finditer(match.group("args") or "")
+        }
+
+        try:
+            result = await asyncio.to_thread(skills_svc.execute_skill, skill_id, params)
+        except FileNotFoundError:
+            available = await asyncio.to_thread(skills_svc.list_skills)
+            names = ", ".join(s["id"] for s in available) or "нет ни одного"
+            return f"Скилл «{skill_id}» не найден. Доступные: {names}"
+        except Exception as e:
+            logger.exception("Скилл %s упал", skill_id)
+            return f"Скилл «{skill_id}» завершился с ошибкой: {e}"
+
+        return self._format_skill_result(result)
+
+    @staticmethod
+    def _format_skill_result(result: dict[str, Any]) -> str:
+        """Человекочитаемый отчёт: что именно сделал скилл."""
+        lines = [f"Скилл «{result['skill_name']}» выполнен."]
+        for entry in result.get("log", []):
+            status = entry.get("status")
+            action = entry.get("action")
+            if status == "ok":
+                detail = entry.get("result") or {}
+                summary = ", ".join(f"{k}={v}" for k, v in detail.items())
+                lines.append(f"  • {action}: {summary}" if summary else f"  • {action}")
+            elif status == "skipped":
+                lines.append(f"  • {action}: пропущен")
+            else:
+                lines.append(f"  • {action}: ошибка — {entry.get('error')}")
+        return "\n".join(lines)
 
     def _llm_for(self, persona: dict[str, Any], channel: str = "") -> LLMService:
         """Клиент под персону: своя модель на каждое сообщение.

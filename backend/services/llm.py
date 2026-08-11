@@ -57,6 +57,28 @@ DEFAULT_BASE_URLS = {
     "deepseek": "https://api.deepseek.com/v1",
 }
 
+# Telegram шлёт голосовые в ogg/opus; остальное — на случай других каналов
+AUDIO_MIME_TYPES = {
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".aac": "audio/aac",
+    ".webm": "audio/webm",
+}
+
+
+class TranscriptionUnavailable(RuntimeError):
+    """Распознавание речи выключено: нет ключа провайдера."""
+
+
+def guess_audio_mime(path: str) -> str:
+    """Определяет mime по расширению — Gemini отвергает неверный тип."""
+    return AUDIO_MIME_TYPES.get(os.path.splitext(path)[1].lower(), "audio/mpeg")
+
 
 class LLMService:
     """Unified LLM service with provider abstraction."""
@@ -112,23 +134,44 @@ class LLMService:
     
     async def generate_plan(self, audio_path: str, prompt: str) -> str:
         """Generate plan from audio using Gemini 2.0 Flash."""
+        return await self._gemini_audio(audio_path, prompt, max_tokens=2048)
+
+    async def transcribe_audio(self, audio_path: str) -> str:
+        """Расшифровывает голосовое сообщение через Gemini.
+
+        Отдельного STT-провайдера в системе нет, но мультимодальный Gemini
+        уже подключён — используем его существующий ключ. Если ключа нет,
+        честно говорим об этом вместо молчаливого падения.
+        """
+        if not self.gemini_api_key:
+            raise TranscriptionUnavailable(
+                "Распознавание речи выключено: не задан GEMINI_API_KEY"
+            )
+        prompt = (
+            "Расшифруй эту аудиозапись дословно. "
+            "Верни только текст сказанного, без комментариев и пояснений."
+        )
+        return await self._gemini_audio(audio_path, prompt, max_tokens=1024)
+
+    async def _gemini_audio(self, audio_path: str, prompt: str, max_tokens: int) -> str:
+        """Общий путь для аудио-запросов к Gemini."""
         if not self.gemini_api_key:
             raise ValueError("GEMINI_API_KEY not set for audio processing")
-        
+
         url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-        
+
         # Read audio file and encode as base64
         import base64
         with open(audio_path, "rb") as f:
             audio_data = base64.b64encode(f.read()).decode("utf-8")
-        
+
         payload = {
             "contents": [{
                 "parts": [
                     {"text": prompt},
                     {
                         "inline_data": {
-                            "mime_type": "audio/mpeg",
+                            "mime_type": guess_audio_mime(audio_path),
                             "data": audio_data
                         }
                     }
@@ -136,14 +179,14 @@ class LLMService:
             }],
             "generationConfig": {
                 "temperature": 0.1,
-                "maxOutputTokens": 2048,
+                "maxOutputTokens": max_tokens,
             }
         }
-        
+
         headers = {
             "Content-Type": "application/json",
         }
-        
+
         async with httpx.AsyncClient(timeout=120.0) as client:
             try:
                 response = await client.post(
@@ -153,7 +196,7 @@ class LLMService:
                 )
                 response.raise_for_status()
                 data = response.json()
-                
+
                 content = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
                 return content
             except Exception as e:

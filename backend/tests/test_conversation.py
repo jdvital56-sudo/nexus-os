@@ -251,3 +251,94 @@ async def test_dialog_is_interactive_for_budget():
     await svc.drain()
 
     assert llm.kinds == ["interactive"]
+
+
+# --- Скиллы из диалога (PR-6) ---
+
+
+@pytest.fixture
+def default_skills():
+    from backend.services import skills as skills_svc
+
+    skills_svc.create_default_skills()
+    return skills_svc
+
+
+@pytest.mark.asyncio
+async def test_skill_trigger_executes_skill(default_skills):
+    """DoD PR-6: триггер из диалога реально исполняет скилл."""
+    from backend.services import tasks as task_svc
+
+    llm = FakeLLM("модель не должна отвечать")
+    svc = make_service(llm)
+
+    reply = await svc.handle(
+        "telegram", "42", "/skill publish-post topic=Запуск platform=telegram"
+    )
+    await svc.drain()
+
+    assert "Publish Post" in reply
+    # Скилл создаёт задачу — проверяем побочный эффект, а не только текст
+    titles = [t.title for t in task_svc.list_tasks()]
+    assert any("Запуск" in t for t in titles)
+    # LLM в этом пути не звали — скилл не должен стоить денег
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_skill_params_are_passed_through(default_skills):
+    from backend.services import tasks as task_svc
+
+    svc = make_service()
+    await svc.handle("telegram", "42", "/skill publish-post topic=Отчёт platform=x")
+    await svc.drain()
+
+    task = task_svc.list_tasks()[0]
+    assert "Отчёт" in task.title
+    assert "x" in task.description
+
+
+@pytest.mark.asyncio
+async def test_russian_skill_trigger_works(default_skills):
+    svc = make_service()
+
+    reply = await svc.handle("telegram", "42", "запусти скилл collect-metrics date=2026-08-11")
+    await svc.drain()
+
+    assert "Collect Metrics" in reply
+
+
+@pytest.mark.asyncio
+async def test_unknown_skill_lists_available(default_skills):
+    svc = make_service()
+
+    reply = await svc.handle("telegram", "42", "/skill выдуманный-скилл")
+    await svc.drain()
+
+    assert "не найден" in reply
+    assert "publish-post" in reply
+
+
+@pytest.mark.asyncio
+async def test_skill_run_is_recorded_in_memory(default_skills):
+    svc = make_service()
+
+    await svc.handle("telegram", "42", "/skill collect-metrics date=2026-08-11")
+    await svc.drain()
+
+    facts = mem_svc.get_facts(layer=MemoryLayer.INBOX)
+    assert len(facts) == 1
+    assert "skill" in facts[0].tags
+
+
+@pytest.mark.asyncio
+async def test_normal_message_is_not_treated_as_skill(default_skills):
+    """Слово «скилл» в обычной фразе не должно ничего запускать."""
+    llm = FakeLLM("обычный ответ")
+    svc = make_service(llm)
+
+    reply = await svc.handle("telegram", "42", "расскажи, что такое скиллы в системе")
+    await svc.drain()
+
+    assert reply == "обычный ответ"
+    assert len(llm.calls) == 1
