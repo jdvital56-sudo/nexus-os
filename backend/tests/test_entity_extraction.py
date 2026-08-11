@@ -16,7 +16,7 @@ class JsonLLM:
         self.wrap = wrap
         self.kinds: list[str] = []
 
-    async def generate_response(self, user_message: str, context: str = "", kind: str = "interactive") -> str:
+    async def generate_response(self, user_message: str, context: str = "", kind: str = "interactive", json_mode: bool = False) -> str:
         self.kinds.append(kind)
         body = json.dumps(self.payload, ensure_ascii=False)
         if self.wrap == "fence":

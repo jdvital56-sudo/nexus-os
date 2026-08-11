@@ -360,7 +360,8 @@ class ExtractingLLM(FakeLLM):
         self.background_calls = 0
 
     async def generate_response(
-        self, user_message: str, context: str = "", kind: str = "interactive"
+        self, user_message: str, context: str = "", kind: str = "interactive",
+        json_mode: bool = False
     ) -> str:
         if kind == "background":
             self.background_calls += 1

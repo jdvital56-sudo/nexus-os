@@ -181,7 +181,7 @@ async def extract_from_dialog(llm, text: str, reply: str, source: str, semantic:
 
     dialog = f"Пользователь: {text}\nАссистент: {reply}"
     raw = await llm.generate_response(
-        _PROMPT.format(dialog=dialog), kind=budget.BACKGROUND
+        _PROMPT.format(dialog=dialog), kind=budget.BACKGROUND, json_mode=True
     )
     extracted = _parse(raw)
     if not extracted["entities"]:

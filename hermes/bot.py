@@ -139,28 +139,32 @@ class HermesAgent:
         await update.message.reply_text(text)
     
     async def brief_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle /brief command - Morning briefing from Dream Cadence"""
+        """Handle /brief command — читает кэш ночного прогона.
+
+        Полный анализ в чате занимал бы десятки секунд и стоил бы денег
+        при каждом вызове (риск R-10), поэтому пишет ночь, а читает /brief.
+        """
         if not self._authorize_user(update.effective_user.id):
             return
-        
-        # Generate morning brief using LLM
-        prompt = """
-Сгенерируй утренний бриф на основе вчерашней активности.
-Включи:
-1. Краткую сводку выполненных задач
-2. Анализ расходов на API
-3. 2-3 конкретных действия на сегодня
-4. Любые важные уведомления
 
-Формат: Кратко, по делу, с эмодзи.
-        """
-        
-        try:
-            brief = await self.llm.generate_response(prompt)
-            await update.message.reply_text(f"🌅 **Утренний бриф:**\n\n{brief}")
-        except Exception as e:
-            logger.error(f"Error generating brief: {e}")
-            await update.message.reply_text("⚠️ Не удалось сгенерировать бриф. Проверьте логи.")
+        from backend.services import dream as dream_store
+
+        cached = dream_store.get_brief()
+        if not cached:
+            await update.message.reply_text(
+                "🌅 Ночной прогон Dream Cadence ещё не выполнялся.\n"
+                "Он запускается по расписанию (по умолчанию в 3:00)."
+            )
+            return
+
+        findings = dream_store.list_findings(status=dream_store.STATUS_NEW)
+        tail = (
+            f"\n\n📋 Новых находок: {len(findings)} — посмотреть в Dream Review."
+            if findings else ""
+        )
+        await update.message.reply_text(
+            f"🌅 Утренний бриф (прогон {cached['run_id']}):\n\n{cached['brief']}{tail}"
+        )
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle text messages"""
@@ -220,10 +224,22 @@ class HermesAgent:
                 os.remove(voice_path)
     
     def _authorize_user(self, user_id: int) -> bool:
-        """Check if user is authorized"""
+        """Check if user is authorized.
+
+        Отказ виден в логах: пользователю бот молчит по хартии, но
+        «бот не запущен» и «вас нет в списке» обязаны различаться при
+        диагностике — иначе тишина неотличима от поломки.
+        """
         if not self.allowed_user_id:
             return True  # No restriction if not configured
-        return str(user_id) == str(self.allowed_user_id)
+        if str(user_id) != str(self.allowed_user_id):
+            logger.warning(
+                "Сообщение от %s отклонено: в TELEGRAM_ALLOWED_USER_ID указан %s",
+                user_id,
+                self.allowed_user_id,
+            )
+            return False
+        return True
     
     def run(self):
         """Start the Telegram bot.

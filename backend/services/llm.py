@@ -109,20 +109,23 @@ class LLMService:
         max_tokens: int = 1024,
         stream: bool = False,
         kind: str = budget.INTERACTIVE,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Send chat completion request.
 
         `kind` решает судьбу вызова при исчерпанном дневном бюджете (I-4):
         фоновый отклоняется, интерактивный проходит с пометкой.
+        `json_mode` требует от провайдера строгий JSON — без него модель на
+        длинных запросах отвечает прозой, и разбор ломается.
         """
         within_budget = budget.check(kind)
 
         if self.provider == "ollama":
-            response = await self._ollama_chat(messages, temperature, max_tokens)
+            response = await self._ollama_chat(messages, temperature, max_tokens, json_mode)
         elif self.provider == "gemini":
             response = await self._gemini_chat(messages, temperature, max_tokens)
         elif self.provider in ("openai", "anthropic", "deepseek"):
-            response = await self._openai_compat_chat(messages, temperature, max_tokens)
+            response = await self._openai_compat_chat(messages, temperature, max_tokens, json_mode)
         else:
             raise ValueError(f"Unsupported LLM provider: {self.provider}")
 
@@ -208,15 +211,20 @@ class LLMService:
         user_message: str,
         context: str = "",
         kind: str = budget.INTERACTIVE,
+        json_mode: bool = False,
     ) -> str:
         """Generate response for chat using configured LLM."""
         full_prompt = f"Context: {context}\n\nUser: {user_message}\n\nAssistant:"
         messages = []
-        if self.system_prompt:
+        # В режиме JSON системный промпт персоны только мешает: он тянет
+        # модель в разговорный тон, а нам нужна голая структура
+        if self.system_prompt and not json_mode:
             messages.append(LLMMessage(role="system", content=self.system_prompt))
         messages.append(LLMMessage(role="user", content=full_prompt))
 
-        response = await self.chat(messages, temperature=0.7, max_tokens=512, kind=kind)
+        response = await self.chat(
+            messages, temperature=0.7, max_tokens=512, kind=kind, json_mode=json_mode
+        )
         return response.content
     
     async def _ollama_chat(
@@ -224,6 +232,7 @@ class LLMService:
         messages: List[LLMMessage],
         temperature: float,
         max_tokens: int,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Chat with Ollama."""
         url = f"{self.base_url}/api/chat"
@@ -231,6 +240,7 @@ class LLMService:
             "model": self.model,
             "messages": [m.to_dict() for m in messages],
             "stream": False,
+            **({"format": "json"} if json_mode else {}),
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
@@ -309,6 +319,7 @@ class LLMService:
         messages: List[LLMMessage],
         temperature: float,
         max_tokens: int,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Chat with OpenAI-compatible API."""
         if self.provider == "anthropic":
@@ -348,6 +359,9 @@ class LLMService:
                 "temperature": temperature,
                 "max_tokens": max_tokens,
             }
+            if json_mode:
+                # Поддерживают OpenAI и DeepSeek; Anthropic идёт другой веткой
+                payload["response_format"] = {"type": "json_object"}
         
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:

@@ -113,7 +113,7 @@ async def test_dialog_emits_chat_messages():
     from backend.services.conversation import ConversationService
 
     class Stub:
-        async def generate_response(self, m, context="", kind="interactive"):
+        async def generate_response(self, m, context="", kind="interactive", json_mode=False):
             return "ответ модели"
 
     seen, sink = collector()
@@ -136,7 +136,7 @@ async def test_web_channel_is_marked_as_web():
     from backend.services.conversation import ConversationService
 
     class Stub:
-        async def generate_response(self, m, context="", kind="interactive"):
+        async def generate_response(self, m, context="", kind="interactive", json_mode=False):
             return "ответ"
 
     seen, sink = collector()
@@ -201,7 +201,7 @@ def test_websocket_receives_whole_dialog_stream():
     from backend.services.conversation import ConversationService
 
     class Stub:
-        async def generate_response(self, m, context="", kind="interactive"):
+        async def generate_response(self, m, context="", kind="interactive", json_mode=False):
             return "ответ модели"
 
     with live_client() as c, c.websocket_connect("/ws") as ws:

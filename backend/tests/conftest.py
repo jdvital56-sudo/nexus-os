@@ -44,6 +44,10 @@ def temp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(persona_svc, "PERSONAS_FILE", tmp_path / "personas.json")
     monkeypatch.setattr(budget_svc, "SPEND_FILE", tmp_path / "llm_spend.json")
 
+    import backend.services.dream as dream_svc
+    monkeypatch.setattr(dream_svc, "FINDINGS_FILE", tmp_path / "dream_findings.json")
+    monkeypatch.setattr(dream_svc, "BRIEF_FILE", tmp_path / "dream_brief.json")
+
     # Боевые ключи лежат в переменных окружения машины. Без этой заглушки
     # тесты ходили бы в реальные API за реальные деньги.
     for field in ("openai_api_key", "anthropic_api_key", "deepseek_api_key",

@@ -13,7 +13,7 @@ from .core.config import (
 )
 from .core.errors import NexsysError, nexsys_error_handler, generic_error_handler
 from .core.auth import init_auth
-from .api import documents, tasks, graph, agents, webhooks, skills, calendar, obsidian, pipeline, memory, events, vector_search, fireflies, telephony, personas
+from .api import documents, tasks, graph, agents, webhooks, skills, calendar, obsidian, pipeline, memory, events, vector_search, fireflies, telephony, personas, dream
 
 # Configure logging
 log_config = {
@@ -65,6 +65,7 @@ app.include_router(vector_search.router)
 app.include_router(fireflies.router)
 app.include_router(telephony.router)
 app.include_router(personas.router)
+app.include_router(dream.router)
 
 
 @app.get("/api/health")
@@ -94,7 +95,16 @@ async def startup():
         logger.info("Default skills created successfully")
     except Exception as e:
         logger.warning(f"Failed to create default skills: {e}")
-    
+
+    # Ночная аналитика живёт в этом же процессе: при нескольких воркерах
+    # APScheduler запустил бы джобу в каждом (I-3, риск R-4)
+    try:
+        from .agents.dream_cadence import start_dream_cadence
+        start_dream_cadence()
+    except Exception as e:
+        logger.warning(f"Dream Cadence не запущен: {e}")
+
+
     # Log startup info (without exposing token in production)
     logger.info(f"NEXSYS v0.1.0 starting on {API_HOST}:{API_PORT}")
     logger.info(f"CORS allowed origins: {', '.join(CORS_ORIGINS)}")

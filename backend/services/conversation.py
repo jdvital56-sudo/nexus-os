@@ -97,7 +97,7 @@ class ConversationService:
 
         self._emit_message(channel, "assistant", selected["name"], reply)
         self._spawn(self._remember(channel, user_id, text, reply, selected["name"]))
-        self._spawn(self._extract(channel, user_id, text, reply))
+        self._spawn(self._extract(channel, user_id, text, reply, llm))
         return reply
 
     @staticmethod
@@ -115,13 +115,20 @@ class ConversationService:
             source=source,
         )
 
-    async def _extract(self, channel: str, user_id: str, text: str, reply: str) -> None:
-        """Достаёт сущности из диалога в граф. Тихо уступает бюджету (I-4)."""
+    async def _extract(
+        self, channel: str, user_id: str, text: str, reply: str, llm: Any = None
+    ) -> None:
+        """Достаёт сущности из диалога в граф. Тихо уступает бюджету (I-4).
+
+        Работает тем же клиентом, который только что ответил: клиент по
+        умолчанию может смотреть в незапущенную локальную модель, и тогда
+        фоновая задача падала бы на каждом сообщении.
+        """
         if not self.extract_entities:
             return
         try:
             result = await entity_extraction.extract_from_dialog(
-                self.llm,
+                llm or self.llm,
                 text,
                 reply,
                 source=f"{channel}:{user_id}",
