@@ -14,6 +14,7 @@ from backend.core.config import settings
 from backend.services.llm import LLMService
 from backend.services.apollo_client import ApolloClient
 from backend.services.google_calendar import GoogleCalendarClient
+from backend.services.conversation import ConversationService
 from backend.agents.persona_manager import PersonaManager
 
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +34,10 @@ class HermesAgent:
         self.apollo = ApolloClient() if settings.apollo_api_key else None
         self.calendar = GoogleCalendarClient()
         self.persona_manager = PersonaManager()
+        # Мышление живёт в ConversationService, бот только принимает и отдаёт (I-1)
+        self.conversation = ConversationService(
+            llm=self.llm, persona_manager=self.persona_manager
+        )
         self.application = None
         
         # Context compression settings
@@ -153,15 +158,12 @@ class HermesAgent:
         
         user_message = update.message.text
         logger.info(f"Received message from {update.effective_user.username}: {user_message}")
-        
-        # Auto-detect persona or use default
-        persona = self.persona_manager.detect_persona(user_message)
-        
-        # Process with LLM
+
         try:
-            response = await self.llm.generate_response(
-                user_message,
-                context=f"Persona: {persona['name']}"
+            response = await self.conversation.handle(
+                channel="telegram",
+                user_id=str(update.effective_user.id),
+                text=user_message,
             )
             await update.message.reply_text(response)
         except Exception as e:
@@ -183,11 +185,16 @@ class HermesAgent:
         try:
             transcription = await self.llm.transcribe_audio(voice_path)
             await update.message.reply_text(f"🎤 **Распознано:**\n{transcription}")
-            
-            # Process transcription as text
-            response = await self.llm.generate_response(transcription)
+
+            # Расшифровка идёт тем же путём, что и текст
+            response = await self.conversation.handle(
+                channel="telegram",
+                user_id=str(update.effective_user.id),
+                text=transcription,
+            )
             await update.message.reply_text(response)
-            
+
+
         except Exception as e:
             logger.error(f"Error processing voice: {e}")
             await update.message.reply_text("⚠️ Не удалось распознать голосовое сообщение.")
