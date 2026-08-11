@@ -1,16 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import ForceGraph2D from 'react-force-graph-2d';
+import { useEffect, useMemo, useState } from 'react';
+import MemoryGalaxy, { type GalaxyLink, type GalaxyNode } from '../components/MemoryGalaxy';
 import { getGraphMap } from '../lib/api';
 import { links as linksWord, nodes as nodesWord } from '../lib/format';
 import type { ApiGraphNode, GraphMap } from '../types';
 
 // Карта второго мозга на настоящих данных (PR-20). До этого экран показывал
 // восемь выдуманных узлов вроде «Project Alpha» — красиво и ни о чём.
-//
-// Движение здесь не украшение: симуляция никогда не останавливается, поэтому
-// граф медленно дышит, как облако в невесомости. По связям бегут светлые
-// точки — так видно, что это живые связи, а не картинка. Наведение
-// подсвечивает соседей: у узла с сорока связями иначе не понять, куда он ведёт.
+// Отрисовка живёт в MemoryGalaxy, здесь — данные, легенда и карточка узла.
 
 const TYPE_COLORS: Record<string, string> = {
   memory: '#00DC82',
@@ -34,11 +30,6 @@ const TYPE_LABELS: Record<string, string> = {
   session: 'Сессии',
 };
 
-const DIM = 'rgba(148, 163, 184, 0.12)';
-
-type SimNode = ApiGraphNode & { degree: number; x?: number; y?: number };
-type SimLink = { source: any; target: any; weight: number; edge_type: string };
-
 function colorOf(type: string): string {
   return TYPE_COLORS[type] ?? '#6B7280';
 }
@@ -46,12 +37,8 @@ function colorOf(type: string): string {
 export default function GraphScreen() {
   const [map, setMap] = useState<GraphMap | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [hovered, setHovered] = useState<SimNode | null>(null);
-  const [selected, setSelected] = useState<SimNode | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
-  const holder = useRef<HTMLDivElement>(null);
-  const fg = useRef<any>(null);
-  const [box, setBox] = useState({ width: 800, height: 600 });
 
   useEffect(() => {
     getGraphMap(500)
@@ -59,37 +46,8 @@ export default function GraphScreen() {
       .catch(() => setError('Не удалось загрузить граф. Бэкенд запущен?'));
   }, []);
 
-  // Холст должен занимать всё окно и переживать его изменение
-  useEffect(() => {
-    if (!holder.current) return;
-    const observer = new ResizeObserver(([entry]) => {
-      setBox({ width: entry.contentRect.width, height: entry.contentRect.height });
-    });
-    observer.observe(holder.current);
-    return () => observer.disconnect();
-  }, [map]);
-
-  // Вращение галактики: каждому узлу добавляем скорость по касательной к
-  // окружности вокруг центра. Ускорение растёт с радиусом, поэтому облако
-  // поворачивается целиком, а не размазывается по спирали. Оборот ≈ минута.
-  useEffect(() => {
-    if (!fg.current) return;
-    let simNodes: any[] = [];
-    const galaxy: any = () => {
-      for (const n of simNodes) {
-        if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
-        n.vx += -n.y * 1e-4;
-        n.vy += n.x * 1e-4;
-      }
-    };
-    galaxy.initialize = (ns: any[]) => {
-      simNodes = ns;
-    };
-    fg.current.d3Force('galaxy', galaxy);
-  }, [map]);
-
-  const data = useMemo(() => {
-    if (!map) return { nodes: [] as SimNode[], links: [] as SimLink[] };
+  const { galaxyNodes, galaxyLinks, byId } = useMemo(() => {
+    if (!map) return { galaxyNodes: [] as GalaxyNode[], galaxyLinks: [] as GalaxyLink[], byId: new Map<string, ApiGraphNode>() };
 
     const degree = new Map<string, number>();
     for (const e of map.edges) {
@@ -101,101 +59,22 @@ export default function GraphScreen() {
     const ids = new Set(visible.map((n) => n.id));
 
     return {
-      nodes: visible.map((n) => ({ ...n, degree: degree.get(n.id) ?? 0 })),
-      links: map.edges
+      galaxyNodes: visible.map((n) => ({
+        id: n.id,
+        label: n.label,
+        type: n.node_type,
+        color: colorOf(n.node_type),
+        degree: degree.get(n.id) ?? 0,
+      })),
+      galaxyLinks: map.edges
         .filter((e) => ids.has(e.source) && ids.has(e.target))
-        .map((e) => ({ source: e.source, target: e.target, weight: e.weight, edge_type: e.edge_type })),
+        .map((e) => ({ source: e.source, target: e.target, weight: e.weight })),
+      byId: new Map(map.nodes.map((n) => [n.id, n])),
     };
   }, [map, hiddenTypes]);
 
-  // Соседи подсвеченного узла — считаем один раз на наведение, а не на кадр
-  const lit = useMemo(() => {
-    const node = hovered ?? selected;
-    if (!node) return { nodes: new Set<string>(), links: new Set<string>() };
-    const nodes = new Set<string>([node.id]);
-    const links = new Set<string>();
-    for (const l of data.links) {
-      const s = typeof l.source === 'object' ? l.source.id : l.source;
-      const t = typeof l.target === 'object' ? l.target.id : l.target;
-      if (s === node.id || t === node.id) {
-        links.add(`${s}->${t}`);
-        nodes.add(s);
-        nodes.add(t);
-      }
-    }
-    return { nodes, links };
-  }, [hovered, selected, data.links]);
-
-  const paintNode = useCallback(
-    (node: any, ctx: CanvasRenderingContext2D, scale: number) => {
-      // Первый кадр рисуется раньше, чем симуляция расставит координаты.
-      // Без этой проверки createRadialGradient получал NaN и роняло весь
-      // экран в белое — React выносил всё дерево вместе с приложением.
-      if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
-
-      const focus = hovered ?? selected;
-      const isLit = !focus || lit.nodes.has(node.id);
-      const base = 2.2 + Math.min(node.degree, 24) * 0.32;
-      const color = colorOf(node.node_type);
-
-      // Свечение складывается, а не перекрывает: там, где узлы рядом,
-      // разгорается общее зарево — так и выглядит скопление звёзд
-      ctx.globalCompositeOperation = 'lighter';
-
-      const halo = base * (isLit ? 6 : 3.5);
-      const glow = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, halo);
-      glow.addColorStop(0, color);
-      glow.addColorStop(0.18, `${color}aa`);
-      glow.addColorStop(0.45, `${color}33`);
-      glow.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.globalAlpha = isLit ? 0.9 : 0.28;
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, halo, 0, 2 * Math.PI);
-      ctx.fill();
-
-      // Само тело узла и белое ядро внутри — как у звезды
-      ctx.globalAlpha = isLit ? 1 : 0.4;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, base, 0, 2 * Math.PI);
-      ctx.fill();
-
-      if (isLit) {
-        ctx.globalAlpha = 0.8;
-        ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, base * 0.42, 0, 2 * Math.PI);
-        ctx.fill();
-      }
-
-      ctx.globalCompositeOperation = 'source-over';
-
-      // Подписи мелким шрифтом читать невозможно — показываем только
-      // крупные узлы, а на отдалении не показываем вовсе
-      const showLabel = scale > 1.1 && (node.degree > 2 || isLit);
-      if (showLabel) {
-        ctx.globalAlpha = isLit ? 0.95 : 0.4;
-        ctx.font = `${Math.max(10 / scale, 2.6)}px ui-monospace, Consolas, monospace`;
-        ctx.fillStyle = '#E2E8F0';
-        ctx.textAlign = 'center';
-        ctx.fillText(node.label.slice(0, 28), node.x, node.y + base + 5 / scale);
-      }
-      ctx.globalAlpha = 1;
-    },
-    [hovered, selected, lit],
-  );
-
-  const linkColor = useCallback(
-    (link: any) => {
-      const focus = hovered ?? selected;
-      if (!focus) return DIM;
-      const s = typeof link.source === 'object' ? link.source.id : link.source;
-      const t = typeof link.target === 'object' ? link.target.id : link.target;
-      return lit.links.has(`${s}->${t}`) ? 'rgba(226, 232, 240, 0.75)' : 'rgba(148, 163, 184, 0.05)';
-    },
-    [hovered, selected, lit],
-  );
+  const selected = selectedId ? byId.get(selectedId) : null;
+  const selectedDegree = galaxyNodes.find((n) => n.id === selectedId)?.degree ?? 0;
 
   const toggleType = (type: string) => {
     setHiddenTypes((prev) => {
@@ -207,9 +86,7 @@ export default function GraphScreen() {
   };
 
   if (error) {
-    return (
-      <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-6 text-red-100">{error}</div>
-    );
+    return <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-6 text-red-100">{error}</div>;
   }
 
   if (!map) {
@@ -235,46 +112,12 @@ export default function GraphScreen() {
 
   return (
     <div className="relative -m-8 h-screen overflow-hidden bg-darker">
-      <div ref={holder} className="absolute inset-0">
-        <ForceGraph2D
-          ref={fg}
-          graphData={data as any}
-          width={box.width}
-          height={box.height}
-          backgroundColor="#020617"
-          nodeCanvasObject={paintNode}
-          nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
-            if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(node.x, node.y, 6, 0, 2 * Math.PI);
-            ctx.fill();
-          }}
-          linkColor={linkColor}
-          linkWidth={(l: any) => 0.3 + Math.min(l.weight, 4) * 0.25}
-          // Те самые светлые точки, бегущие по нитям
-          linkDirectionalParticles={2}
-          linkDirectionalParticleWidth={(l: any) => {
-            const focus = hovered ?? selected;
-            const s = typeof l.source === 'object' ? l.source.id : l.source;
-            const t = typeof l.target === 'object' ? l.target.id : l.target;
-            return !focus || lit.links.has(`${s}->${t}`) ? 1.8 : 0.6;
-          }}
-          // Медленно: точка проходит нить примерно за полминуты. Быстрые
-          // точки читаются как тревога, а тут спокойный обмен
-          linkDirectionalParticleSpeed={(l: any) => 0.0004 + Math.min(l.weight, 5) * 0.00012}
-          linkDirectionalParticleColor={() => 'rgba(255,255,255,0.9)'}
-          onNodeHover={(node: any) => setHovered(node ?? null)}
-          onNodeClick={(node: any) => setSelected(node ?? null)}
-          onBackgroundClick={() => setSelected(null)}
-          // Симуляция не остывает: облако всё время медленно движется
-          d3AlphaDecay={0}
-          d3VelocityDecay={0.94}
-          cooldownTime={Infinity}
-          warmupTicks={60}
-          enableNodeDrag
-        />
-      </div>
+      <MemoryGalaxy
+        nodes={galaxyNodes}
+        links={galaxyLinks}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+      />
 
       {/* Легенда — она же фильтр по типам */}
       <div className="pointer-events-auto absolute left-6 top-6 w-56 rounded-lg border border-gray-800 bg-dark/85 p-4 backdrop-blur">
@@ -308,7 +151,8 @@ export default function GraphScreen() {
           })}
         </ul>
         <p className="mt-3 text-[11px] leading-snug text-gray-500">
-          Наведи — подсветятся связи. Нажми — подробности. Тип можно скрыть.
+          Карта поворачивается сама — ближний к тебе узел разгорается. Веди мышь, чтобы
+          зажечь другой, нажми — подробности.
         </p>
       </div>
 
@@ -326,7 +170,7 @@ export default function GraphScreen() {
               <h3 className="break-words text-lg font-bold text-white">{selected.label}</h3>
             </div>
             <button
-              onClick={() => setSelected(null)}
+              onClick={() => setSelectedId(null)}
               className="cursor-pointer rounded px-2 text-gray-400 transition-colors duration-200 hover:text-white focus:outline-none focus:ring-1 focus:ring-primary"
               aria-label="Закрыть"
             >
@@ -337,12 +181,14 @@ export default function GraphScreen() {
           <dl className="space-y-1 text-sm">
             <div className="flex justify-between gap-3">
               <dt className="text-gray-400">Связей</dt>
-              <dd className="font-mono tabular-nums text-gray-100">{selected.degree}</dd>
+              <dd className="font-mono tabular-nums text-gray-100">{selectedDegree}</dd>
             </div>
             {selected.created_at && (
               <div className="flex justify-between gap-3">
                 <dt className="text-gray-400">Создан</dt>
-                <dd className="font-mono text-xs text-gray-100">{selected.created_at.slice(0, 16).replace('T', ' ')}</dd>
+                <dd className="font-mono text-xs text-gray-100">
+                  {selected.created_at.slice(0, 16).replace('T', ' ')}
+                </dd>
               </div>
             )}
           </dl>

@@ -9,150 +9,153 @@ interface JarvisHudWidgetProps {
   size?: number;
 }
 
-// Бегущая по кругу дуга — главный элемент: пока она идёт, система жива.
-// Когда Джарвис говорит, дуга ускоряется, а кольцо и ядро мелко дрожат.
+// Кольцо собрано слоями, как приборная шкала: неподвижная дорожка, четыре
+// бирюзовых сегмента, янтарная дуга, которая бежит по кругу всегда, и
+// внутренние риски, ползущие в обратную сторону. Когда Джарвис говорит,
+// дуга ускоряется, а кольцо и ядро мелко дрожат.
 //
 // Всё движение — на CSS-анимациях. Прошлая версия крутила кольцо через
 // setInterval(50ms) и перерисовывала React двадцать раз в секунду просто
 // потому, что дашборд открыт.
 
-const PALETTE: Record<JarvisState, { arc: string; ring: string; core: string; label: string }> = {
-  // Покой — янтарь: тот же акцент, что у бегущей дуги, ничего не мигает
-  ONLINE: { arc: '#F5B642', ring: 'rgba(245, 182, 66, 0.25)', core: 'rgba(245, 182, 66, 0.10)', label: 'text-amber-300' },
-  LISTENING: { arc: '#FF2A85', ring: 'rgba(255, 42, 133, 0.3)', core: 'rgba(255, 42, 133, 0.15)', label: 'text-pink-400' },
-  SPEAKING: { arc: '#00F2FE', ring: 'rgba(0, 242, 254, 0.3)', core: 'rgba(0, 242, 254, 0.18)', label: 'text-cyan-300' },
-  PROCESSING: { arc: '#00DC82', ring: 'rgba(0, 220, 130, 0.3)', core: 'rgba(0, 220, 130, 0.12)', label: 'text-primary' },
+const CYAN = '#22D3EE';
+const AMBER = '#F5B642';
+
+const STATE_COLOR: Record<JarvisState, string> = {
+  ONLINE: '#34D399',
+  LISTENING: '#F472B6',
+  SPEAKING: CYAN,
+  PROCESSING: AMBER,
 };
 
-const CAPTION: Record<JarvisState, string> = {
-  ONLINE: 'ONLINE',
-  LISTENING: 'СЛУШАЮ',
-  SPEAKING: 'ГОВОРЮ',
-  PROCESSING: 'ДУМАЮ',
+const CAPTION: Record<JarvisState, [string, string]> = {
+  ONLINE: ['НА СВЯЗИ', 'жду команды, сэр'],
+  LISTENING: ['СЛУШАЮ', 'слушаю, сэр…'],
+  SPEAKING: ['ГОВОРЮ', 'отвечаю…'],
+  PROCESSING: ['ДУМАЮ', 'считаю, сэр…'],
 };
+
+const R = 44;
+const CIRC = 2 * Math.PI * R;
+
+/** Четыре сегмента шкалы: длинный, короткий, длинный, короткий. */
+const SEGMENTS = `${CIRC * 0.28} ${CIRC * 0.06} ${CIRC * 0.14} ${CIRC * 0.06} ${CIRC * 0.28} ${CIRC * 0.06} ${CIRC * 0.06} ${CIRC * 0.06}`;
 
 export const JarvisHudWidget: React.FC<JarvisHudWidgetProps> = ({
   state = 'ONLINE',
   activeModel = '',
-  size = 160,
+  size = 170,
 }) => {
-  const colors = PALETTE[state];
-  const lively = state === 'LISTENING' || state === 'SPEAKING' || state === 'PROCESSING';
-  const orbitSeconds = state === 'SPEAKING' ? 1.6 : state === 'PROCESSING' ? 2.4 : lively ? 3 : 6;
-
-  // Дуга — это окружность с пунктиром «кусок штриха, остальное пусто»
-  const r = 46;
-  const circumference = 2 * Math.PI * r;
-  const arcLength = circumference * (state === 'SPEAKING' ? 0.3 : 0.22);
+  const accent = STATE_COLOR[state];
+  const lively = state !== 'ONLINE';
+  const orbit = state === 'SPEAKING' ? 1.8 : state === 'PROCESSING' ? 2.6 : lively ? 3.4 : 6;
+  const arc = CIRC * (state === 'SPEAKING' ? 0.26 : 0.18);
+  const [caption, subtitle] = CAPTION[state];
 
   return (
     <div className="flex select-none flex-col items-center">
       <div
-        className={`relative ${state === 'SPEAKING' ? 'jarvis-animated' : ''}`}
+        className={state === 'SPEAKING' ? 'jarvis-animated' : undefined}
         style={{
           width: size,
           height: size,
-          // Дрожь всего блока — её видно на кольце и на ядре сразу
+          position: 'relative',
           animation: state === 'SPEAKING' ? 'jarvis-tremor 0.18s linear infinite' : undefined,
         }}
         role="img"
-        aria-label={`Джарвис: ${CAPTION[state].toLowerCase()}${activeModel ? `, модель ${activeModel}` : ''}`}
+        aria-label={`Джарвис: ${caption.toLowerCase()}${activeModel ? `, модель ${activeModel}` : ''}`}
       >
         <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full">
-          {/* Неподвижная дорожка, по которой бежит дуга */}
-          <circle cx="50" cy="50" r={r} fill="none" stroke={colors.ring} strokeWidth="1" />
+          {/* Внешний тонкий обод */}
+          <circle cx="50" cy="50" r="48" fill="none" stroke={CYAN} strokeWidth="0.5" opacity="0.25" />
 
-          {/* Штрихи-риски: дают ощущение шкалы, крутятся медленно в обратную сторону */}
+          {/* Сегменты шкалы — медленно против часовой */}
           <g
             className="jarvis-animated"
-            style={{
-              transformOrigin: 'center',
-              animation: `jarvis-orbit-reverse ${orbitSeconds * 6}s linear infinite`,
-            }}
+            style={{ transformOrigin: 'center', animation: `jarvis-orbit-reverse ${orbit * 8}s linear infinite` }}
           >
             <circle
               cx="50"
               cy="50"
-              r="41"
+              r={R}
               fill="none"
-              stroke={colors.ring}
-              strokeWidth="0.7"
-              strokeDasharray="1 6"
+              stroke={CYAN}
+              strokeWidth="2"
+              strokeDasharray={SEGMENTS}
+              opacity="0.75"
             />
           </g>
 
-          {/* Та самая бегущая полоска */}
+          {/* Та самая янтарная полоска, бегущая по кругу */}
           <g
             className="jarvis-animated"
             style={{
               transformOrigin: 'center',
-              animation: `jarvis-orbit ${orbitSeconds}s linear infinite`,
-              filter: `drop-shadow(0 0 4px ${colors.arc})`,
+              animation: `jarvis-orbit ${orbit}s linear infinite`,
+              filter: `drop-shadow(0 0 3px ${AMBER})`,
             }}
           >
             <circle
               cx="50"
               cy="50"
-              r={r}
+              r={R}
               fill="none"
-              stroke={colors.arc}
-              strokeWidth="2.5"
+              stroke={AMBER}
+              strokeWidth="2.4"
               strokeLinecap="round"
-              strokeDasharray={`${arcLength} ${circumference - arcLength}`}
+              strokeDasharray={`${arc} ${CIRC - arc}`}
             />
           </g>
 
-          {/* Засечки по четырём сторонам — рамка прицела, стоит на месте */}
-          {[0, 90, 180, 270].map((angle) => (
-            <line
-              key={angle}
-              x1="50"
-              y1="2"
-              x2="50"
-              y2="7"
-              stroke={colors.arc}
-              strokeWidth="1.5"
-              opacity="0.5"
-              style={{ transform: `rotate(${angle}deg)`, transformOrigin: 'center' }}
-            />
-          ))}
+          {/* Внутренние риски — в обратную сторону, дают ощущение механизма */}
+          <g
+            className="jarvis-animated"
+            style={{ transformOrigin: 'center', animation: `jarvis-orbit-reverse ${orbit * 3}s linear infinite` }}
+          >
+            <circle cx="50" cy="50" r="37" fill="none" stroke={CYAN} strokeWidth="0.8" strokeDasharray="1 5" opacity="0.5" />
+          </g>
+
+          {/* Скобки сверху и снизу — рамка прицела, стоит на месте */}
+          <path d="M 34 17 A 34 34 0 0 1 66 17" fill="none" stroke={CYAN} strokeWidth="1.2" opacity="0.55" />
+          <path d="M 34 83 A 34 34 0 0 0 66 83" fill="none" stroke={CYAN} strokeWidth="1.2" opacity="0.55" />
+
+          {/* Кольцо ядра */}
+          <circle cx="50" cy="50" r="29" fill="rgba(34, 211, 238, 0.05)" stroke={CYAN} strokeWidth="0.8" opacity="0.7" />
         </svg>
 
-        {/* Ядро */}
         <div
-          className={`absolute inset-0 m-auto flex items-center justify-center rounded-full border ${
-            lively ? 'jarvis-animated' : ''
-          }`}
+          className={`absolute inset-0 m-auto flex items-center justify-center rounded-full ${lively ? 'jarvis-animated' : ''}`}
           style={{
-            width: '68%',
-            height: '68%',
-            backgroundColor: colors.core,
-            borderColor: colors.arc,
-            boxShadow: `0 0 ${lively ? 28 : 14}px ${colors.ring}, inset 0 0 24px ${colors.core}`,
-            animation: lively ? 'jarvis-breathe 2s ease-in-out infinite' : undefined,
-            transition: 'box-shadow 300ms ease, background-color 300ms ease',
+            width: '52%',
+            height: '52%',
+            boxShadow: `0 0 ${lively ? 26 : 14}px rgba(34, 211, 238, 0.35), inset 0 0 22px rgba(34, 211, 238, 0.15)`,
+            borderRadius: '50%',
+            animation: lively ? 'jarvis-breathe 2.4s ease-in-out infinite' : undefined,
+            transition: 'box-shadow 300ms ease',
           }}
         >
           <span
-            className="font-mono text-[0.62rem] font-bold tracking-[0.3em] text-white"
-            style={{ textShadow: `0 0 10px ${colors.arc}`, paddingLeft: '0.3em' }}
+            className="font-mono text-[0.6rem] font-bold tracking-[0.28em] text-white"
+            style={{ textShadow: `0 0 10px ${CYAN}`, paddingLeft: '0.28em' }}
           >
             J.A.R.V.I.S.
           </span>
         </div>
       </div>
 
-      <div className={`mt-3 flex items-center gap-2 font-mono text-[0.7rem] tracking-widest ${colors.label}`}>
-        <span
-          className="h-2 w-2 rounded-full"
-          style={{ backgroundColor: colors.arc, boxShadow: `0 0 8px ${colors.arc}` }}
-        />
-        {CAPTION[state]}
+      <div className="mt-3 flex items-center gap-2 font-mono text-[0.7rem] tracking-[0.2em]" style={{ color: accent }}>
+        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: accent, boxShadow: `0 0 8px ${accent}` }} />
+        {caption}
       </div>
 
+      <div className="mt-1 font-mono text-[0.6rem] tracking-wide text-gray-500">{subtitle}</div>
+
       {activeModel && (
-        <div className="mt-2 rounded-full border border-gray-700 bg-darker px-3 py-1 font-mono text-[0.6rem] tracking-wide text-gray-300">
-          {activeModel}
+        <div
+          className="mt-2 rounded-full border px-3 py-1 font-mono text-[0.6rem] tracking-wide"
+          style={{ borderColor: 'rgba(34, 211, 238, 0.3)', color: '#67E8F9', backgroundColor: 'rgba(2, 6, 23, 0.9)' }}
+        >
+          ◈ {activeModel}
         </div>
       )}
     </div>
