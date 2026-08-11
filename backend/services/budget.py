@@ -10,6 +10,8 @@ import logging
 from datetime import datetime, timezone
 
 from ..core.config import DATA_DIR, ensure_data_dir, settings
+from ..core.eventbus import SYSTEM_BUDGET as SYSTEM_BUDGET_EVENT
+from ..core import eventbus
 from ..core.jsonio import read_json, write_json
 
 logger = logging.getLogger(__name__)
@@ -98,6 +100,9 @@ def check(kind: str = INTERACTIVE) -> bool:
     spent = spent_today()
     if spent < budget:
         return True
+
+    # Предохранитель сработал — это обязано быть видно в Activity (I-6)
+    eventbus.emit(SYSTEM_BUDGET_EVENT, status())
 
     if kind == BACKGROUND:
         raise BudgetExceeded(

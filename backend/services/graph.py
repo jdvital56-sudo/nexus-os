@@ -6,6 +6,7 @@ from ..core.config import GRAPH_FILE, ensure_data_dir
 from ..core.errors import NotFoundError
 from ..models.schemas import GraphNode, GraphEdge, GraphStats, NodeType, EdgeType
 from ..core.jsonio import read_json, write_json
+from ..core import eventbus
 
 
 def _load_graph() -> nx.DiGraph:
@@ -80,6 +81,15 @@ def add_node(node: GraphNode) -> GraphNode:
         node.id = str(uuid.uuid4())[:8]
     G.add_node(node.id, **node.model_dump())
     _save_graph(G)
+
+    eventbus.emit(
+        eventbus.GRAPH_NODE_ADDED,
+        {
+            "node_id": node.id,
+            "kind": node.node_type.value if hasattr(node.node_type, "value") else str(node.node_type),
+            "label": node.label,
+        },
+    )
     return node
 
 
@@ -100,6 +110,15 @@ def add_edge(edge: GraphEdge) -> GraphEdge:
         raise NotFoundError("Node (target)", edge.target)
     G.add_edge(edge.source, edge.target, **edge.model_dump())
     _save_graph(G)
+
+    eventbus.emit(
+        eventbus.GRAPH_EDGE_ADDED,
+        {
+            "src": edge.source,
+            "dst": edge.target,
+            "kind": edge.edge_type.value if hasattr(edge.edge_type, "value") else str(edge.edge_type),
+        },
+    )
     return edge
 
 

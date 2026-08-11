@@ -44,6 +44,18 @@ def temp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(persona_svc, "PERSONAS_FILE", tmp_path / "personas.json")
     monkeypatch.setattr(budget_svc, "SPEND_FILE", tmp_path / "llm_spend.json")
 
+    # Боевые ключи лежат в переменных окружения машины. Без этой заглушки
+    # тесты ходили бы в реальные API за реальные деньги.
+    for field in ("openai_api_key", "anthropic_api_key", "deepseek_api_key",
+                  "llm_api_key", "gemini_api_key"):
+        monkeypatch.setattr(cfg.settings, field, "")
+
+    # Шина событий не должна протекать между тестами
+    from backend.core import eventbus
+
+    monkeypatch.setattr(eventbus, "_subscribers", [])
+    monkeypatch.setattr(eventbus, "_loop", None)
+
     # Init files
     (tmp_path / "graph.json").write_text('{"nodes": [], "edges": []}')
     (tmp_path / "auth.json").write_text('{}')

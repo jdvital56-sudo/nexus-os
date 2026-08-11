@@ -20,6 +20,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 from ..core.config import DATA_DIR, ensure_data_dir
 from ..core.jsonio import read_json, write_json
+from ..core import eventbus
 
 
 class MemoryLayer(str, Enum):
@@ -91,6 +92,16 @@ def add_fact(
     )
     facts.append(fact.model_dump())
     _save(facts)
+
+    eventbus.emit(
+        eventbus.MEMORY_FACT_ADDED,
+        {
+            "fact_id": fact.id,
+            "layer": fact.layer.value,
+            "summary": fact.content[:160],
+            "source": fact.source,
+        },
+    )
     return fact
 
 

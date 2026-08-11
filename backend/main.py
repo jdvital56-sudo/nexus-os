@@ -73,11 +73,20 @@ def health():
 
 
 @app.on_event("startup")
-def startup():
+async def startup():
     """Initialize application on startup."""
     ensure_data_dir()
     token = init_auth()
-    
+
+    # Шина событий: запоминаем именно работающий цикл — emit() зовут из
+    # рабочих потоков (asyncio.to_thread), оттуда его иначе не достать
+    import asyncio as _asyncio
+
+    from .core import eventbus
+
+    eventbus.bind_loop(_asyncio.get_running_loop())
+    events.install()
+
     # Create default skills
     try:
         from .services.skills import create_default_skills

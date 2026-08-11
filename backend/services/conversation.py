@@ -11,6 +11,7 @@ import re
 from typing import Any
 
 from ..agents.persona_manager import PersonaManager
+from ..core import eventbus
 from . import budget
 from . import entity_extraction
 from . import memory as memory_svc
@@ -81,18 +82,38 @@ class ConversationService:
 
         skill_reply = await self._try_skill(text)
         if skill_reply is not None:
+            self._emit_message(channel, "user", "Skill", text)
+            self._emit_message(channel, "assistant", "Skill", skill_reply)
             self._spawn(self._remember(channel, user_id, text, skill_reply, "Skill"))
             return skill_reply
 
         selected = self._select_persona(text, persona)
+        self._emit_message(channel, "user", selected["name"], text)
+
         llm = self._llm_for(selected, channel=channel)
         reply = await llm.generate_response(
             text, context=f"Persona: {selected['name']}", kind=budget.INTERACTIVE
         )
 
+        self._emit_message(channel, "assistant", selected["name"], reply)
         self._spawn(self._remember(channel, user_id, text, reply, selected["name"]))
         self._spawn(self._extract(channel, user_id, text, reply))
         return reply
+
+    @staticmethod
+    def _emit_message(channel: str, role: str, persona: str, text: str) -> None:
+        """Сообщение в поток Activity — целиком текст туда не уходит (§3)."""
+        source = eventbus.SOURCE_HERMES if channel == "telegram" else eventbus.SOURCE_WEB
+        eventbus.emit(
+            eventbus.CHAT_MESSAGE,
+            {
+                "channel": channel,
+                "role": role,
+                "persona": persona,
+                "text_preview": text[:120],
+            },
+            source=source,
+        )
 
     async def _extract(self, channel: str, user_id: str, text: str, reply: str) -> None:
         """Достаёт сущности из диалога в граф. Тихо уступает бюджету (I-4)."""
