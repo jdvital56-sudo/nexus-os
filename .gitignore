@@ -60,4 +60,4 @@ alembic/versions/*.py
 *.xz
 *.7z
 *.rar
-```
+```frontend/node_modules/

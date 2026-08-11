@@ -8,7 +8,7 @@ export interface AnalyticsData {
 
 export interface ApiUsage {
   provider: string;
-  tokensUsed: number;
+  tokensUsed: string | number;
   cost: number;
   limit: number;
 }

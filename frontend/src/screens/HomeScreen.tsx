@@ -3,6 +3,7 @@ import { DollarSign, Clock, TrendingUp, AlertCircle } from 'lucide-react';
 import { analyticsApi, systemApi } from '../lib/api';
 import { useApi } from '../hooks/useApi';
 import type { AnalyticsData, SystemStatus } from '../types';
+import { JarvisHudWidget } from '../components/JarvisHudWidget';
 
 // Mock data for demo (will be replaced with real API calls)
 const mockAnalytics: AnalyticsData = {
@@ -11,9 +12,9 @@ const mockAnalytics: AnalyticsData = {
   moneySaved: 8940,
   netRoi: 3512,
   apiUsage: [
-    { provider: 'Claude API', tokensUsed: 2.4M, cost: 124.50, limit: 500 },
-    { provider: 'OpenAI API', tokensUsed: 1.8M, cost: 89.20, limit: 300 },
-    { provider: 'Gemini API', tokensUsed: 3.1M, cost: 34.13, limit: 1000 },
+    { provider: 'Claude API', tokensUsed: '2.4M', cost: 124.50, limit: 500 },
+    { provider: 'OpenAI API', tokensUsed: '1.8M', cost: 89.20, limit: 300 },
+    { provider: 'Gemini API', tokensUsed: '3.1M', cost: 34.13, limit: 1000 },
   ],
 };
 
@@ -28,6 +29,7 @@ const mockSystemStatus: SystemStatus = {
 
 export default function HomeScreen() {
   const [period, setPeriod] = useState('7d');
+  const [jarvisState, setJarvisState] = useState<'ONLINE' | 'LISTENING' | 'SPEAKING' | 'PROCESSING'>('ONLINE');
   
   // In production, uncomment these:
   // const { data: analytics } = useApi<AnalyticsData>(() => analyticsApi.getOverview(), [period]);
@@ -69,9 +71,38 @@ export default function HomeScreen() {
 
   return (
     <div className="p-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-2">Dashboard</h1>
-        <p className="text-gray-400">Overview of your AI operations and ROI</p>
+      <div className="flex justify-between items-start mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-white mb-2">Dashboard</h1>
+          <p className="text-gray-400">Overview of your AI operations and ROI</p>
+        </div>
+        
+        {/* J.A.R.V.I.S. HUD Widget */}
+        <div className="relative">
+          <JarvisHudWidget state={jarvisState} activeModel="GEMINI-2.0" />
+          
+          {/* Quick state controls for demo */}
+          <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 flex gap-1">
+            <button
+              onClick={() => setJarvisState('ONLINE')}
+              className={`px-2 py-1 text-xs rounded ${jarvisState === 'ONLINE' ? 'bg-emerald-500 text-white' : 'bg-gray-700 text-gray-300'}`}
+            >
+              Online
+            </button>
+            <button
+              onClick={() => setJarvisState('LISTENING')}
+              className={`px-2 py-1 text-xs rounded ${jarvisState === 'LISTENING' ? 'bg-pink-500 text-white' : 'bg-gray-700 text-gray-300'}`}
+            >
+              Listen
+            </button>
+            <button
+              onClick={() => setJarvisState('SPEAKING')}
+              className={`px-2 py-1 text-xs rounded ${jarvisState === 'SPEAKING' ? 'bg-cyan-500 text-white' : 'bg-gray-700 text-gray-300'}`}
+            >
+              Speak
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Stats Grid */}
