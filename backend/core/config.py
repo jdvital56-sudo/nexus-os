@@ -50,6 +50,10 @@ class Settings(BaseModel):
     # Дневной потолок расходов на LLM в долларах (I-4)
     daily_llm_budget_usd: float = float(os.getenv("NEXUS_DAILY_LLM_BUDGET_USD", "5"))
 
+    # Потолок длины ответа. 512 обрывало развёрнутые ответы на полуслове;
+    # деньги стережёт дневной бюджет, а не куцый лимит на сообщение
+    max_reply_tokens: int = int(os.getenv("NEXUS_MAX_REPLY_TOKENS", "2000"))
+
     # Google Gemini API Key (for audio processing and advanced features)
     gemini_api_key: str = os.getenv("NEXSYS_GEMINI_API_KEY", "")
     

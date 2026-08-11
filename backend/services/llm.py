@@ -17,6 +17,7 @@ from ..core.config import (
     LLM_MODEL,
     LLM_API_KEY,
     LLM_BASE_URL,
+    settings,
 )
 from . import budget
 
@@ -223,7 +224,11 @@ class LLMService:
         messages.append(LLMMessage(role="user", content=full_prompt))
 
         response = await self.chat(
-            messages, temperature=0.7, max_tokens=512, kind=kind, json_mode=json_mode
+            messages,
+            temperature=0.7,
+            max_tokens=settings.max_reply_tokens,
+            kind=kind,
+            json_mode=json_mode,
         )
         return response.content
     

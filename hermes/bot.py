@@ -32,6 +32,23 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
+def strip_markdown(text: str) -> str:
+    """Убирает markdown-разметку: в Telegram она видна как мусор.
+
+    Модель просят писать простым текстом, но привычка сильнее — это
+    страховка на случай, если разметка всё же просочилась.
+    """
+    import re
+
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)   # заголовки
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)  # жирный
+    text = re.sub(r"__(.+?)__", r"\1", text, flags=re.DOTALL)      # он же
+    text = re.sub(r"(?<!\w)\*(?!\s)(.+?)(?<!\s)\*(?!\w)", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"^\s*[\*\+]\s+", "- ", text, flags=re.MULTILINE)  # маркеры списка
+    text = re.sub(r"`{1,3}", "", text)                              # код
+    return text.strip()
+
+
 class HermesAgent:
     """
     Hermes Agent - Telegram interface for NEXSYS
@@ -83,22 +100,22 @@ class HermesAgent:
             return
         
         help_text = """
-📚 **Помощь Hermes**
+📚 Помощь Hermes
 
-**Команды:**
+Команды:
 - /start - Запуск бота
 - /status - Проверка статуса системы
 - /persons - Показать доступные AI-персоны
 - /brief - Получить утренний бриф (Dream Cadence)
 - /help - Эта справка
 
-**Примеры запросов:**
+Примеры запросов:
 - "Найди 20 кровельных компаний в Техасе"
 - "Создай план проекта для..."
 - "Запиши встречу с командой на завтра в 15:00"
 - "Проанализируй мои расходы за неделю"
 
-**Персоны:**
+Персоны:
 - Mercury - Автономные скрипты (Llama 3.3)
 - Philosopher - Глубокий анализ (Claude Opus)
 - Labyrinth - Исследования (GPT/DeepSeek)
@@ -119,7 +136,7 @@ class HermesAgent:
             "Compression": f"{self.compression_threshold:.2f}"
         }
         
-        status_text = "🔧 **Статус системы:**\n\n"
+        status_text = "🔧 Статус системы:\n\n"
         for service, state in status.items():
             status_text += f"{service}: {state}\n"
         
@@ -131,9 +148,9 @@ class HermesAgent:
             return
         
         personas = self.persona_manager.list_personas()
-        text = "🎭 **Доступные персоны:**\n\n"
+        text = "🎭 Доступные персоны:\n\n"
         for p in personas:
-            text += f"**{p['name']}**: {p['description']}\n"
+            text += f"{p['name']}: {p['description']}\n"
             text += f"  Модель: {p['model']}\n\n"
         
         await update.message.reply_text(text)
@@ -180,7 +197,7 @@ class HermesAgent:
                 user_id=str(update.effective_user.id),
                 text=user_message,
             )
-            await update.message.reply_text(response)
+            await update.message.reply_text(strip_markdown(response))
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             await update.message.reply_text("⚠️ Произошла ошибка при обработке запроса.")
@@ -199,7 +216,7 @@ class HermesAgent:
         # Transcribe using Gemini (multimodal)
         try:
             transcription = await self.llm.transcribe_audio(voice_path)
-            await update.message.reply_text(f"🎤 **Распознано:**\n{transcription}")
+            await update.message.reply_text(f"🎤 Распознано:\n{transcription}")
 
             # Расшифровка идёт тем же путём, что и текст
             response = await self.conversation.handle(
@@ -207,7 +224,7 @@ class HermesAgent:
                 user_id=str(update.effective_user.id),
                 text=transcription,
             )
-            await update.message.reply_text(response)
+            await update.message.reply_text(strip_markdown(response))
 
         except TranscriptionUnavailable as e:
             # Честная причина вместо «что-то пошло не так»
