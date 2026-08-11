@@ -194,3 +194,64 @@ class AgentRunResult(BaseModel):
     output: str
     duration_ms: int
     tokens_used: int | None = None
+
+
+# === Библиотека источников ===
+
+
+class SourceKind(str, Enum):
+    SITE = "site"
+    RSS = "rss"
+    BLOG = "blog"
+    DOCS = "docs"
+    SOCIAL = "social"
+
+
+class SourceStatus(str, Enum):
+    NEVER = "never"
+    OK = "ok"
+    ERROR = "error"
+
+
+class SourceCreate(BaseModel):
+    url: str
+    title: str = ""
+    kind: SourceKind = SourceKind.SITE
+    topics: list[str] = Field(default_factory=list)
+    # Доверие 0..1. Половина по умолчанию: содержимое чужого сайта — это
+    # данные, а не указания системе, и повышать доверие можно только вручную.
+    trust: float = 0.5
+    check_interval_hours: int = 24
+    enabled: bool = True
+    notes: str = ""
+
+
+class Source(BaseModel):
+    id: str
+    url: str
+    title: str = ""
+    kind: SourceKind = SourceKind.SITE
+    topics: list[str] = Field(default_factory=list)
+    trust: float = 0.5
+    check_interval_hours: int = 24
+    enabled: bool = True
+    notes: str = ""
+    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    last_checked_at: str | None = None
+    last_status: SourceStatus = SourceStatus.NEVER
+    last_error: str = ""
+    check_count: int = 0
+    error_streak: int = 0
+    items_found: int = 0
+
+
+class SourceUpdate(BaseModel):
+    url: str | None = None
+    title: str | None = None
+    kind: SourceKind | None = None
+    topics: list[str] | None = None
+    trust: float | None = None
+    check_interval_hours: int | None = None
+    enabled: bool | None = None
+    notes: str | None = None
