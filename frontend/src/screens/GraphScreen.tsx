@@ -50,6 +50,7 @@ export default function GraphScreen() {
   const [selected, setSelected] = useState<SimNode | null>(null);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const holder = useRef<HTMLDivElement>(null);
+  const fg = useRef<any>(null);
   const [box, setBox] = useState({ width: 800, height: 600 });
 
   useEffect(() => {
@@ -66,6 +67,25 @@ export default function GraphScreen() {
     });
     observer.observe(holder.current);
     return () => observer.disconnect();
+  }, [map]);
+
+  // Вращение галактики: каждому узлу добавляем скорость по касательной к
+  // окружности вокруг центра. Ускорение растёт с радиусом, поэтому облако
+  // поворачивается целиком, а не размазывается по спирали. Оборот ≈ минута.
+  useEffect(() => {
+    if (!fg.current) return;
+    let simNodes: any[] = [];
+    const galaxy: any = () => {
+      for (const n of simNodes) {
+        if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) continue;
+        n.vx += -n.y * 1e-4;
+        n.vy += n.x * 1e-4;
+      }
+    };
+    galaxy.initialize = (ns: any[]) => {
+      simNodes = ns;
+    };
+    fg.current.d3Force('galaxy', galaxy);
   }, [map]);
 
   const data = useMemo(() => {
@@ -118,23 +138,38 @@ export default function GraphScreen() {
       const base = 2.2 + Math.min(node.degree, 24) * 0.32;
       const color = colorOf(node.node_type);
 
-      // Свечение: чем больше связей, тем ярче ореол
-      const halo = base * (isLit ? 3.4 : 2.2);
+      // Свечение складывается, а не перекрывает: там, где узлы рядом,
+      // разгорается общее зарево — так и выглядит скопление звёзд
+      ctx.globalCompositeOperation = 'lighter';
+
+      const halo = base * (isLit ? 6 : 3.5);
       const glow = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, halo);
       glow.addColorStop(0, color);
-      glow.addColorStop(0.35, `${color}55`);
+      glow.addColorStop(0.18, `${color}aa`);
+      glow.addColorStop(0.45, `${color}33`);
       glow.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.globalAlpha = isLit ? 0.85 : 0.25;
+      ctx.globalAlpha = isLit ? 0.9 : 0.28;
       ctx.fillStyle = glow;
       ctx.beginPath();
       ctx.arc(node.x, node.y, halo, 0, 2 * Math.PI);
       ctx.fill();
 
-      ctx.globalAlpha = isLit ? 1 : 0.35;
+      // Само тело узла и белое ядро внутри — как у звезды
+      ctx.globalAlpha = isLit ? 1 : 0.4;
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(node.x, node.y, base, 0, 2 * Math.PI);
       ctx.fill();
+
+      if (isLit) {
+        ctx.globalAlpha = 0.8;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, base * 0.42, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+
+      ctx.globalCompositeOperation = 'source-over';
 
       // Подписи мелким шрифтом читать невозможно — показываем только
       // крупные узлы, а на отдалении не показываем вовсе
@@ -202,6 +237,7 @@ export default function GraphScreen() {
     <div className="relative -m-8 h-screen overflow-hidden bg-darker">
       <div ref={holder} className="absolute inset-0">
         <ForceGraph2D
+          ref={fg}
           graphData={data as any}
           width={box.width}
           height={box.height}
@@ -224,7 +260,9 @@ export default function GraphScreen() {
             const t = typeof l.target === 'object' ? l.target.id : l.target;
             return !focus || lit.links.has(`${s}->${t}`) ? 1.8 : 0.6;
           }}
-          linkDirectionalParticleSpeed={(l: any) => 0.0015 + Math.min(l.weight, 5) * 0.0006}
+          // Медленно: точка проходит нить примерно за полминуты. Быстрые
+          // точки читаются как тревога, а тут спокойный обмен
+          linkDirectionalParticleSpeed={(l: any) => 0.0004 + Math.min(l.weight, 5) * 0.00012}
           linkDirectionalParticleColor={() => 'rgba(255,255,255,0.9)'}
           onNodeHover={(node: any) => setHovered(node ?? null)}
           onNodeClick={(node: any) => setSelected(node ?? null)}
