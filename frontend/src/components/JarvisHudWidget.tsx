@@ -1,210 +1,160 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
+
+export type JarvisState = 'ONLINE' | 'LISTENING' | 'SPEAKING' | 'PROCESSING';
 
 interface JarvisHudWidgetProps {
-  state?: 'ONLINE' | 'LISTENING' | 'SPEAKING' | 'PROCESSING';
+  state?: JarvisState;
   activeModel?: string;
+  /** Размер кольца в пикселях. По умолчанию — как на дашборде. */
+  size?: number;
 }
+
+// Бегущая по кругу дуга — главный элемент: пока она идёт, система жива.
+// Когда Джарвис говорит, дуга ускоряется, а кольцо и ядро мелко дрожат.
+//
+// Всё движение — на CSS-анимациях. Прошлая версия крутила кольцо через
+// setInterval(50ms) и перерисовывала React двадцать раз в секунду просто
+// потому, что дашборд открыт.
+
+const PALETTE: Record<JarvisState, { arc: string; ring: string; core: string; label: string }> = {
+  // Покой — янтарь: тот же акцент, что у бегущей дуги, ничего не мигает
+  ONLINE: { arc: '#F5B642', ring: 'rgba(245, 182, 66, 0.25)', core: 'rgba(245, 182, 66, 0.10)', label: 'text-amber-300' },
+  LISTENING: { arc: '#FF2A85', ring: 'rgba(255, 42, 133, 0.3)', core: 'rgba(255, 42, 133, 0.15)', label: 'text-pink-400' },
+  SPEAKING: { arc: '#00F2FE', ring: 'rgba(0, 242, 254, 0.3)', core: 'rgba(0, 242, 254, 0.18)', label: 'text-cyan-300' },
+  PROCESSING: { arc: '#00DC82', ring: 'rgba(0, 220, 130, 0.3)', core: 'rgba(0, 220, 130, 0.12)', label: 'text-primary' },
+};
+
+const CAPTION: Record<JarvisState, string> = {
+  ONLINE: 'ONLINE',
+  LISTENING: 'СЛУШАЮ',
+  SPEAKING: 'ГОВОРЮ',
+  PROCESSING: 'ДУМАЮ',
+};
 
 export const JarvisHudWidget: React.FC<JarvisHudWidgetProps> = ({
   state = 'ONLINE',
-  activeModel = 'GEMINI-2.0',
+  activeModel = '',
+  size = 160,
 }) => {
-  const [rotation, setRotation] = useState(0);
-  const [pulseScale, setPulseScale] = useState(1);
+  const colors = PALETTE[state];
+  const lively = state === 'LISTENING' || state === 'SPEAKING' || state === 'PROCESSING';
+  const orbitSeconds = state === 'SPEAKING' ? 1.6 : state === 'PROCESSING' ? 2.4 : lively ? 3 : 6;
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setRotation((prev) => (prev + (state === 'LISTENING' || state === 'SPEAKING' ? 2 : 0.5)) % 360);
-    }, 50);
-    return () => clearInterval(interval);
-  }, [state]);
-
-  useEffect(() => {
-    if (state === 'LISTENING' || state === 'SPEAKING') {
-      const pulseInterval = setInterval(() => {
-        setPulseScale((prev) => (prev === 1 ? 1.15 : 1));
-      }, 400);
-      return () => clearInterval(pulseInterval);
-    } else {
-      setPulseScale(1);
-    }
-  }, [state]);
-
-  const getCoreColors = () => {
-    switch (state) {
-      case 'LISTENING':
-        return { bg: 'rgba(255, 42, 133, 0.2)', border: '#FF2A85', glow: '#FF2A85' };
-      case 'SPEAKING':
-      case 'PROCESSING':
-        return { bg: 'rgba(0, 242, 254, 0.25)', border: '#00F2FE', glow: '#00F2FE' };
-      default:
-        return { bg: 'rgba(0, 242, 254, 0.1)', border: 'rgba(0, 242, 254, 0.4)', glow: '#00F2FE' };
-    }
-  };
-
-  const colors = getCoreColors();
+  // Дуга — это окружность с пунктиром «кусок штриха, остальное пусто»
+  const r = 46;
+  const circumference = 2 * Math.PI * r;
+  const arcLength = circumference * (state === 'SPEAKING' ? 0.3 : 0.22);
 
   return (
-    <div className="relative flex flex-col items-center justify-center select-none p-4">
-      {/* Outer Container */}
-      <div className="relative w-40 h-40 flex items-center justify-center">
-        {/* Outer Arc Shell - Track Ring */}
-        <svg
-          className="absolute inset-0 w-full h-full"
-          viewBox="0 0 100 100"
-          style={{ filter: `drop-shadow(0 0 8px ${colors.glow})` }}
-        >
-          {/* Main dashed ring */}
-          <circle
-            cx="50"
-            cy="50"
-            r="46"
-            fill="none"
-            stroke="#00F2FE"
-            strokeWidth="1.5"
-            strokeDasharray="60 15 30 15"
-            className="opacity-80"
-            style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center' }}
-          />
-          
-          {/* Secondary tick marks ring */}
-          <circle
-            cx="50"
-            cy="50"
-            r="42"
-            fill="none"
-            stroke="rgba(0, 242, 254, 0.3)"
-            strokeWidth="0.8"
-            strokeDasharray="3 5"
-            style={{ transform: `rotate(${-rotation * 0.5}deg)`, transformOrigin: 'center' }}
-          />
+    <div className="flex select-none flex-col items-center">
+      <div
+        className={`relative ${state === 'SPEAKING' ? 'jarvis-animated' : ''}`}
+        style={{
+          width: size,
+          height: size,
+          // Дрожь всего блока — её видно на кольце и на ядре сразу
+          animation: state === 'SPEAKING' ? 'jarvis-tremor 0.18s linear infinite' : undefined,
+        }}
+        role="img"
+        aria-label={`Джарвис: ${CAPTION[state].toLowerCase()}${activeModel ? `, модель ${activeModel}` : ''}`}
+      >
+        <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full">
+          {/* Неподвижная дорожка, по которой бежит дуга */}
+          <circle cx="50" cy="50" r={r} fill="none" stroke={colors.ring} strokeWidth="1" />
 
-          {/* Bracket notches at 0°, 90°, 180°, 270° */}
+          {/* Штрихи-риски: дают ощущение шкалы, крутятся медленно в обратную сторону */}
+          <g
+            className="jarvis-animated"
+            style={{
+              transformOrigin: 'center',
+              animation: `jarvis-orbit-reverse ${orbitSeconds * 6}s linear infinite`,
+            }}
+          >
+            <circle
+              cx="50"
+              cy="50"
+              r="41"
+              fill="none"
+              stroke={colors.ring}
+              strokeWidth="0.7"
+              strokeDasharray="1 6"
+            />
+          </g>
+
+          {/* Та самая бегущая полоска */}
+          <g
+            className="jarvis-animated"
+            style={{
+              transformOrigin: 'center',
+              animation: `jarvis-orbit ${orbitSeconds}s linear infinite`,
+              filter: `drop-shadow(0 0 4px ${colors.arc})`,
+            }}
+          >
+            <circle
+              cx="50"
+              cy="50"
+              r={r}
+              fill="none"
+              stroke={colors.arc}
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeDasharray={`${arcLength} ${circumference - arcLength}`}
+            />
+          </g>
+
+          {/* Засечки по четырём сторонам — рамка прицела, стоит на месте */}
           {[0, 90, 180, 270].map((angle) => (
-            <g key={angle} style={{ transform: `rotate(${angle + rotation}deg)`, transformOrigin: 'center' }}>
-              <line
-                x1="50"
-                y1="8"
-                x2="50"
-                y2="14"
-                stroke="rgba(0, 242, 254, 0.6)"
-                strokeWidth="1.5"
-              />
-              <line
-                x1="50"
-                y1="86"
-                x2="50"
-                y2="92"
-                stroke="rgba(0, 242, 254, 0.6)"
-                strokeWidth="1.5"
-              />
-            </g>
+            <line
+              key={angle}
+              x1="50"
+              y1="2"
+              x2="50"
+              y2="7"
+              stroke={colors.arc}
+              strokeWidth="1.5"
+              opacity="0.5"
+              style={{ transform: `rotate(${angle}deg)`, transformOrigin: 'center' }}
+            />
           ))}
         </svg>
 
-        {/* Rotating Tech Ring */}
-        <svg
-          className="absolute inset-0 w-full h-full"
-          viewBox="0 0 100 100"
-          style={{ 
-            animation: state === 'LISTENING' || state === 'SPEAKING' 
-              ? 'spin 4s linear infinite' 
-              : 'spin 12s linear infinite'
-          }}
-        >
-          <circle
-            cx="50"
-            cy="50"
-            r="38"
-            fill="none"
-            stroke="rgba(0, 242, 254, 0.2)"
-            strokeWidth="1"
-            strokeDasharray="20 40 10 40"
-          />
-        </svg>
-
-        {/* Inner Glowing Core */}
+        {/* Ядро */}
         <div
-          className="w-28 h-28 rounded-full flex items-center justify-center transition-all duration-300 border-2"
+          className={`absolute inset-0 m-auto flex items-center justify-center rounded-full border ${
+            lively ? 'jarvis-animated' : ''
+          }`}
           style={{
-            backgroundColor: colors.bg,
-            borderColor: colors.border,
-            boxShadow: `0 0 ${state === 'LISTENING' ? '30px' : '20px'} ${colors.glow}, inset 0 0 20px rgba(0, 242, 254, 0.2)`,
-            transform: `scale(${pulseScale})`,
+            width: '68%',
+            height: '68%',
+            backgroundColor: colors.core,
+            borderColor: colors.arc,
+            boxShadow: `0 0 ${lively ? 28 : 14}px ${colors.ring}, inset 0 0 24px ${colors.core}`,
+            animation: lively ? 'jarvis-breathe 2s ease-in-out infinite' : undefined,
+            transition: 'box-shadow 300ms ease, background-color 300ms ease',
           }}
         >
-          {/* Center Brand Text */}
           <span
-            className="font-mono text-xs tracking-[0.35em] font-bold pl-1"
-            style={{
-              color: '#FFFFFF',
-              textShadow: `0 0 10px ${colors.glow}`,
-            }}
+            className="font-mono text-[0.62rem] font-bold tracking-[0.3em] text-white"
+            style={{ textShadow: `0 0 10px ${colors.arc}`, paddingLeft: '0.3em' }}
           >
             J.A.R.V.I.S.
           </span>
         </div>
-
-        {/* Radial tick marks around outer edge */}
-        {Array.from({ length: 36 }).map((_, i) => (
-          <div
-            key={i}
-            className="absolute w-px h-2 bg-cyan-400/30"
-            style={{
-              top: '4px',
-              left: '50%',
-              transformOrigin: '50% 76px',
-              transform: `translateX(-50%) rotate(${i * 10}deg)`,
-            }}
-          />
-        ))}
       </div>
 
-      {/* State Text Indicator */}
-      <div className="mt-4 flex items-center gap-2 font-mono text-xs tracking-widest">
+      <div className={`mt-3 flex items-center gap-2 font-mono text-[0.7rem] tracking-widest ${colors.label}`}>
         <span
-          className={`w-2.5 h-2.5 rounded-full ${
-            state === 'ONLINE' ? 'bg-emerald-400' : 'bg-pink-500 animate-pulse'
-          }`}
-          style={{
-            boxShadow: state === 'ONLINE' 
-              ? '0 0 10px #00FF9D' 
-              : `0 0 15px ${colors.glow}`,
-          }}
+          className="h-2 w-2 rounded-full"
+          style={{ backgroundColor: colors.arc, boxShadow: `0 0 8px ${colors.arc}` }}
         />
-        <span
-          className={`${
-            state === 'ONLINE' 
-              ? 'text-emerald-400' 
-              : state === 'LISTENING'
-              ? 'text-pink-400'
-              : 'text-cyan-400'
-          }`}
-          style={{
-            textShadow: `0 0 8px ${
-              state === 'ONLINE' ? '#00FF9D' : colors.glow
-            }`,
-          }}
-        >
-          {state === 'ONLINE' && '● ONLINE'}
-          {state === 'LISTENING' && '🎙 LISTENING, sir...'}
-          {state === 'SPEAKING' && '🔊 SPEAKING'}
-          {state === 'PROCESSING' && '⚙ PROCESSING'}
-        </span>
+        {CAPTION[state]}
       </div>
 
-      {/* Active Model Pill */}
-      <div
-        className="mt-3 px-4 py-1 rounded-full border text-[10px] font-mono tracking-wide"
-        style={{
-          backgroundColor: 'rgba(15, 23, 42, 0.9)',
-          borderColor: 'rgba(0, 242, 254, 0.3)',
-          color: '#67E8F9',
-          boxShadow: '0 0 10px rgba(0, 242, 254, 0.1)',
-        }}
-      >
-        ◈ {activeModel}
-      </div>
+      {activeModel && (
+        <div className="mt-2 rounded-full border border-gray-700 bg-darker px-3 py-1 font-mono text-[0.6rem] tracking-wide text-gray-300">
+          {activeModel}
+        </div>
+      )}
     </div>
   );
 };

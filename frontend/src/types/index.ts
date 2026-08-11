@@ -121,6 +121,21 @@ export interface GraphStats {
   connected_components: number;
 }
 
+export interface ApiGraphEdge {
+  source: string;
+  target: string;
+  edge_type: string;
+  weight: number;
+  metadata: Record<string, any>;
+}
+
+// GET /api/graph/map — карта второго мозга целиком
+export interface GraphMap {
+  nodes: ApiGraphNode[];
+  edges: ApiGraphEdge[];
+  stats: GraphStats;
+}
+
 export interface GraphData {
   nodes: GraphNode[];
   links: GraphLink[];

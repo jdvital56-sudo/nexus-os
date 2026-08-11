@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { DollarSign, Moon, CreditCard, Bot, AlertCircle, RefreshCw, Check, Minus } from 'lucide-react';
 import type { SystemStatusResponse, WalletSummary, SpendDay } from '../types';
 import { getSystemStatus, getWalletSummary } from '../lib/api';
+import { days, money, plural } from '../lib/format';
 import { JarvisHudWidget } from '../components/JarvisHudWidget';
 
 // Ничего придуманного: каждое число на этом экране приходит с бэкенда.
@@ -14,25 +15,10 @@ import { JarvisHudWidget } from '../components/JarvisHudWidget';
 // тренд линией, а не столбиками, состояние подписано словом, а не только
 // цветом (дальтоники видят то же самое), фокус виден с клавиатуры.
 
-function money(value: number): string {
-  // Диалог через DeepSeek стоит доли цента. При round(2) день работы выглядит
-  // как «$0.00» — то есть как будто ничего не тратится вообще.
-  if (value > 0 && value < 0.01) return `$${value.toFixed(4)}`;
-  return `$${value.toFixed(2)}`;
-}
-
-function plural(n: number, one: string, few: string, many: string): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${n} ${one}`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} ${few}`;
-  return `${n} ${many}`;
-}
-
 function whenCharged(daysLeft: number): string {
   if (daysLeft === 0) return 'сегодня';
-  if (daysLeft > 0) return `через ${plural(daysLeft, 'день', 'дня', 'дней')}`;
-  return `просрочено на ${plural(-daysLeft, 'день', 'дня', 'дней')}`;
+  if (daysLeft > 0) return `через ${days(daysLeft)}`;
+  return `просрочено на ${days(-daysLeft)}`;
 }
 
 function ago(iso: string | null): string {

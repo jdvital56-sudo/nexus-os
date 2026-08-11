@@ -61,6 +61,36 @@ def list_nodes(node_type: str | None = None, label_contains: str | None = None, 
     return nodes
 
 
+def list_edges(limit: int = 2000) -> list[GraphEdge]:
+    """Все связи графа — для отрисовки карты второго мозга."""
+    G = _load_graph()
+    edges = []
+    for source, target, data in G.edges(data=True):
+        edges.append(GraphEdge(
+            source=source,
+            target=target,
+            edge_type=data.get("edge_type", "related"),
+            weight=float(data.get("weight", 1.0)),
+            metadata=data.get("metadata", {}),
+        ))
+        if len(edges) >= limit:
+            break
+    return edges
+
+
+def get_map(limit: int = 500) -> dict:
+    """Узлы и связи одним запросом.
+
+    Карта рисуется целиком, поэтому тянуть её двумя обращениями — значит
+    получить кадр, где связи ссылаются на ещё не приехавшие узлы. Связи
+    отдаём только между теми узлами, что попали в выборку.
+    """
+    nodes = list_nodes(limit=limit)
+    known = {n.id for n in nodes}
+    edges = [e for e in list_edges() if e.source in known and e.target in known]
+    return {"nodes": nodes, "edges": edges, "stats": get_stats()}
+
+
 def get_node(node_id: str) -> GraphNode:
     G = _load_graph()
     if node_id not in G:

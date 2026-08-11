@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { ApiGraphNode, GraphStats, SystemStatusResponse, WalletSummary } from '../types';
+import type { ApiGraphNode, GraphMap, GraphStats, SystemStatusResponse, WalletSummary } from '../types';
 
 // Бэкенд монтирует роутеры с префиксом /api и слушает 8420 (см. Makefile)
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8420/api';
@@ -28,6 +28,8 @@ export const getWalletSummary = () => data<WalletSummary>(api.get('/wallet/summa
 export const getGraphNodes = (limit = 200) =>
   data<ApiGraphNode[]>(api.get('/graph/nodes', { params: { limit } }));
 export const getGraphStats = () => data<GraphStats>(api.get('/graph/stats'));
+export const getGraphMap = (limit = 500) =>
+  data<GraphMap>(api.get('/graph/map', { params: { limit } }));
 
 // --- Агенты ---
 export const getAgents = () => data<any[]>(api.get('/agents'));

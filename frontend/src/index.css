@@ -18,6 +18,41 @@ code {
     monospace;
 }
 
+/* --- Кольцо Джарвиса ---
+   Анимации на CSS, а не на setInterval: таймер на 50 мс перерисовывал
+   виджет двадцать раз в секунду и грел процессор на пустом экране.
+   Крутится композитор, React в этом не участвует. */
+@keyframes jarvis-orbit {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes jarvis-orbit-reverse {
+  to { transform: rotate(-360deg); }
+}
+
+/* Дрожь, когда Джарвис говорит: смещение на доли пикселя,
+   иначе кольцо «прыгает» и читать надпись внутри невозможно */
+@keyframes jarvis-tremor {
+  0%, 100% { transform: translate(0, 0); }
+  20% { transform: translate(0.6px, -0.4px); }
+  40% { transform: translate(-0.5px, 0.5px); }
+  60% { transform: translate(0.4px, 0.6px); }
+  80% { transform: translate(-0.6px, -0.3px); }
+}
+
+@keyframes jarvis-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+
+/* Человеку с вестибулярными нарушениями бесконечное вращение
+   вызывает тошноту — системная настройка это отключает */
+@media (prefers-reduced-motion: reduce) {
+  .jarvis-animated {
+    animation: none !important;
+  }
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

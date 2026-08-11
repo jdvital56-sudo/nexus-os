@@ -13,6 +13,17 @@ def stats(_=Depends(auth)):
     return svc.get_stats()
 
 
+@router.get("/map")
+def get_map(limit: int = 500, _=Depends(auth)):
+    """Карта второго мозга: узлы, связи и статистика одним ответом."""
+    return svc.get_map(limit=limit)
+
+
+@router.get("/edges", response_model=list[GraphEdge])
+def list_edges(limit: int = 2000, _=Depends(auth)):
+    return svc.list_edges(limit=limit)
+
+
 @router.get("/nodes", response_model=list[GraphNode])
 def list_nodes(node_type: str | None = None, label_contains: str | None = None, limit: int = 50, _=Depends(auth)):
     return svc.list_nodes(node_type=node_type, label_contains=label_contains, limit=limit)
