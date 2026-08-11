@@ -54,6 +54,9 @@ class Settings(BaseModel):
     # деньги стережёт дневной бюджет, а не куцый лимит на сообщение
     max_reply_tokens: int = int(os.getenv("NEXUS_MAX_REPLY_TOKENS", "2000"))
 
+    # Единая папка артефактов — всё, что система сгенерировала для человека
+    artifacts_path: str = os.getenv("HERMES_ARTIFACTS_PATH", "./artifacts")
+
     # База знаний Obsidian: путь к папке хранилища
     obsidian_vault_path: str = os.getenv("OBSIDIAN_VAULT_PATH", "")
 

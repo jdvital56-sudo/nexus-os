@@ -48,6 +48,10 @@ def temp_data_dir(tmp_path, monkeypatch):
     # прогон с 17 секунд до четырёх минут — в тестах она не нужна
     monkeypatch.setattr(mem_svc, "INDEXING_ENABLED", False)
 
+    import backend.services.artifacts as art_svc
+    monkeypatch.setattr(art_svc, "REGISTRY_FILE", tmp_path / "artifacts.json")
+    monkeypatch.setattr(cfg.settings, "artifacts_path", str(tmp_path / "artifacts"))
+
     import backend.services.wallet as wallet_svc
     monkeypatch.setattr(wallet_svc, "SERVICES_FILE", tmp_path / "services.json")
 

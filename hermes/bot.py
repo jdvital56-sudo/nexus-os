@@ -251,7 +251,11 @@ class HermesAgent:
             return
         
         voice_file = await update.message.voice.get_file()
-        voice_path = f"{self.artifacts_path}/voice_{update.message.message_id}.ogg"
+        # Скачанное голосовое — мусор процесса, а не артефакт: кладём в
+        # служебную подпапку, чтобы не засорять то, что человек будет читать
+        from backend.services import artifacts
+
+        voice_path = str(artifacts.temp_dir() / f"voice_{update.message.message_id}.ogg")
         await voice_file.download_to_drive(voice_path)
         
         logger.info(f"Received voice message, saved to {voice_path}")

@@ -68,7 +68,10 @@ def test_equal_bounds_mean_no_quiet_hours(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_quiet_hours_stop_the_run(monkeypatch):
-    enable(monkeypatch, quiet_hours_start=0, quiet_hours_end=23)
+    # Само вычисление тихих часов проверяется отдельно; здесь важно, что
+    # их наступление останавливает прогон — независимо от времени запуска
+    enable(monkeypatch)
+    monkeypatch.setattr(autopilot, "in_quiet_hours", lambda *a, **kw: True)
 
     result = await autopilot.tick()
 

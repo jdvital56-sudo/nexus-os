@@ -349,17 +349,21 @@ class DreamCadence:
             self.save_brief_to_file(brief)
 
     def save_brief_to_file(self, brief: str):
-        """Save brief to file as fallback"""
-        artifacts_path = os.getenv("HERMES_ARTIFACTS_PATH", "./artifacts")
-        os.makedirs(artifacts_path, exist_ok=True)
+        """Сохранить бриф в единую папку артефактов (PR-14)."""
+        from backend.services import artifacts
 
-        filename = f"{artifacts_path}/brief_{datetime.now().strftime('%Y-%m-%d')}.md"
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write("# Утренний бриф\n")
-            f.write(f"**Дата:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n")
-            f.write(brief)
-
-        logger.info(f"Бриф сохранён в {filename}")
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        try:
+            item = artifacts.save(
+                title=f"Утренний бриф {datetime.now().strftime('%Y-%m-%d')}",
+                content=f"# Утренний бриф\n\n**Дата:** {stamp}\n\n{brief}",
+                description="Сводка ночного прогона Dream Cadence: находки и что с ними делать",
+                kind="brief",
+                source="dream",
+            )
+            logger.info("Бриф сохранён: %s", item["filename"])
+        except Exception:
+            logger.exception("Не удалось сохранить бриф в артефакты")
 
     async def nightly_job(self):
         """Ночная работа: анализ, бриф, отправка."""
