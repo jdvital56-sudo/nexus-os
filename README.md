@@ -109,7 +109,7 @@ nexsys skill run publish-post --params '{"topic": "AI", "platform": "twitter"}'
 - **Framework**: FastAPI + Pydantic
 - **Graph**: NetworkX
 - **Vector Store**: ChromaDB (with NumPy fallback)
-- **Database**: SQLite (optional, via SQLAlchemy + Alembic)
+- **Storage**: JSON-хранилище (`data/`)
 - **Auth**: JWT with python-jose
 
 ### Frontend Stack
