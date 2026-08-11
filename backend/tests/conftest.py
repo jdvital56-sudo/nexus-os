@@ -59,6 +59,12 @@ def temp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(dream_svc, "FINDINGS_FILE", tmp_path / "dream_findings.json")
     monkeypatch.setattr(dream_svc, "BRIEF_FILE", tmp_path / "dream_brief.json")
 
+    import backend.services.sources as sources_svc
+    monkeypatch.setattr(sources_svc, "SOURCES_FILE", tmp_path / "sources.json")
+
+    import backend.services.dialog_history as history_svc
+    monkeypatch.setattr(history_svc, "HISTORY_FILE", tmp_path / "dialog_history.json")
+
     # Боевые ключи лежат в переменных окружения машины. Без этой заглушки
     # тесты ходили бы в реальные API за реальные деньги.
     for field in ("openai_api_key", "anthropic_api_key", "deepseek_api_key",
@@ -86,7 +92,8 @@ def temp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "ensure_data_dir", patched_ensure)
 
     # Patch each service's ensure_data_dir reference
-    for svc_mod in [doc_svc, task_svc, graph_svc, agent_svc, auth_mod, skills_svc, mem_svc, vec_svc]:
+    for svc_mod in [doc_svc, task_svc, graph_svc, agent_svc, auth_mod, skills_svc,
+                    mem_svc, vec_svc, history_svc, sources_svc]:
         if hasattr(svc_mod, 'ensure_data_dir'):
             monkeypatch.setattr(svc_mod, "ensure_data_dir", patched_ensure)
 

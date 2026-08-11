@@ -595,3 +595,107 @@ async def test_broken_recall_does_not_break_dialog(monkeypatch):
     await svc.drain()
 
     assert reply == "ответ несмотря ни на что"
+
+
+# --- Нить разговора: короткая память диалога (PR-16) ---
+
+
+@pytest.mark.asyncio
+async def test_previous_turn_reaches_the_model():
+    """Ключевое: второе сообщение видит первое — диалог перестал быть одиночным."""
+    llm = ContextCapturingLLM("хорошо")
+    svc = make_service(llm)
+
+    await svc.handle("telegram", "42", "меня зовут Вадим")
+    await svc.drain()
+    await svc.handle("telegram", "42", "как меня зовут?")
+    await svc.drain()
+
+    context = llm.calls[1][1]
+    assert "меня зовут Вадим" in context
+    assert "хорошо" in context
+
+
+@pytest.mark.asyncio
+async def test_first_message_has_no_thread():
+    llm = ContextCapturingLLM("ответ")
+    svc = make_service(llm)
+
+    await svc.handle("telegram", "42", "первое сообщение")
+    await svc.drain()
+
+    assert "Недавняя переписка" not in llm.calls[0][1]
+
+
+@pytest.mark.asyncio
+async def test_thread_does_not_leak_between_channels():
+    llm = ContextCapturingLLM("ответ")
+    svc = make_service(llm)
+
+    await svc.handle("telegram", "42", "сказано в телеграме")
+    await svc.drain()
+    await svc.handle("web", "42", "вопрос с сайта")
+    await svc.drain()
+
+    assert "сказано в телеграме" not in llm.calls[1][1]
+
+
+@pytest.mark.asyncio
+async def test_history_can_be_switched_off():
+    llm = ContextCapturingLLM("ответ")
+    svc = ConversationService(
+        llm=llm, semantic_dedup=False, extract_entities=False, use_history=False
+    )
+
+    await svc.handle("telegram", "42", "первое")
+    await svc.drain()
+    await svc.handle("telegram", "42", "второе")
+    await svc.drain()
+
+    assert "первое" not in llm.calls[1][1]
+
+
+@pytest.mark.asyncio
+async def test_thread_is_written_before_reply_returns():
+    """История обязана лечь до возврата ответа: следующее сообщение может
+    прийти сразу, и фоновая запись за ним не успеет."""
+    from backend.services import dialog_history
+
+    svc = make_service(FakeLLM("ответ"))
+
+    await svc.handle("telegram", "42", "вопрос")
+
+    assert len(dialog_history.recent("telegram", "42")) == 2
+    await svc.drain()
+
+
+@pytest.mark.asyncio
+async def test_broken_history_does_not_break_dialog(monkeypatch):
+    from backend.services import dialog_history
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("файл истории недоступен")
+
+    monkeypatch.setattr(dialog_history, "append_turn", boom)
+    monkeypatch.setattr(dialog_history, "render", boom)
+    svc = make_service(FakeLLM("ответ несмотря ни на что"))
+
+    reply = await svc.handle("telegram", "42", "вопрос")
+    await svc.drain()
+
+    assert reply == "ответ несмотря ни на что"
+
+
+@pytest.mark.asyncio
+async def test_skill_run_stays_in_the_thread(default_skills):
+    """Запуск скилла — тоже часть разговора: «а что я сейчас запускал» не слепнет."""
+    from backend.services import dialog_history
+
+    svc = make_service()
+
+    await svc.handle("telegram", "42", "/skill collect-metrics date=2026-08-11")
+    await svc.drain()
+
+    thread = dialog_history.render("telegram", "42")
+    assert "collect-metrics" in thread
+    assert "Skill" in thread

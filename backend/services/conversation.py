@@ -13,6 +13,7 @@ from typing import Any
 from ..agents.persona_manager import PersonaManager
 from ..core import eventbus
 from . import budget
+from . import dialog_history
 from . import entity_extraction
 from . import memory as memory_svc
 from . import obsidian
@@ -74,12 +75,14 @@ class ConversationService:
         semantic_dedup: bool = True,
         extract_entities: bool = True,
         use_memory: bool = True,
+        use_history: bool = True,
     ):
         self.llm = llm or LLMService()
         self.persona_manager = persona_manager or PersonaManager()
         self.semantic_dedup = semantic_dedup
         self.extract_entities = extract_entities
         self.use_memory = use_memory
+        self.use_history = use_history
         self._tasks: set[asyncio.Task] = set()
         # Клиенты под персоны создаются лениво и переиспользуются
         self._llm_cache: dict[tuple[str, str, str], LLMService] = {}
@@ -103,12 +106,14 @@ class ConversationService:
         if note_reply is not None:
             self._emit_message(channel, "user", "Obsidian", text)
             self._emit_message(channel, "assistant", "Obsidian", note_reply)
+            await self._log_turn(channel, user_id, text, note_reply, "Obsidian")
             return note_reply
 
         skill_reply = await self._try_skill(text)
         if skill_reply is not None:
             self._emit_message(channel, "user", "Skill", text)
             self._emit_message(channel, "assistant", "Skill", skill_reply)
+            await self._log_turn(channel, user_id, text, skill_reply, "Skill")
             self._spawn(self._remember(channel, user_id, text, skill_reply, "Skill"))
             return skill_reply
 
@@ -116,17 +121,37 @@ class ConversationService:
         self._emit_message(channel, "user", selected["name"], text)
 
         llm = self._llm_for(selected, channel=channel)
-        context = await asyncio.to_thread(self._build_context, text, selected["name"])
+        context = await asyncio.to_thread(
+            self._build_context, text, selected["name"], channel, user_id
+        )
         reply = await llm.generate_response(
             text, context=context, kind=budget.INTERACTIVE
         )
 
         self._emit_message(channel, "assistant", selected["name"], reply)
+        # Нить разговора пишется до возврата ответа: следующее сообщение может
+        # прийти сразу, и фоновая запись не успела бы за ним
+        await self._log_turn(channel, user_id, text, reply, selected["name"])
         self._spawn(self._remember(channel, user_id, text, reply, selected["name"]))
         self._spawn(self._extract(channel, user_id, text, reply, llm))
         return reply
 
-    def _build_context(self, text: str, persona_name: str) -> str:
+    async def _log_turn(
+        self, channel: str, user_id: str, text: str, reply: str, persona: str
+    ) -> None:
+        """Кладёт пару реплик в короткую память. Сбой не должен ломать диалог."""
+        if not self.use_history:
+            return
+        try:
+            await asyncio.to_thread(
+                dialog_history.append_turn, channel, user_id, text, reply, persona
+            )
+        except Exception:
+            logger.exception("Не удалось записать историю диалога %s:%s", channel, user_id)
+
+    def _build_context(
+        self, text: str, persona_name: str, channel: str = "", user_id: str = ""
+    ) -> str:
         """Подмешивает в запрос то, что система уже знает.
 
         Без этого Hermes писал бы в память, но никогда из неё не читал —
@@ -134,28 +159,42 @@ class ConversationService:
         """
         parts = [f"Persona: {persona_name}"]
 
-        if not self.use_memory:
-            return parts[0]
+        if self.use_memory:
+            try:
+                facts = memory_svc.recall(text, limit=_RECALL_LIMIT)
+            except Exception:
+                logger.debug("Recall недоступен", exc_info=True)
+                facts = []
 
-        try:
-            facts = memory_svc.recall(text, limit=_RECALL_LIMIT)
-        except Exception:
-            logger.debug("Recall недоступен", exc_info=True)
-            return parts[0]
+            if facts:
+                known = "\n".join(f"- {f.content[:300]}" for f in facts)
+                parts.append(
+                    "Что тебе уже известно из памяти (используй, если уместно; "
+                    "не ссылайся на «память» вслух):\n" + known
+                )
 
-        if facts:
-            known = "\n".join(f"- {f.content[:300]}" for f in facts)
-            parts.append(
-                "Что тебе уже известно из памяти (используй, если уместно; "
-                "не ссылайся на «память» вслух):\n" + known
-            )
+            # База знаний Obsidian — то, что фаундер написал сам
+            vault = obsidian.context_for(text)
+            if vault:
+                parts.append(vault)
 
-        # База знаний Obsidian — то, что фаундер написал сам
-        vault = obsidian.context_for(text)
-        if vault:
-            parts.append(vault)
+        # Нить разговора идёт последней: она ближе всего к самому вопросу,
+        # а «переделай короче» относится именно к ней, не к фактам из памяти
+        thread = self._history_block(channel, user_id)
+        if thread:
+            parts.append(thread)
 
         return "\n\n".join(parts)
+
+    def _history_block(self, channel: str, user_id: str) -> str:
+        """Последние реплики этого канала. Недоступность истории не критична."""
+        if not self.use_history or not channel:
+            return ""
+        try:
+            return dialog_history.render(channel, user_id)
+        except Exception:
+            logger.debug("История диалога недоступна", exc_info=True)
+            return ""
 
     @staticmethod
     def _emit_message(channel: str, role: str, persona: str, text: str) -> None:

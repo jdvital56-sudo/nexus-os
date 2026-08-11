@@ -88,6 +88,7 @@ class HermesAgent:
             "/persons - Список персон\n"
             "/brief - Утренний бриф\n"
             "/services - Мои платные сервисы\n"
+            "/reset - Начать разговор заново\n"
             "/help - Помощь\n\n"
             "Просто отправь мне сообщение или голосовую заметку!"
         )
@@ -105,6 +106,7 @@ class HermesAgent:
 - /status - Проверка статуса системы
 - /persons - Показать доступные AI-персоны
 - /brief - Получить утренний бриф (Dream Cadence)
+- /reset - Забыть нить разговора (память фактов останется)
 - /help - Эта справка
 
 Примеры запросов:
@@ -180,6 +182,26 @@ class HermesAgent:
             f"🌅 Утренний бриф (прогон {cached['run_id']}):\n\n{cached['brief']}{tail}"
         )
     
+    async def reset_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /reset — начать разговор с чистого листа.
+
+        Стирается только нить последних реплик. Память фактов и база знаний
+        остаются: «сменить тему» и «забудь, что я говорил» — разные просьбы.
+        """
+        if not self._authorize_user(update.effective_user.id):
+            return
+
+        from backend.services import dialog_history
+
+        removed = dialog_history.clear("telegram", str(update.effective_user.id))
+        if removed:
+            await update.message.reply_text(
+                f"🧹 Нить разговора очищена ({removed} реплик).\n"
+                "Память фактов и заметки не тронуты."
+            )
+        else:
+            await update.message.reply_text("🧹 Нить разговора и так пуста.")
+
     async def services_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /services — за что платим и когда спишут."""
         if not self._authorize_user(update.effective_user.id):
@@ -320,6 +342,7 @@ class HermesAgent:
         self.application.add_handler(CommandHandler("persons", self.persons_command))
         self.application.add_handler(CommandHandler("brief", self.brief_command))
         self.application.add_handler(CommandHandler("services", self.services_command))
+        self.application.add_handler(CommandHandler("reset", self.reset_command))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         self.application.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
         
