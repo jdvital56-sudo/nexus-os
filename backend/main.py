@@ -13,7 +13,7 @@ from .core.config import (
 )
 from .core.errors import NexsysError, nexsys_error_handler, generic_error_handler
 from .core.auth import init_auth
-from .api import documents, tasks, graph, agents, webhooks, skills, calendar, obsidian, pipeline, memory, events, vector_search, fireflies, telephony, personas, dream, wallet, artifacts
+from .api import documents, tasks, graph, agents, webhooks, skills, calendar, obsidian, pipeline, memory, events, vector_search, fireflies, telephony, personas, dream, wallet, artifacts, gmail
 
 # Configure logging
 log_config = {
@@ -68,6 +68,7 @@ app.include_router(personas.router)
 app.include_router(dream.router)
 app.include_router(wallet.router)
 app.include_router(artifacts.router)
+app.include_router(gmail.router)
 
 
 @app.get("/api/health")
