@@ -67,6 +67,23 @@ export interface GraphLink {
   weight: number;
 }
 
+// Форма ответа бэкенда (backend/models/schemas.py), в отличие от GraphNode выше,
+// который описывает демо-данные экрана Graph
+export interface ApiGraphNode {
+  id: string;
+  label: string;
+  node_type: string;
+  metadata: Record<string, any>;
+  created_at: string;
+}
+
+export interface GraphStats {
+  nodes: number;
+  edges: number;
+  node_types: Record<string, number>;
+  connected_components: number;
+}
+
 export interface GraphData {
   nodes: GraphNode[];
   links: GraphLink[];

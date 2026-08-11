@@ -5,10 +5,12 @@ import {
   Sparkles, 
   Bot, 
   FileText, 
-  Settings, 
+  Settings,
   Activity,
   Network,
-  Calendar
+  Calendar,
+  CheckSquare,
+  Workflow
 } from 'lucide-react';
 
 const menuItems = [
@@ -18,6 +20,9 @@ const menuItems = [
   { path: '/agents', label: 'Agents', icon: Bot },
   { path: '/dream-review', label: 'Dream Review', icon: Calendar },
   { path: '/graph', label: 'Knowledge Graph', icon: Network },
+  { path: '/documents', label: 'Documents', icon: FileText },
+  { path: '/tasks', label: 'Tasks', icon: CheckSquare },
+  { path: '/pipeline', label: 'Pipeline', icon: Workflow },
   { path: '/activity', label: 'Activity', icon: Activity },
   { path: '/settings', label: 'Settings', icon: Settings },
 ];

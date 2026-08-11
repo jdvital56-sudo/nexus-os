@@ -1,11 +1,9 @@
 import { useState } from 'react';
 import { DollarSign, Clock, TrendingUp, AlertCircle } from 'lucide-react';
-import { analyticsApi, systemApi } from '../lib/api';
-import { useApi } from '../hooks/useApi';
 import type { AnalyticsData, SystemStatus } from '../types';
 import { JarvisHudWidget } from '../components/JarvisHudWidget';
 
-// Mock data for demo (will be replaced with real API calls)
+// Демо-данные: эндпоинтов /analytics и /system на бэкенде пока нет
 const mockAnalytics: AnalyticsData = {
   totalSpent: 247.83,
   timeSaved: 127,
@@ -30,10 +28,6 @@ const mockSystemStatus: SystemStatus = {
 export default function HomeScreen() {
   const [period, setPeriod] = useState('7d');
   const [jarvisState, setJarvisState] = useState<'ONLINE' | 'LISTENING' | 'SPEAKING' | 'PROCESSING'>('ONLINE');
-  
-  // In production, uncomment these:
-  // const { data: analytics } = useApi<AnalyticsData>(() => analyticsApi.getOverview(), [period]);
-  // const { data: systemStatus } = useApi<SystemStatus>(() => systemApi.getStatus(), []);
   
   const analytics = mockAnalytics;
   const systemStatus = mockSystemStatus;

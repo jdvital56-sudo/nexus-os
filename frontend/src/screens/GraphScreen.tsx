@@ -1,10 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
-import { useApi } from '../hooks/useApi';
-import { memoryApi } from '../lib/api';
 import type { GraphData, GraphNode } from '../types';
 
-// Mock data for demo
+// Демо-данные: живой граф подключается в PR-20
 const mockGraphData: GraphData = {
   nodes: [
     { id: '1', label: 'Memory Core', type: 'memory', size: 20, color: '#00DC82' },
@@ -31,10 +29,6 @@ const mockGraphData: GraphData = {
 export default function GraphScreen() {
   const [graphData, setGraphData] = useState<GraphData>(mockGraphData);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-
-  // In production, uncomment:
-  // const { data, loading, error } = useApi<GraphData>(() => memoryApi.getGraph(), []);
-  // if (data) setGraphData(data);
 
   const getNodeColor = (type: string) => {
     const colors: Record<string, string> = {
