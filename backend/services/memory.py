@@ -20,6 +20,7 @@ from enum import Enum
 from typing import Any
 from pydantic import BaseModel, Field
 from ..core.config import DATA_DIR, ensure_data_dir
+from ..core.errors import NotFoundError
 from ..core.jsonio import read_json, write_json
 from ..core import eventbus
 
@@ -173,7 +174,7 @@ def get_fact(fact_id: str) -> MemoryFact:
     for f in facts:
         if f["id"] == fact_id:
             return MemoryFact(**f)
-    raise FileNotFoundError(f"Memory fact '{fact_id}' not found")
+    raise NotFoundError("Memory fact", fact_id)
 
 
 def update_fact(fact_id: str, **kwargs) -> MemoryFact:
@@ -188,7 +189,7 @@ def update_fact(fact_id: str, **kwargs) -> MemoryFact:
             facts[i] = f
             _save(facts)
             return MemoryFact(**f)
-    raise FileNotFoundError(f"Memory fact '{fact_id}' not found")
+    raise NotFoundError("Memory fact", fact_id)
 
 
 def supersede(old_id: str, new_content: str, source: str = "", confidence: float = 0.5) -> MemoryFact:
@@ -246,7 +247,7 @@ def recall(query: str, limit: int = 5) -> list[MemoryFact]:
                     fact_id = r["id"].replace("memory:", "")
                     try:
                         facts.append(get_fact(fact_id))
-                    except FileNotFoundError:
+                    except NotFoundError:
                         pass
             if facts:
                 return facts

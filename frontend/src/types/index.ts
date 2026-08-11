@@ -50,6 +50,28 @@ export interface WalletSummary {
   low_balance: Array<{ id: string; name: string; balance: number }>;
 }
 
+// Ночной прогон Dream Cadence: находки и утренний бриф
+export interface DreamFinding {
+  finding_id: string;
+  run_id: string;
+  dimension: string;
+  severity: 'low' | 'medium' | 'high';
+  title: string;
+  detail: string;
+  action: Record<string, any> | null;
+  status: 'new' | 'applied' | 'skipped';
+  created_at: string;
+  resolved_at: string | null;
+}
+
+export interface DreamBrief {
+  run_id: string;
+  brief: string;
+  cost_usd: number;
+  findings_count: number;
+  created_at: string;
+}
+
 export interface DreamReview {
   date: string;
   summary: string;

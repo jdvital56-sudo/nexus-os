@@ -41,8 +41,25 @@ async def nexsys_error_handler(request: Request, exc: NexsysError) -> JSONRespon
     )
 
 
+def _cors_headers(request: Request) -> dict[str, str]:
+    """Заголовки CORS для ответа об ошибке.
+
+    Обработчик Exception живёт в самом внешнем слое Starlette — выше
+    CORSMiddleware, поэтому его ответы уходили без этих заголовков.
+    Браузер такой ответ не показывал вовсе, и фронтенд видел «нет связи»
+    вместо настоящей причины сбоя.
+    """
+    from .config import CORS_ORIGINS
+
+    origin = request.headers.get("origin")
+    if origin and origin in CORS_ORIGINS:
+        return {"Access-Control-Allow-Origin": origin, "Vary": "Origin"}
+    return {}
+
+
 async def generic_error_handler(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(
         status_code=500,
         content={"error": str(exc), "detail": None, "code": "INTERNAL"},
+        headers=_cors_headers(request),
     )

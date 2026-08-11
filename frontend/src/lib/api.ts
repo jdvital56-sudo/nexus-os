@@ -1,5 +1,13 @@
 import axios from 'axios';
-import type { ApiGraphNode, GraphMap, GraphStats, SystemStatusResponse, WalletSummary } from '../types';
+import type {
+  ApiGraphNode,
+  DreamBrief,
+  DreamFinding,
+  GraphMap,
+  GraphStats,
+  SystemStatusResponse,
+  WalletSummary,
+} from '../types';
 
 // Бэкенд монтирует роутеры с префиксом /api и слушает 8420 (см. Makefile)
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8420/api';
@@ -23,6 +31,13 @@ const data = <T>(p: Promise<{ data: T }>): Promise<T> => p.then(r => r.data);
 export const getSystemStatus = () =>
   data<SystemStatusResponse>(api.get('/system/status'));
 export const getWalletSummary = () => data<WalletSummary>(api.get('/wallet/summary'));
+
+// --- Ночной прогон ---
+export const getDreamFindings = (status?: string) =>
+  data<DreamFinding[]>(api.get('/dream/findings', { params: status ? { status } : {} }));
+export const getDreamBrief = () => data<DreamBrief | null>(api.get('/dream/brief'));
+export const applyFinding = (id: string) => data<DreamFinding>(api.post(`/dream/findings/${id}/apply`));
+export const skipFinding = (id: string) => data<DreamFinding>(api.post(`/dream/findings/${id}/skip`));
 
 // --- Граф ---
 export const getGraphNodes = (limit = 200) =>
