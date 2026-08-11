@@ -156,7 +156,10 @@ def _days_until(value: str | None) -> int | None:
         target = date.fromisoformat(value[:10])
     except ValueError:
         return None
-    return (target - datetime.now(timezone.utc).date()).days
+    # Дата списания вписана по календарю фаундера, поэтому и «сегодня» здесь
+    # местное. По UTC ночью получались сутки разницы: подписка, которая
+    # спишется завтра, объявлялась как «через 2 дня».
+    return (target - date.today()).days
 
 
 def due_soon(warn_days: int = DEFAULT_WARN_DAYS) -> list[dict]:
