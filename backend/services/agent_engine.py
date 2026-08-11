@@ -329,6 +329,100 @@ def verify_researcher(ctx: AgentContext, act_results: list[dict]) -> dict:
     return {"research_tasks": tasks_created}
 
 
+# === Curator ===
+
+def orient_curator(ctx: AgentContext) -> dict:
+    """Куратор: сколько всего в памяти и сколько уже в архиве."""
+    from . import curator as curator_svc
+
+    stats = curator_svc.get_stats()
+    mem = stats["memory"]
+    ctx.log_msg(
+        f"Orient: {mem.get('active', 0)} активных фактов, "
+        f"{stats['archived']} в архиве"
+    )
+    return stats
+
+
+def observe_curator(ctx: AgentContext, orient_data: dict) -> list:
+    """Куратор: что именно требует уборки."""
+    from . import curator as curator_svc
+
+    report = curator_svc.run_cycle(apply=False)
+    findings = []
+    if report["duplicates"]["facts"]:
+        findings.append({"kind": "duplicates", "count": report["duplicates"]["facts"]})
+    if report["decay"]["facts"]:
+        findings.append({"kind": "decay", "count": report["decay"]["facts"]})
+    if report["junk"]["facts"]:
+        findings.append({"kind": "junk", "count": report["junk"]["facts"]})
+
+    ctx.log_msg(f"Observe: найдено {len(findings)} видов беспорядка")
+    return findings
+
+
+def think_curator(ctx: AgentContext, findings: list) -> list[dict]:
+    """Куратор: решает, что делать — и ничего не удаляет.
+
+    Дубли и старение применяются сами: они обратимы. Архивация мусора
+    уходит человеку задачей, потому что вынимает записи из памяти.
+    """
+    actions = []
+    for finding in findings:
+        if finding["kind"] in ("duplicates", "decay"):
+            actions.append({"action": f"apply_{finding['kind']}", "count": finding["count"]})
+        elif finding["kind"] == "junk":
+            actions.append({"action": "propose_archive", "count": finding["count"]})
+
+    ctx.log_msg(f"Think: {len(actions)} действий запланировано")
+    return actions
+
+
+def act_curator(ctx: AgentContext, actions: list[dict]) -> list[dict]:
+    """Куратор: применяет обратимое, спорное отдаёт человеку."""
+    from . import curator as curator_svc
+
+    results = []
+    for action in actions:
+        kind = action["action"]
+        try:
+            if kind == "apply_duplicates":
+                merged = curator_svc.merge_duplicates()
+                results.append({"action": kind, "status": "ok", "merged": merged})
+                ctx.log_msg(f"Act: склеено дублей — {merged}")
+
+            elif kind == "apply_decay":
+                changed = curator_svc.apply_decay()
+                results.append({"action": kind, "status": "ok", "changed": changed})
+                ctx.log_msg(f"Act: понижена достоверность у {changed} фактов")
+
+            elif kind == "propose_archive":
+                task = task_svc.create_task(task_svc.TaskCreate(
+                    title=f"Архивировать мусор в памяти: {action['count']} записей",
+                    description=(
+                        "Куратор нашёл пустые и обрывочные записи. Архивация вынимает "
+                        "их из памяти, поэтому нужно твоё подтверждение. Вернуть можно "
+                        "в любой момент через /api/curator/restore."
+                    ),
+                    assigned_agent="curator",
+                    tags=["память", "уборка"],
+                ))
+                results.append({"action": kind, "status": "task_created", "task_id": task.id})
+                ctx.log_msg(f"Act: архивация {action['count']} записей вынесена на подтверждение")
+        except Exception as e:
+            results.append({"action": kind, "status": "error", "error": str(e)})
+    return results
+
+
+def verify_curator(ctx: AgentContext, act_results: list[dict]) -> dict:
+    """Куратор: итог прохода."""
+    merged = sum(r.get("merged", 0) for r in act_results)
+    decayed = sum(r.get("changed", 0) for r in act_results)
+    proposed = sum(1 for r in act_results if r.get("status") == "task_created")
+    ctx.log_msg(f"Verify: склеено {merged}, состарено {decayed}, на подтверждении {proposed}")
+    return {"merged": merged, "decayed": decayed, "proposed": proposed, "deleted": 0}
+
+
 # === Monitor ===
 
 def orient_monitor(ctx: AgentContext) -> dict:
@@ -420,6 +514,7 @@ JARVIS_AGENTS = {
     "builder": "делает: пишет, собирает, реализует",
     "researcher": "изучает вопрос, собирает данные и источники",
     "monitor": "следит за здоровьем системы и застрявшими задачами",
+    "curator": "наводит порядок в памяти: дубли, устаревшее, мусор — не удаляя",
 }
 
 _JARVIS_PROMPT = """Ты Jarvis, оркестратор Nexus OS. Твоя работа — решить,
@@ -612,6 +707,13 @@ ROLE_CYCLES = {
         "think": think_monitor,
         "act": act_monitor,
         "verify": verify_monitor,
+    },
+    AgentRole.CURATOR: {
+        "orient": orient_curator,
+        "observe": observe_curator,
+        "think": think_curator,
+        "act": act_curator,
+        "verify": verify_curator,
     },
     AgentRole.JARVIS: {
         "orient": orient_jarvis,

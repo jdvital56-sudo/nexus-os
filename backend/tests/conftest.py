@@ -62,6 +62,9 @@ def temp_data_dir(tmp_path, monkeypatch):
     import backend.services.sources as sources_svc
     monkeypatch.setattr(sources_svc, "SOURCES_FILE", tmp_path / "sources.json")
 
+    import backend.services.curator as curator_svc
+    monkeypatch.setattr(curator_svc, "ARCHIVE_FILE", tmp_path / "memory_archive.json")
+
     import backend.services.dialog_history as history_svc
     monkeypatch.setattr(history_svc, "HISTORY_FILE", tmp_path / "dialog_history.json")
 
@@ -93,7 +96,7 @@ def temp_data_dir(tmp_path, monkeypatch):
 
     # Patch each service's ensure_data_dir reference
     for svc_mod in [doc_svc, task_svc, graph_svc, agent_svc, auth_mod, skills_svc,
-                    mem_svc, vec_svc, history_svc, sources_svc]:
+                    mem_svc, vec_svc, history_svc, sources_svc, curator_svc]:
         if hasattr(svc_mod, 'ensure_data_dir'):
             monkeypatch.setattr(svc_mod, "ensure_data_dir", patched_ensure)
 

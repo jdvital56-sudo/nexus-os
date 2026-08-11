@@ -152,6 +152,7 @@ class AgentRole(str, Enum):
     REVIEWER = "reviewer"
     RESEARCHER = "researcher"
     MONITOR = "monitor"
+    CURATOR = "curator"
     JARVIS = "jarvis"
 
 
