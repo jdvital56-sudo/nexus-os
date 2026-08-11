@@ -48,7 +48,9 @@ export const JarvisHudWidget: React.FC<JarvisHudWidgetProps> = ({
 }) => {
   const accent = STATE_COLOR[state];
   const lively = state !== 'ONLINE';
-  const orbit = state === 'SPEAKING' ? 1.8 : state === 'PROCESSING' ? 2.6 : lively ? 3.4 : 6;
+  // Секунд на оборот. Быстрая дуга читается как тревога — здесь она идёт
+  // спокойно и ускоряется только когда Джарвис действительно занят
+  const orbit = state === 'SPEAKING' ? 3.4 : state === 'PROCESSING' ? 5 : lively ? 7 : 12;
   const arc = CIRC * (state === 'SPEAKING' ? 0.26 : 0.18);
   const [caption, subtitle] = CAPTION[state];
 

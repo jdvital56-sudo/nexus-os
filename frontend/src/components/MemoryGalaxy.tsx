@@ -53,6 +53,13 @@ const FOCAL = 900;
 // Радиус подсветки от курсора в экранных пикселях
 const POINTER_RADIUS = 150;
 
+// Пределы приближения: дальше нечего разглядывать, ближе — теряешь карту
+const ZOOM_MIN = 0.35;
+const ZOOM_MAX = 6;
+
+// Солнечный свет подсветки — тёплый, в отличие от холодной паутины
+const SOLAR = '255, 196, 92';
+
 /** Раскладка силами в трёх измерениях. Считается один раз, не каждый кадр. */
 function layout(nodes: GalaxyNode[], links: GalaxyLink[]): Placed[] {
   const index = new Map(nodes.map((n, i) => [n.id, i]));
@@ -139,6 +146,10 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pointer = useRef<{ x: number; y: number } | null>(null);
   const hoverId = useRef<string | null>(null);
+  // Камера: приближение и сдвиг. В ref — их меняет колесо и перетаскивание
+  // много раз в секунду, состояние React тут только мешало бы
+  const camera = useRef({ zoom: 1, panX: 0, panY: 0 });
+  const drag = useRef<{ x: number; y: number; panX: number; panY: number; moved: number } | null>(null);
   const [hoverLabel, setHoverLabel] = useState<{ node: GalaxyNode; x: number; y: number } | null>(null);
 
   const placed = useMemo(() => layout(nodes, links), [nodes, links]);
@@ -179,6 +190,24 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
 
+    // Колесо приближает к точке под курсором, а не к центру экрана —
+    // иначе то, что разглядываешь, уезжает из виду
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const cam = camera.current;
+      const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, cam.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2;
+      const ratio = next / cam.zoom;
+      cam.panX = mx - centerX - (mx - centerX - cam.panX) * ratio;
+      cam.panY = my - centerY - (my - centerY - cam.panY) * ratio;
+      cam.zoom = next;
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+
     const started = performance.now();
 
     const render = (now: number) => {
@@ -192,14 +221,15 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
 
       ctx.clearRect(0, 0, width, height);
 
-      // Поворот вокруг вертикальной оси и перспектива
+      // Поворот вокруг вертикальной оси, перспектива и камера
+      const { zoom, panX, panY } = camera.current;
       for (const p of placed) {
         const rx = p.x * cos - p.z * sin;
         const rz = p.x * sin + p.z * cos;
         const k = FOCAL / (FOCAL + rz);
-        p.sx = cx + rx * k;
-        p.sy = cy + p.y * k;
-        p.sr = (1.6 + Math.min(p.degree, 20) * 0.34) * k;
+        p.sx = cx + rx * k * zoom + panX;
+        p.sy = cy + p.y * k * zoom + panY;
+        p.sr = (1.6 + Math.min(p.degree, 20) * 0.34) * k * zoom;
         // 1 — у самого зрителя, 0 — на дальнем краю
         p.depth = Math.max(0, Math.min(1, (FOCAL * 0.5 - rz) / (FOCAL * 0.9)));
       }
@@ -224,33 +254,44 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
 
       // Нити
       ctx.lineCap = 'round';
-      for (const l of links) {
+      links.forEach((l, li) => {
         const a = byId.get(l.source);
         const b = byId.get(l.target);
-        if (!a || !b) continue;
+        if (!a || !b) return;
         const lit = focusSet ? focusSet.has(a.id) && focusSet.has(b.id) : false;
-        const heat = focusSet ? (lit ? 0.8 : 0.03) : 0.05 + 0.45 * Math.pow((a.depth + b.depth) / 2, 5);
-        ctx.strokeStyle = `rgba(190, 228, 224, ${heat.toFixed(3)})`;
-        ctx.lineWidth = Math.max(0.4, ((a.depth + b.depth) / 2) * 1.1);
+        const heat = focusSet ? (lit ? 0.85 : 0.03) : 0.06 + 0.45 * Math.pow((a.depth + b.depth) / 2, 5);
+
+        // Подсвеченная нить горит тёплым солнечным светом, спокойная —
+        // холодная паутина. Так видно, что именно ты сейчас трогаешь
+        ctx.strokeStyle = lit
+          ? `rgba(${SOLAR}, ${heat.toFixed(3)})`
+          : `rgba(190, 228, 224, ${heat.toFixed(3)})`;
+        ctx.lineWidth = Math.max(0.4, ((a.depth + b.depth) / 2) * 1.1 * Math.min(zoom, 2));
         ctx.beginPath();
         ctx.moveTo(a.sx, a.sy);
         ctx.lineTo(b.sx, b.sy);
         ctx.stroke();
 
-        // Светлые точки идут по нити не спеша
-        if (heat > 0.12) {
-          const speed = 0.03 + Math.min(l.weight, 4) * 0.012;
-          for (let i = 0; i < 2; i++) {
-            const prog = (t * speed + i * 0.5 + (a.sx % 7) / 7) % 1;
-            ctx.globalAlpha = Math.min(0.9, heat * 1.6);
-            ctx.fillStyle = '#ffffff';
-            ctx.beginPath();
-            ctx.arc(a.sx + (b.sx - a.sx) * prog, a.sy + (b.sy - a.sy) * prog, heat > 0.4 ? 1.4 : 0.8, 0, 7);
-            ctx.fill();
-            ctx.globalAlpha = 1;
-          }
+        // Точки идут по нити всегда — они и показывают, что связь живая.
+        // Раньше их гасил порог, и на спокойной карте не двигалось ничего.
+        const speed = 0.03 + Math.min(l.weight, 4) * 0.012;
+        const bright = focusSet ? (lit ? 1 : 0.06) : 0.3 + 0.7 * Math.pow((a.depth + b.depth) / 2, 3);
+        for (let i = 0; i < 2; i++) {
+          const prog = (t * speed + i * 0.5 + (li % 7) / 7) % 1;
+          ctx.globalAlpha = Math.min(0.95, 0.2 + bright * 0.75);
+          ctx.fillStyle = lit ? `rgb(${SOLAR})` : '#ffffff';
+          ctx.beginPath();
+          ctx.arc(
+            a.sx + (b.sx - a.sx) * prog,
+            a.sy + (b.sy - a.sy) * prog,
+            (bright > 0.5 ? 1.5 : 0.9) * Math.min(zoom, 2),
+            0,
+            7,
+          );
+          ctx.fill();
+          ctx.globalAlpha = 1;
         }
-      }
+      });
 
       // Узлы: дальние рисуются раньше, ближние ложатся поверх
       for (const p of order) {
@@ -302,6 +343,7 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      canvas.removeEventListener('wheel', onWheel);
     };
   }, [placed, links, neighbours, selectedId]);
 
@@ -322,25 +364,53 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
   return (
     <canvas
       ref={canvasRef}
-      className="h-full w-full cursor-crosshair"
+      className={`h-full w-full ${drag.current ? 'cursor-grabbing' : 'cursor-crosshair'}`}
+      onMouseDown={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        drag.current = {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+          panX: camera.current.panX,
+          panY: camera.current.panY,
+          moved: 0,
+        };
+      }}
       onMouseMove={(e) => {
         const rect = e.currentTarget.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
+
+        if (drag.current) {
+          const dx = x - drag.current.x;
+          const dy = y - drag.current.y;
+          drag.current.moved = Math.max(drag.current.moved, Math.hypot(dx, dy));
+          camera.current.panX = drag.current.panX + dx;
+          camera.current.panY = drag.current.panY + dy;
+          return;
+        }
+
         pointer.current = { x, y };
         const hit = pick(x, y);
         hoverId.current = hit?.id ?? null;
         setHoverLabel(hit ? { node: hit, x, y } : null);
       }}
+      onMouseUp={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const wasDrag = (drag.current?.moved ?? 0) > 4;
+        drag.current = null;
+        // Тащили карту — это не выбор узла
+        if (wasDrag) return;
+        const hit = pick(e.clientX - rect.left, e.clientY - rect.top);
+        onSelect?.(hit?.id ?? null);
+      }}
+      onDoubleClick={() => {
+        camera.current = { zoom: 1, panX: 0, panY: 0 };
+      }}
       onMouseLeave={() => {
         pointer.current = null;
         hoverId.current = null;
+        drag.current = null;
         setHoverLabel(null);
-      }}
-      onClick={(e) => {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const hit = pick(e.clientX - rect.left, e.clientY - rect.top);
-        onSelect?.(hit?.id ?? null);
       }}
       title={hoverLabel?.node.label}
     />
