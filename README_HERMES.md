@@ -71,7 +71,22 @@ pip install -r backend/requirements.txt
 DEEPSEEK_API_KEY=sk-...
 GEMINI_API_KEY=...
 ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
+OLLAMA_BASE_URL=http://localhost:11434
 ```
+
+Каждая персона ходит в свою модель: Architect и Philosopher — в Anthropic,
+Labyrinth — в OpenAI, Orpheus — в DeepSeek, Mercury — в локальную Ollama.
+Если ключа провайдера нет, персона откатывается на модель по умолчанию
+(`NEXSYS_LLM_PROVIDER`), диалог при этом не ломается.
+
+**Дневной потолок расходов** (обязателен до включения автопилота):
+```bash
+NEXUS_DAILY_LLM_BUDGET_USD=5
+```
+При превышении фоновые задачи (Dream Cadence, цикл Jarvis, извлечение
+сущностей) останавливаются до полуночи UTC, а Telegram/веб/голос продолжают
+работать с предупреждением. Потраченное за день лежит в `~/.nexsys/llm_spend.json`.
 
 ### Шаг 3: Apollo.io (B2B лиды)
 

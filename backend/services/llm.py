@@ -18,6 +18,7 @@ from ..core.config import (
     LLM_API_KEY,
     LLM_BASE_URL,
 )
+from . import budget
 
 logger = logging.getLogger(__name__)
 
@@ -38,29 +39,41 @@ class LLMResponse:
         self.content = content
         self.model = model
         self.usage = usage or {}
-    
+        # Ответ получен сверх дневного бюджета — канал должен предупредить (I-4)
+        self.over_budget = False
+
     def to_dict(self) -> dict:
         return {
             "content": self.content,
             "model": self.model,
             "usage": self.usage,
+            "over_budget": self.over_budget,
         }
+
+
+# Куда ходить, если базовый URL не задан явно
+DEFAULT_BASE_URLS = {
+    "openai": "https://api.openai.com/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+}
 
 
 class LLMService:
     """Unified LLM service with provider abstraction."""
-    
+
     def __init__(
         self,
         provider: str = None,
         model: str = None,
         api_key: str = None,
         base_url: str = None,
+        system_prompt: str = "",
     ):
         self.provider = provider or LLM_PROVIDER
         self.model = model or LLM_MODEL
         self.api_key = api_key or LLM_API_KEY
-        self.base_url = base_url or LLM_BASE_URL
+        self.base_url = base_url or DEFAULT_BASE_URLS.get(self.provider) or LLM_BASE_URL
+        self.system_prompt = system_prompt
         
         # Gemini specific config
         self.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
@@ -73,16 +86,29 @@ class LLMService:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         stream: bool = False,
+        kind: str = budget.INTERACTIVE,
     ) -> LLMResponse:
-        """Send chat completion request."""
+        """Send chat completion request.
+
+        `kind` решает судьбу вызова при исчерпанном дневном бюджете (I-4):
+        фоновый отклоняется, интерактивный проходит с пометкой.
+        """
+        within_budget = budget.check(kind)
+
         if self.provider == "ollama":
-            return await self._ollama_chat(messages, temperature, max_tokens)
+            response = await self._ollama_chat(messages, temperature, max_tokens)
         elif self.provider == "gemini":
-            return await self._gemini_chat(messages, temperature, max_tokens)
-        elif self.provider in ("openai", "anthropic"):
-            return await self._openai_compat_chat(messages, temperature, max_tokens)
+            response = await self._gemini_chat(messages, temperature, max_tokens)
+        elif self.provider in ("openai", "anthropic", "deepseek"):
+            response = await self._openai_compat_chat(messages, temperature, max_tokens)
         else:
             raise ValueError(f"Unsupported LLM provider: {self.provider}")
+
+        cost = budget.record(response.model, response.usage)
+        if cost:
+            response.usage["cost_usd"] = round(cost, 6)
+        response.over_budget = not within_budget
+        return response
     
     async def generate_plan(self, audio_path: str, prompt: str) -> str:
         """Generate plan from audio using Gemini 2.0 Flash."""
@@ -134,12 +160,20 @@ class LLMService:
                 logger.error(f"Gemini audio processing failed: {e}")
                 raise
     
-    async def generate_response(self, user_message: str, context: str = "") -> str:
+    async def generate_response(
+        self,
+        user_message: str,
+        context: str = "",
+        kind: str = budget.INTERACTIVE,
+    ) -> str:
         """Generate response for chat using configured LLM."""
         full_prompt = f"Context: {context}\n\nUser: {user_message}\n\nAssistant:"
-        messages = [LLMMessage(role="user", content=full_prompt)]
-        
-        response = await self.chat(messages, temperature=0.7, max_tokens=512)
+        messages = []
+        if self.system_prompt:
+            messages.append(LLMMessage(role="system", content=self.system_prompt))
+        messages.append(LLMMessage(role="user", content=full_prompt))
+
+        response = await self.chat(messages, temperature=0.7, max_tokens=512, kind=kind)
         return response.content
     
     async def _ollama_chat(

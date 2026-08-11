@@ -15,7 +15,9 @@ class FakeLLM:
         self.reply = reply
         self.calls: list[tuple[str, str]] = []
 
-    async def generate_response(self, user_message: str, context: str = "") -> str:
+    async def generate_response(
+        self, user_message: str, context: str = "", kind: str = "interactive"
+    ) -> str:
         self.calls.append((user_message, context))
         return self.reply
 
@@ -158,3 +160,94 @@ async def test_memory_failure_does_not_break_dialog(monkeypatch):
     await svc.drain()
 
     assert reply == "ответ несмотря ни на что"
+
+
+class RecordingLLM(FakeLLM):
+    """Помнит, с каким kind его звали."""
+
+    def __init__(self, reply: str = "ответ"):
+        super().__init__(reply)
+        self.kinds: list[str] = []
+
+    async def generate_response(
+        self, user_message: str, context: str = "", kind: str = "interactive"
+    ) -> str:
+        self.kinds.append(kind)
+        return await super().generate_response(user_message, context, kind)
+
+
+def with_provider_keys(monkeypatch):
+    """Как будто ключи Пантеона заполнены в .env."""
+    from backend.core.config import settings
+
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-test")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-openai-test")
+    monkeypatch.setattr(settings, "deepseek_api_key", "sk-deepseek-test")
+
+
+@pytest.mark.asyncio
+async def test_personas_resolve_to_different_models(monkeypatch):
+    """Ключевой DoD PR-5: разные персоны — разные model-id."""
+    with_provider_keys(monkeypatch)
+    svc = make_service()
+
+    architect = svc._llm_for(svc.persona_manager.get_persona("Architect"))
+    philosopher = svc._llm_for(svc.persona_manager.get_persona("Philosopher"))
+    labyrinth = svc._llm_for(svc.persona_manager.get_persona("Labyrinth"))
+
+    assert architect.model == "claude-3.5-sonnet"
+    assert philosopher.model == "claude-3-opus-20240229"
+    assert labyrinth.model == "gpt-4-turbo"
+    assert architect.model != philosopher.model
+
+
+@pytest.mark.asyncio
+async def test_persona_system_prompt_reaches_client(monkeypatch):
+    with_provider_keys(monkeypatch)
+    svc = make_service()
+
+    client = svc._llm_for(svc.persona_manager.get_persona("Architect"))
+    assert "Architect" in client.system_prompt
+
+
+@pytest.mark.asyncio
+async def test_deepseek_persona_gets_its_own_base_url(monkeypatch):
+    with_provider_keys(monkeypatch)
+    svc = make_service()
+
+    orpheus = svc._llm_for(svc.persona_manager.get_persona("Orpheus"))
+    assert orpheus.provider == "deepseek"
+    assert "deepseek" in orpheus.base_url
+
+
+@pytest.mark.asyncio
+async def test_clients_are_reused_per_persona(monkeypatch):
+    with_provider_keys(monkeypatch)
+    svc = make_service()
+    persona = svc.persona_manager.get_persona("Architect")
+
+    assert svc._llm_for(persona) is svc._llm_for(persona)
+
+
+@pytest.mark.asyncio
+async def test_persona_without_api_key_falls_back_to_default_client(monkeypatch):
+    """Незаполненный .env не должен ломать диалог."""
+    from backend.core.config import settings
+
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
+    fallback = FakeLLM()
+    svc = make_service(fallback)
+
+    assert svc._llm_for(svc.persona_manager.get_persona("Architect")) is fallback
+
+
+@pytest.mark.asyncio
+async def test_dialog_is_interactive_for_budget():
+    """Сообщение человека — интерактивный вызов, его бюджет не глушит (I-4)."""
+    llm = RecordingLLM()
+    svc = make_service(llm)
+
+    await svc.handle("telegram", "42", "привет")
+    await svc.drain()
+
+    assert llm.kinds == ["interactive"]

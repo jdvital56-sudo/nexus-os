@@ -37,6 +37,15 @@ class Settings(BaseModel):
     llm_api_key: str = os.getenv("NEXSYS_LLM_API_KEY", "")
     llm_base_url: str = os.getenv("NEXSYS_LLM_BASE_URL", "http://localhost:11434")
     
+    # Ключи провайдеров Пантеона (имена из README_HERMES, не переименовывать до PR-25)
+    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
+
+    # Дневной потолок расходов на LLM в долларах (I-4)
+    daily_llm_budget_usd: float = float(os.getenv("NEXUS_DAILY_LLM_BUDGET_USD", "5"))
+
     # Google Gemini API Key (for audio processing and advanced features)
     gemini_api_key: str = os.getenv("NEXSYS_GEMINI_API_KEY", "")
     

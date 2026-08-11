@@ -104,21 +104,26 @@ class PersonaManager:
         # Default to Orpheus for general queries
         return self.get_persona("Orpheus")
     
-    def get_model_config(self) -> Dict:
-        """Get model configuration for current persona"""
-        provider_map = {
-            "ollama": settings.ollama_base_url,
+    def get_model_config(self, persona: Optional[Dict] = None) -> Dict:
+        """Get model configuration for a persona (defaults to the current one).
+
+        Вызывается на каждое сообщение, поэтому принимает персону явно —
+        глобальное состояние current_persona тут не годится.
+        """
+        target = persona or self.current_persona
+        keys = {
             "openai": settings.openai_api_key,
             "anthropic": settings.anthropic_api_key,
             "deepseek": settings.deepseek_api_key,
         }
-        
+        provider = target["provider"]
+
         return {
-            "provider": self.current_persona["provider"],
-            "model": self.current_persona["model"],
-            "api_key": provider_map.get(self.current_persona["provider"]),
-            "base_url": provider_map.get(self.current_persona["provider"]) if self.current_persona["provider"] == "ollama" else None,
-            "system_prompt": self.current_persona["system_prompt"]
+            "provider": provider,
+            "model": target["model"],
+            "api_key": keys.get(provider, ""),
+            "base_url": settings.ollama_base_url if provider == "ollama" else None,
+            "system_prompt": target["system_prompt"],
         }
     
     def add_persona(self, name: str, description: str, model: str, 

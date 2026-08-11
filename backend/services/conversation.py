@@ -11,6 +11,7 @@ import re
 from typing import Any
 
 from ..agents.persona_manager import PersonaManager
+from . import budget
 from . import memory as memory_svc
 from .llm import LLMService
 from .memory import MemoryLayer
@@ -47,6 +48,8 @@ class ConversationService:
         self.persona_manager = persona_manager or PersonaManager()
         self.semantic_dedup = semantic_dedup
         self._tasks: set[asyncio.Task] = set()
+        # Клиенты под персоны создаются лениво и переиспользуются
+        self._llm_cache: dict[tuple[str, str], LLMService] = {}
 
     async def handle(
         self,
@@ -64,12 +67,48 @@ class ConversationService:
             raise ValueError("Пустое сообщение")
 
         selected = self._select_persona(text, persona)
-        reply = await self.llm.generate_response(
-            text, context=f"Persona: {selected['name']}"
+        llm = self._llm_for(selected, channel=channel)
+        reply = await llm.generate_response(
+            text, context=f"Persona: {selected['name']}", kind=budget.INTERACTIVE
         )
 
         self._spawn(self._remember(channel, user_id, text, reply, selected["name"]))
         return reply
+
+    def _llm_for(self, persona: dict[str, Any], channel: str = "") -> LLMService:
+        """Клиент под персону: своя модель на каждое сообщение.
+
+        Если у провайдера персоны нет ключа, откатываемся на общий клиент —
+        иначе диалог сломается из-за незаполненного .env.
+        """
+        config = self.persona_manager.get_model_config(persona)
+        provider = config["provider"]
+        if provider != "ollama" and not config.get("api_key"):
+            logger.info(
+                "%s: персона %s -> клиент по умолчанию (нет ключа для %s)",
+                channel or "-",
+                persona["name"],
+                provider,
+            )
+            return self.llm
+
+        logger.info(
+            "%s: персона %s -> %s/%s",
+            channel or "-",
+            persona["name"],
+            provider,
+            config["model"],
+        )
+        key = (provider, config["model"])
+        if key not in self._llm_cache:
+            self._llm_cache[key] = LLMService(
+                provider=provider,
+                model=config["model"],
+                api_key=config["api_key"],
+                base_url=config["base_url"],
+                system_prompt=config["system_prompt"],
+            )
+        return self._llm_cache[key]
 
     def _select_persona(self, text: str, persona: str | None) -> dict[str, Any]:
         """Явно заданная персона важнее автоопределения."""
