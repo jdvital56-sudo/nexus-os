@@ -44,6 +44,10 @@ def temp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(persona_svc, "PERSONAS_FILE", tmp_path / "personas.json")
     monkeypatch.setattr(budget_svc, "SPEND_FILE", tmp_path / "llm_spend.json")
 
+    # Векторная индексация каждого факта поднимает ChromaDB и растягивает
+    # прогон с 17 секунд до четырёх минут — в тестах она не нужна
+    monkeypatch.setattr(mem_svc, "INDEXING_ENABLED", False)
+
     import backend.services.wallet as wallet_svc
     monkeypatch.setattr(wallet_svc, "SERVICES_FILE", tmp_path / "services.json")
 

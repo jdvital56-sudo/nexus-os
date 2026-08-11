@@ -16,6 +16,7 @@ from typing import Any, Dict, List
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.core import eventbus
 from backend.core.config import settings
@@ -424,8 +425,26 @@ class DreamCadence:
             name="Subscription Watch",
             replace_existing=True,
         )
+
+        # Автопилот: джоба ставится всегда, но каждый тик сам проверяет
+        # выключатель. Так его можно включить без перезапуска приложения.
+        from . import autopilot
+
+        self.scheduler.add_job(
+            autopilot.tick,
+            trigger=IntervalTrigger(minutes=settings.jarvis_interval_min),
+            id="jarvis_autopilot",
+            name="Jarvis Autopilot",
+            replace_existing=True,
+        )
+
         self.scheduler.start()
-        logger.info("Dream Cadence запланирован: %s, проверка подписок: 9:00", self.cron_schedule)
+        logger.info(
+            "Dream Cadence: %s | подписки: 9:00 | автопилот: %s (каждые %d мин)",
+            self.cron_schedule,
+            "включён" if autopilot.is_enabled() else "выключен",
+            settings.jarvis_interval_min,
+        )
 
     def stop(self):
         """Stop the scheduler"""

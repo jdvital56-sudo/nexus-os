@@ -54,6 +54,14 @@ class Settings(BaseModel):
     # деньги стережёт дневной бюджет, а не куцый лимит на сообщение
     max_reply_tokens: int = int(os.getenv("NEXUS_MAX_REPLY_TOKENS", "2000"))
 
+    # Автопилот выключен по умолчанию: включать только после того, как
+    # неделю отработала гигиена памяти (риск R-2)
+    autopilot: bool = os.getenv("NEXUS_AUTOPILOT", "off").lower() in ("on", "true", "1")
+    jarvis_interval_min: int = int(os.getenv("NEXUS_JARVIS_INTERVAL_MIN", "60"))
+    jarvis_max_runs_per_day: int = int(os.getenv("NEXUS_JARVIS_MAX_RUNS_PER_DAY", "12"))
+    quiet_hours_start: int = int(os.getenv("NEXUS_QUIET_HOURS_START", "23"))
+    quiet_hours_end: int = int(os.getenv("NEXUS_QUIET_HOURS_END", "8"))
+
     # Google Gemini API Key (for audio processing and advanced features)
     gemini_api_key: str = os.getenv("NEXSYS_GEMINI_API_KEY", "")
     

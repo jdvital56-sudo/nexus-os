@@ -60,6 +60,10 @@ class MemoryFact(BaseModel):
 
 MEMORY_FILE = DATA_DIR / "memory.json"
 
+# Индексация в векторный стор — боевое поведение. В тестах выключается:
+# поднимать ChromaDB на каждый факт долго, а текстовый поиск им хватает.
+INDEXING_ENABLED = True
+
 # Насколько слой ценен при вспоминании. Сырой диалог из INBOX — самый
 # шумный: там лежит каждое сообщение дословно, включая сам вопрос.
 LAYER_WEIGHTS = {
@@ -123,6 +127,8 @@ def add_fact(
 
 def _index_fact(fact: "MemoryFact") -> None:
     """Кладёт факт в векторный индекс. Молча уступает, если он недоступен."""
+    if not INDEXING_ENABLED:
+        return
     try:
         from .vector_store import add_vector
 
