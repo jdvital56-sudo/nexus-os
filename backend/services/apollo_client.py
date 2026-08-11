@@ -1,7 +1,10 @@
 import httpx
+import logging
 import os
 from typing import Optional, Dict, List, Any
 from backend.core.config import APOLLO_API_KEY
+
+logger = logging.getLogger(__name__)
 
 class ApolloClient:
     def __init__(self):
@@ -13,7 +16,7 @@ class ApolloClient:
         } if self.api_key else {}
         
         if not self.api_key:
-            print("⚠️ WARNING: APOLLO_API_KEY not set. Apollo features disabled.")
+            logger.warning("APOLLO_API_KEY not set. Apollo features disabled.")
 
     async def search_people(
         self, 

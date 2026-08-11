@@ -22,8 +22,8 @@ NEXSYS Hermes — это мост между вашим мобильным ус�
 ## ⚡ Быстрая установка
 
 ```bash
-# 1. Запустить скрипт установки
-bash scripts/install.sh
+# 1. Установить зависимости и создать рабочие папки
+make install
 
 # 2. Настроить .env (добавить API ключи)
 nano .env
@@ -35,14 +35,8 @@ python hermes/bot.py
 ### Ручная установка
 
 ```bash
-# Установить зависимости
+# Все зависимости, включая Hermes, лежат в одном файле
 pip install -r backend/requirements.txt
-pip install python-telegram-bot APScheduler google-auth google-auth-oauthlib google-api-python-client
-
-# Создать .env из шаблона
-cp .env.example .env
-
-# Отредактировать .env и добавить ключи
 ```
 
 ---
@@ -215,8 +209,7 @@ nexus-os/
 │   ├── skills/                  # Скиллы агентов
 │   └── core/
 │       └── config.py            # Конфигурация из .env
-├── scripts/
-│   └── install.sh          # Скрипт установки
+├── Makefile                # make install / test / run / dev
 ├── artifacts/              # Сгенерированные файлы
 ├── credentials.json        # Google OAuth (создать вручную)
 ├── .env                    # Конфигурация (не коммитить!)

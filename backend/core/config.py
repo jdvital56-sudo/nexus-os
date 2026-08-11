@@ -12,11 +12,7 @@ class Settings(BaseModel):
     # Base directories with env var override
     data_dir: Path = Path(os.getenv("NEXSYS_DATA_DIR", Path.home() / ".nexsys"))
     
-    # Database configuration (SQLite with migrations support)
-    database_url: str = os.getenv("NEXSYS_DATABASE_URL", f"sqlite:///{Path(os.getenv('NEXSYS_DATA_DIR', Path.home() / '.nexsys'))}/nexus.db")
-    use_sqlite: bool = os.getenv("NEXSYS_USE_SQLITE", "true").lower() == "true"
-    
-    # File-based storage (legacy/backup)
+    # File-based storage (JSON)
     graph_file: Path = None  # Will be set in __init__
     documents_file: Path = None
     tasks_file: Path = None
@@ -97,8 +93,6 @@ settings = Settings()
 
 # Legacy compatibility - keep old variable names for backward compatibility
 DATA_DIR = settings.data_dir
-DATABASE_URL = settings.database_url
-USE_SQLITE = settings.use_sqlite
 GRAPH_FILE = settings.graph_file
 DOCUMENTS_FILE = settings.documents_file
 TASKS_FILE = settings.tasks_file
