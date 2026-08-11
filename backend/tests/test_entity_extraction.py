@@ -65,7 +65,7 @@ def test_parse_drops_entities_without_name():
 def test_upsert_creates_nodes_and_edges():
     result = ex.upsert(SIMPLE, source="telegram:42", semantic=False)
 
-    assert result == {"nodes_added": 2, "edges_added": 1}
+    assert result == {"nodes_added": 2, "edges_added": 1, "edges_dropped": 0}
     labels = [n.label for n in graph_svc.list_nodes()]
     assert "Одесса" in labels
     assert "Nexus OS" in labels
@@ -145,5 +145,63 @@ async def test_empty_extraction_does_not_touch_graph():
 
     result = await ex.extract_from_dialog(llm, "привет", "привет", source="s", semantic=False)
 
-    assert result == {"nodes_added": 0, "edges_added": 0}
+    assert result == {"nodes_added": 0, "edges_added": 0, "edges_dropped": 0}
     assert graph_svc.list_nodes() == []
+
+
+# --- Связи, которые терялись вживую (найдено 2026-08-12) ---
+
+
+def test_relation_matches_entity_written_in_another_case():
+    """Модель пишет «Nexus OS» в entities и «nexus os» в relations —
+    из-за регистра связь пропадала, и граф оставался россыпью точек."""
+    result = ex.upsert(
+        {
+            "entities": [{"name": "Nexus OS", "type": "concept"},
+                         {"name": "Одесса", "type": "concept"}],
+            "relations": [{"source": "nexus os", "target": "  ОДЕССА ", "kind": "related"}],
+        },
+        source="s",
+        semantic=False,
+    )
+    assert result["edges_added"] == 1
+
+
+def test_relation_can_reach_entity_from_earlier_dialogs():
+    """Сущность из прошлого разговора уже в графе — связь с ней законна."""
+    ex.upsert({"entities": [{"name": "Одесса", "type": "concept"}], "relations": []},
+              source="s", semantic=False)
+
+    result = ex.upsert(
+        {
+            "entities": [{"name": "Спа-оффер", "type": "concept"}],
+            "relations": [{"source": "Спа-оффер", "target": "Одесса", "kind": "related"}],
+        },
+        source="s",
+        semantic=False,
+    )
+    assert result["edges_added"] == 1
+
+
+def test_relation_through_the_user_is_dropped_and_counted():
+    """Живой DeepSeek связывал всё через «Пользователь», которого нет
+    среди сущностей — все связи молча исчезали."""
+    result = ex.upsert(
+        {
+            "entities": [{"name": "Nexus OS", "type": "concept"},
+                         {"name": "PropFlow", "type": "concept"}],
+            "relations": [
+                {"source": "Пользователь", "target": "Nexus OS", "kind": "related"},
+                {"source": "Пользователь", "target": "PropFlow", "kind": "related"},
+            ],
+        },
+        source="telegram:42",
+        semantic=False,
+    )
+    assert result["edges_added"] == 0
+    assert result["edges_dropped"] == 2
+
+
+def test_prompt_forbids_dragging_the_speakers_into_relations():
+    assert "Пользователь" in ex._PROMPT
+    assert "только между сущностями" in ex._PROMPT

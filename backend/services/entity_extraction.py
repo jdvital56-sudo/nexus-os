@@ -32,7 +32,11 @@ _PROMPT = """Извлеки из диалога сущности и связи �
 
 type — одно из: concept, document, task, agent, decision, session, file
 kind — одно из: related, depends_on, created_by, mentions, contains, leads_to
-В relations используй ровно те имена, что в entities.
+
+Связи — только между сущностями из entities, слово в слово.
+НЕ используй «Пользователь», «Ассистент», «я», «ты», «мы» — ни сущностью,
+ни концом связи. Связывай сущности друг с другом: проект с городом,
+человека с компанией, задачу с проектом. Если связать нечего — пустой список.
 Если сущностей нет, верни пустые списки.
 
 Диалог:
@@ -153,11 +157,32 @@ def upsert(extracted: dict[str, list[dict]], source: str, semantic: bool = True)
         if semantic:
             _index_node(node_id, name)
 
+    # Ключ по слагу: модель пишет «Nexus OS» в entities и «nexus os» в
+    # relations, и связь терялась на разнице в регистре
+    by_slug = {_slug(name): node_id for name, node_id in resolved.items()}
+
+    def _resolve(raw_name: str) -> str | None:
+        name = str(raw_name).strip()
+        found = resolved.get(name) or by_slug.get(_slug(name))
+        if found:
+            return found
+        # Сущность из прошлых разговоров: связь с ней законна, узел уже есть
+        candidate = _node_id(name)
+        try:
+            graph_svc.get_node(candidate)
+            return candidate
+        except Exception:
+            return None
+
     added_edges = 0
+    dropped = 0
     for relation in extracted.get("relations", []):
-        src = resolved.get(str(relation["source"]).strip())
-        dst = resolved.get(str(relation["target"]).strip())
+        src = _resolve(relation["source"])
+        dst = _resolve(relation["target"])
         if not src or not dst or src == dst:
+            # Обычно это «Пользователь → проект»: модель тянет в связи
+            # собеседника, которого нет и не должно быть среди сущностей
+            dropped += 1
             continue
         try:
             graph_svc.add_edge(
@@ -167,7 +192,16 @@ def upsert(extracted: dict[str, list[dict]], source: str, semantic: bool = True)
         except Exception:
             logger.debug("Ребро %s -> %s не добавлено", src, dst, exc_info=True)
 
-    return {"nodes_added": added_nodes, "edges_added": added_edges}
+    if dropped:
+        # Молчать нельзя: граф без связей выглядит рабочим, а это россыпь
+        # точек. Раньше это было не видно вообще
+        logger.info(
+            "Извлечение из %s: %d связей отброшено — концы вне списка сущностей",
+            source,
+            dropped,
+        )
+
+    return {"nodes_added": added_nodes, "edges_added": added_edges, "edges_dropped": dropped}
 
 
 async def extract_from_dialog(llm, text: str, reply: str, source: str, semantic: bool = True) -> dict:
@@ -185,5 +219,5 @@ async def extract_from_dialog(llm, text: str, reply: str, source: str, semantic:
     )
     extracted = _parse(raw)
     if not extracted["entities"]:
-        return {"nodes_added": 0, "edges_added": 0}
+        return {"nodes_added": 0, "edges_added": 0, "edges_dropped": 0}
     return upsert(extracted, source=source, semantic=semantic)
