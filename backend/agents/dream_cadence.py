@@ -371,6 +371,39 @@ class DreamCadence:
         except Exception:
             logger.exception("Ночной прогон упал")
 
+    async def wallet_job(self):
+        """Ежедневная проверка подписок: обновить балансы и предупредить."""
+        from backend.services import wallet
+
+        try:
+            await wallet.refresh_balances()
+            summary = wallet.summary()
+        except Exception:
+            logger.exception("Проверка подписок не удалась")
+            return
+
+        alerts = []
+        for s in summary["due_soon"]:
+            days = s["days_left"]
+            when = "сегодня" if days == 0 else (
+                f"через {days} дн." if days > 0 else f"просрочено на {-days} дн."
+            )
+            cancel = f"\nОтменить: {s['cancel_url']}" if s.get("cancel_url") else ""
+            alerts.append(f"💳 {s['name']}: списание {when}, ${s['cost']}{cancel}")
+        for s in summary["low_balance"]:
+            alerts.append(f"🪫 {s['name']}: остаток ${s['balance']} — пора пополнить")
+
+        if not alerts:
+            return
+
+        text = "Напоминание по сервисам:\n\n" + "\n\n".join(alerts)
+        eventbus.emit(
+            "wallet.alert",
+            {"count": len(alerts), "services": [s["name"] for s in summary["due_soon"]]},
+            source=eventbus.SOURCE_SYSTEM,
+        )
+        await self.send_brief_to_telegram(text)
+
     def start(self):
         """Start the scheduler"""
         if self.scheduler.running:
@@ -382,8 +415,17 @@ class DreamCadence:
             name="Night Analytics",
             replace_existing=True,
         )
+        # Подписки проверяем утром: напоминание должно прийти до списания,
+        # а не ночью, когда его никто не прочитает
+        self.scheduler.add_job(
+            self.wallet_job,
+            trigger=CronTrigger(hour=9, minute=0),
+            id="wallet_check",
+            name="Subscription Watch",
+            replace_existing=True,
+        )
         self.scheduler.start()
-        logger.info("Dream Cadence запланирован: %s", self.cron_schedule)
+        logger.info("Dream Cadence запланирован: %s, проверка подписок: 9:00", self.cron_schedule)
 
     def stop(self):
         """Stop the scheduler"""

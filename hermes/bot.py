@@ -90,6 +90,7 @@ class HermesAgent:
             "/status - Статус системы\n"
             "/persons - Список персон\n"
             "/brief - Утренний бриф\n"
+            "/services - Мои платные сервисы\n"
             "/help - Помощь\n\n"
             "Просто отправь мне сообщение или голосовую заметку!"
         )
@@ -183,6 +184,48 @@ class HermesAgent:
             f"🌅 Утренний бриф (прогон {cached['run_id']}):\n\n{cached['brief']}{tail}"
         )
     
+    async def services_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /services — за что платим и когда спишут."""
+        if not self._authorize_user(update.effective_user.id):
+            return
+
+        from backend.services import wallet
+
+        summary = wallet.summary()
+        if not summary["active_count"]:
+            await update.message.reply_text(
+                "💳 Реестр сервисов пуст.\n"
+                "Добавьте подписки — и я буду напоминать о списаниях "
+                "и следить за балансами там, где это возможно."
+            )
+            return
+
+        lines = [
+            f"💳 Активных сервисов: {summary['active_count']}",
+            f"В месяц уходит: ~${summary['monthly_total_usd']}",
+            "",
+        ]
+        for s in wallet.list_services():
+            money = f"${s['cost']} {s['period']}" if s["cost"] else s["period"]
+            when = f", списание {s['next_charge']}" if s.get("next_charge") else ", дата списания неизвестна"
+            bal = f", остаток ${s['balance']}" if s.get("balance") is not None else ""
+            lines.append(f"- {s['name']}: {money}{when}{bal}")
+
+        if summary["due_soon"]:
+            lines += ["", "⏰ Скоро списание:"]
+            for s in summary["due_soon"]:
+                d = s["days_left"]
+                when = "сегодня" if d == 0 else (f"через {d} дн." if d > 0 else f"просрочено на {-d} дн.")
+                cancel = f" — отменить: {s['cancel_url']}" if s.get("cancel_url") else ""
+                lines.append(f"- {s['name']}: {when}{cancel}")
+
+        if summary["low_balance"]:
+            lines += ["", "🪫 Баланс на исходе:"]
+            for s in summary["low_balance"]:
+                lines.append(f"- {s['name']}: ${s['balance']}")
+
+        await update.message.reply_text("\n".join(lines))
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle text messages"""
         if not self._authorize_user(update.effective_user.id):
@@ -276,6 +319,7 @@ class HermesAgent:
         self.application.add_handler(CommandHandler("status", self.status_command))
         self.application.add_handler(CommandHandler("persons", self.persons_command))
         self.application.add_handler(CommandHandler("brief", self.brief_command))
+        self.application.add_handler(CommandHandler("services", self.services_command))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         self.application.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
         
