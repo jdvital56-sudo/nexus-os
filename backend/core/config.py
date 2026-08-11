@@ -5,6 +5,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
+# Строго до объявления Settings: значения полей вычисляются при создании
+# класса, поэтому .env, загруженный ниже по файлу, туда уже не попадёт.
+load_dotenv()
+
 
 class Settings(BaseModel):
     """Settings class for NEXSYS configuration."""
@@ -92,9 +96,6 @@ class Settings(BaseModel):
         if self.log_file:
             self.log_file.parent.mkdir(parents=True, exist_ok=True)
 
-
-# Load environment variables from .env file
-load_dotenv()
 
 # Global settings instance
 settings = Settings()

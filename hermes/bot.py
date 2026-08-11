@@ -4,9 +4,15 @@ Acts as the mobile communication bridge to the main AI system
 """
 
 import os
+import sys
 import asyncio
 import logging
+from pathlib import Path
 from typing import Optional, Dict, Any
+
+# Корень проекта в путь — иначе `python hermes/bot.py` не находит backend
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -19,6 +25,11 @@ from backend.agents.persona_manager import PersonaManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# httpx логирует полный URL запроса, а туда входит токен бота — в INFO
+# он утекал бы в консоль и в nexus.log при каждом опросе Telegram
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 class HermesAgent:
@@ -214,12 +225,16 @@ class HermesAgent:
             return True  # No restriction if not configured
         return str(user_id) == str(self.allowed_user_id)
     
-    async def run(self):
-        """Start the Telegram bot"""
+    def run(self):
+        """Start the Telegram bot.
+
+        run_polling() сам создаёт и закрывает цикл событий, поэтому метод
+        синхронный: под asyncio.run() библиотека падает на закрытии цикла.
+        """
         if not self.bot_token:
             logger.error("Telegram bot token not configured. Set TELEGRAM_BOT_TOKEN in .env")
             return
-        
+
         self.application = Application.builder().token(self.bot_token).build()
         
         # Add handlers
@@ -231,14 +246,13 @@ class HermesAgent:
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         self.application.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
         
-        logger.info("🚀 Hermes Agent started. Listening for messages...")
-        await self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        logger.info("Hermes Agent started. Listening for messages...")
+        self.application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
-async def main():
-    hermes = HermesAgent()
-    await hermes.run()
+def main():
+    HermesAgent().run()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

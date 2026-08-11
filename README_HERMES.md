@@ -29,7 +29,7 @@ make install
 nano .env
 
 # 3. Запустить бота
-python hermes/bot.py
+python hermes/bot.py   # из корня проекта
 ```
 
 ### Ручная установка
@@ -272,7 +272,7 @@ def _authorize_user(self, user_id: int) -> bool:
 ### Запуск бота:
 
 ```bash
-python hermes/bot.py
+python hermes/bot.py   # из корня проекта
 ```
 
 Ожидайте сообщение:
@@ -302,7 +302,7 @@ start_dream_cadence()  # Запускает планировщик
 
 ### Проверка Telegram бота:
 
-1. Запустите: `python hermes/bot.py`
+1. Запустите: `python hermes/bot.py   # из корня проекта`
 2. Откройте бота в Telegram
 3. Отправьте `/start`
 4. Ожидайте: "👋 Привет! Я Hermes, твой AI-ассистент."
@@ -379,7 +379,7 @@ python -c "from backend.agents.dream_cadence import dream_cadence; import asynci
 ## 🎯 Следующие шаги
 
 1. ✅ **Настроить API ключи** в `.env`
-2. ✅ **Запустить бота**: `python hermes/bot.py`
+2. ✅ **Запустить бота**: `python hermes/bot.py   # из корня проекта`
 3. ✅ **Протестировать команды** в Telegram
 4. 🔲 **Настроить Obsidian Vault** для базы знаний
 5. 🔲 **Включить Dream Cadence** для ночной аналитики
