@@ -52,15 +52,31 @@ class PersonaManager:
     ]
     
     def __init__(self, custom_personas: Optional[List[Dict]] = None):
-        self.personas = custom_personas or self.DEFAULT_PERSONAS.copy()
-        self.current_persona = self.personas[0]  # Default to Mercury
-    
+        # Свой список — только для тестов; иначе читаем хранилище на каждый
+        # запрос, чтобы правка из Mission Control влияла на следующее сообщение
+        self._custom_personas = custom_personas
+        self._current_name: Optional[str] = None
+
+    @property
+    def personas(self) -> List[Dict]:
+        if self._custom_personas is not None:
+            return self._custom_personas
+        from backend.services import personas as persona_store
+
+        return persona_store.list_personas()
+
+    @property
+    def current_persona(self) -> Dict:
+        return self.get_persona(self._current_name) or self.personas[0]
+
     def list_personas(self) -> List[Dict]:
         """Return list of all available personas"""
         return self.personas
-    
-    def get_persona(self, name: str) -> Optional[Dict]:
+
+    def get_persona(self, name: Optional[str]) -> Optional[Dict]:
         """Get persona by name"""
+        if not name:
+            return None
         for persona in self.personas:
             if persona["name"].lower() == name.lower():
                 return persona
@@ -68,9 +84,8 @@ class PersonaManager:
     
     def set_persona(self, name: str) -> bool:
         """Set current active persona"""
-        persona = self.get_persona(name)
-        if persona:
-            self.current_persona = persona
+        if self.get_persona(name):
+            self._current_name = name
             return True
         return False
     
@@ -99,10 +114,12 @@ class PersonaManager:
         # Get highest scoring persona (minimum threshold of 1)
         if max(scores.values()) > 0:
             best_persona = max(scores, key=scores.get)
-            return self.get_persona(best_persona)
-        
-        # Default to Orpheus for general queries
-        return self.get_persona("Orpheus")
+            found = self.get_persona(best_persona)
+            if found:
+                return found
+
+        # Персону могли переименовать или удалить через API — не падаем
+        return self.get_persona("Orpheus") or self.personas[0]
     
     def get_model_config(self, persona: Optional[Dict] = None) -> Dict:
         """Get model configuration for a persona (defaults to the current one).
@@ -126,23 +143,36 @@ class PersonaManager:
             "system_prompt": target["system_prompt"],
         }
     
-    def add_persona(self, name: str, description: str, model: str, 
+    def add_persona(self, name: str, description: str, model: str,
                     provider: str, system_prompt: str) -> Dict:
-        """Add custom persona"""
+        """Add custom persona (персистентно, если список не подменён в тестах)"""
         persona = {
             "name": name,
             "description": description,
             "model": model,
             "provider": provider,
-            "system_prompt": system_prompt
+            "system_prompt": system_prompt,
         }
-        self.personas.append(persona)
-        return persona
-    
+        if self._custom_personas is not None:
+            self._custom_personas.append(persona)
+            return persona
+
+        from backend.services import personas as persona_store
+
+        return persona_store.create_persona(persona)
+
     def remove_persona(self, name: str) -> bool:
         """Remove persona by name"""
-        for i, persona in enumerate(self.personas):
-            if persona["name"] == name:
-                self.personas.pop(i)
-                return True
-        return False
+        if self._custom_personas is not None:
+            for i, persona in enumerate(self._custom_personas):
+                if persona["name"] == name:
+                    self._custom_personas.pop(i)
+                    return True
+            return False
+
+        from backend.services import personas as persona_store
+
+        try:
+            return persona_store.delete_persona(name)
+        except Exception:
+            return False

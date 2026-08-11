@@ -37,6 +37,13 @@ def temp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(mem_svc, "MEMORY_FILE", tmp_path / "memory.json")
     monkeypatch.setattr(vec_svc, "VECTORS_FILE", tmp_path / "vectors.json")
 
+    # Хранилища, появившиеся позже: без них тесты писали бы в реальный ~/.nexsys
+    import backend.services.budget as budget_svc
+    import backend.services.personas as persona_svc
+
+    monkeypatch.setattr(persona_svc, "PERSONAS_FILE", tmp_path / "personas.json")
+    monkeypatch.setattr(budget_svc, "SPEND_FILE", tmp_path / "llm_spend.json")
+
     # Init files
     (tmp_path / "graph.json").write_text('{"nodes": [], "edges": []}')
     (tmp_path / "auth.json").write_text('{}')

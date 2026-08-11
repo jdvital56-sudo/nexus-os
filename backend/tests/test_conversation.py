@@ -446,3 +446,75 @@ async def test_extraction_failure_does_not_break_dialog(monkeypatch):
     await svc.drain()
 
     assert reply == "обычный ответ"
+
+
+# --- Правки Пантеона влияют на следующее сообщение (PR-8) ---
+
+
+@pytest.mark.asyncio
+async def test_persona_model_change_affects_next_message(monkeypatch):
+    """DoD PR-8: PUT персоны меняет реальное поведение следующего ответа."""
+    from backend.services import personas as persona_store
+
+    with_provider_keys(monkeypatch)
+    svc = ConversationService(semantic_dedup=False, extract_entities=False)
+
+    before = svc._llm_for(svc.persona_manager.get_persona("Architect"))
+    assert before.model == "claude-3.5-sonnet"
+
+    persona_store.update_persona("Architect", {"model": "claude-4-opus"})
+
+    after = svc._llm_for(svc.persona_manager.get_persona("Architect"))
+    assert after.model == "claude-4-opus"
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_change_is_not_cached(monkeypatch):
+    """Правка промпта не должна застревать в закэшированном клиенте."""
+    from backend.services import personas as persona_store
+
+    with_provider_keys(monkeypatch)
+    svc = ConversationService(semantic_dedup=False, extract_entities=False)
+    persona = svc.persona_manager.get_persona("Architect")
+
+    persona_store.set_system_prompt("ПЕРВЫЙ ВАРИАНТ")
+    assert "ПЕРВЫЙ ВАРИАНТ" in svc._llm_for(persona).system_prompt
+
+    persona_store.set_system_prompt("ВТОРОЙ ВАРИАНТ")
+    client = svc._llm_for(persona)
+    assert "ВТОРОЙ ВАРИАНТ" in client.system_prompt
+    assert "ПЕРВЫЙ ВАРИАНТ" not in client.system_prompt
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_precedes_persona_prompt(monkeypatch):
+    from backend.services import personas as persona_store
+
+    with_provider_keys(monkeypatch)
+    svc = ConversationService(semantic_dedup=False, extract_entities=False)
+    persona_store.set_system_prompt("ОБЩЕЕ ПРАВИЛО")
+
+    prompt = svc._llm_for(svc.persona_manager.get_persona("Architect")).system_prompt
+
+    assert prompt.index("ОБЩЕЕ ПРАВИЛО") < prompt.index("Architect")
+
+
+@pytest.mark.asyncio
+async def test_new_persona_can_be_used_immediately():
+    """Без ключей провайдера — берётся подставной клиент, в сеть не ходим."""
+    from backend.services import personas as persona_store
+
+    persona_store.create_persona({
+        "name": "Веста",
+        "description": "тест",
+        "model": "gpt-4-turbo",
+        "provider": "openai",
+        "system_prompt": "Ты Веста.",
+    })
+    llm = RecordingLLM()
+    svc = ConversationService(llm=llm, semantic_dedup=False, extract_entities=False)
+
+    await svc.handle("web", "42", "привет", persona="Веста")
+    await svc.drain()
+
+    assert "Веста" in llm.calls[0][1]

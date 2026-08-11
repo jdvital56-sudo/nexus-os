@@ -62,7 +62,7 @@ class ConversationService:
         self.extract_entities = extract_entities
         self._tasks: set[asyncio.Task] = set()
         # Клиенты под персоны создаются лениво и переиспользуются
-        self._llm_cache: dict[tuple[str, str], LLMService] = {}
+        self._llm_cache: dict[tuple[str, str, str], LLMService] = {}
 
     async def handle(
         self,
@@ -170,6 +170,7 @@ class ConversationService:
         иначе диалог сломается из-за незаполненного .env.
         """
         config = self.persona_manager.get_model_config(persona)
+        config["system_prompt"] = self._compose_prompt(config["system_prompt"])
         provider = config["provider"]
         if provider != "ollama" and not config.get("api_key"):
             logger.info(
@@ -187,7 +188,9 @@ class ConversationService:
             provider,
             config["model"],
         )
-        key = (provider, config["model"])
+        # Промпт входит в ключ: правка из Mission Control обязана долететь до
+        # следующего сообщения, а не остаться в закэшированном клиенте
+        key = (provider, config["model"], config["system_prompt"])
         if key not in self._llm_cache:
             self._llm_cache[key] = LLMService(
                 provider=provider,
@@ -197,6 +200,18 @@ class ConversationService:
                 system_prompt=config["system_prompt"],
             )
         return self._llm_cache[key]
+
+    @staticmethod
+    def _compose_prompt(persona_prompt: str) -> str:
+        """Общие правила Hermes идут перед характером конкретной персоны."""
+        try:
+            from . import personas as persona_store
+
+            common = persona_store.get_system_prompt()
+        except Exception:
+            logger.debug("Системный промпт недоступен", exc_info=True)
+            return persona_prompt
+        return f"{common}\n\n{persona_prompt}" if common else persona_prompt
 
     def _select_persona(self, text: str, persona: str | None) -> dict[str, Any]:
         """Явно заданная персона важнее автоопределения."""
