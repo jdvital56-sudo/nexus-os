@@ -263,12 +263,18 @@ async def get_setup_guide():
 
 
 @router.post("/test-pin-hash")
-async def test_pin_hash(pin_code: str = Field(..., description="Test PIN code")):
+async def test_pin_hash(request: Request):
     """
     Utility endpoint to generate PIN hash for .env configuration
     
-    Usage: POST /api/call/test-pin-hash?pin_code=44435
+    Usage: POST /api/call/test-pin-hash with JSON body {"pin_code": "44435"}
     """
+    data = await request.json()
+    pin_code = data.get("pin_code", "")
+    
+    if not pin_code:
+        raise HTTPException(status_code=400, detail="pin_code required in JSON body")
+    
     pin_hash = telephony_client.generate_pin_hash(pin_code)
     return {
         "pin_code": pin_code,
