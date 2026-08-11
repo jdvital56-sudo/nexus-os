@@ -54,6 +54,9 @@ class Settings(BaseModel):
     # деньги стережёт дневной бюджет, а не куцый лимит на сообщение
     max_reply_tokens: int = int(os.getenv("NEXUS_MAX_REPLY_TOKENS", "2000"))
 
+    # База знаний Obsidian: путь к папке хранилища
+    obsidian_vault_path: str = os.getenv("OBSIDIAN_VAULT_PATH", "")
+
     # Автопилот выключен по умолчанию: включать только после того, как
     # неделю отработала гигиена памяти (риск R-2)
     autopilot: bool = os.getenv("NEXUS_AUTOPILOT", "off").lower() in ("on", "true", "1")

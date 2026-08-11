@@ -15,6 +15,7 @@ from ..core import eventbus
 from . import budget
 from . import entity_extraction
 from . import memory as memory_svc
+from . import obsidian
 from . import skills as skills_svc
 from .llm import LLMService
 from .memory import MemoryLayer
@@ -39,6 +40,18 @@ _SKILL_TRIGGER = re.compile(
 
 # Аргументы скилла в виде key=value; значение — до следующего ключа или конца
 _SKILL_ARG = re.compile(r"(?P<key>\w+)=(?P<value>.*?)(?=\s+\w+=|$)", re.DOTALL)
+
+# «/note Заголовок | текст» — записать в базу знаний Obsidian
+_NOTE_WRITE = re.compile(
+    r"^\s*(?:/note|заметка)\s+(?P<title>[^|\n]+?)\s*(?:\||\n)\s*(?P<body>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# «/notes запрос» — найти в базе знаний
+_NOTE_SEARCH = re.compile(
+    r"^\s*(?:/notes|найди\s+в\s+заметках)\s+(?P<query>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _normalize(text: str) -> str:
@@ -86,6 +99,12 @@ class ConversationService:
         if not text or not text.strip():
             raise ValueError("Пустое сообщение")
 
+        note_reply = await self._try_note(text)
+        if note_reply is not None:
+            self._emit_message(channel, "user", "Obsidian", text)
+            self._emit_message(channel, "assistant", "Obsidian", note_reply)
+            return note_reply
+
         skill_reply = await self._try_skill(text)
         if skill_reply is not None:
             self._emit_message(channel, "user", "Skill", text)
@@ -130,6 +149,12 @@ class ConversationService:
                 "Что тебе уже известно из памяти (используй, если уместно; "
                 "не ссылайся на «память» вслух):\n" + known
             )
+
+        # База знаний Obsidian — то, что фаундер написал сам
+        vault = obsidian.context_for(text)
+        if vault:
+            parts.append(vault)
+
         return "\n\n".join(parts)
 
     @staticmethod
@@ -177,6 +202,47 @@ class ConversationService:
             logger.warning("Извлечение сущностей отложено: %s", e)
         except Exception:
             logger.exception("Извлечение сущностей из %s не удалось", channel)
+
+    async def _try_note(self, text: str) -> str | None:
+        """Работа с базой знаний из диалога. Не команда — возвращает None.
+
+        Запись в чужое хранилище — заметное действие, поэтому она делается
+        только по явной команде, а не по догадке модели.
+        """
+        match = _NOTE_WRITE.match(text)
+        if match:
+            title = match.group("title").strip()
+            body = (match.group("body") or "").strip()
+            if not body:
+                return "Нужен текст заметки: /note Заголовок | текст заметки"
+            try:
+                result = await asyncio.to_thread(obsidian.write_note, title, body)
+            except obsidian.VaultNotConfigured as e:
+                return f"📓 {e}"
+            except Exception as e:
+                logger.exception("Не удалось записать заметку")
+                return f"Не удалось записать заметку: {e}"
+            verb = "создана" if result["action"] == "created" else "дополнена"
+            return f"📓 Заметка {verb}: {result['path']}"
+
+        match = _NOTE_SEARCH.match(text)
+        if match:
+            query = match.group("query").strip()
+            try:
+                notes = await asyncio.to_thread(obsidian.search_notes, query)
+            except obsidian.VaultNotConfigured as e:
+                return f"📓 {e}"
+            except Exception as e:
+                logger.exception("Поиск по хранилищу упал")
+                return f"Поиск не удался: {e}"
+            if not notes:
+                return f"📓 По запросу «{query}» в базе знаний ничего нет."
+            lines = [f"📓 Нашёл в базе знаний ({len(notes)}):"]
+            for n in notes:
+                lines.append(f"- {n['title']} ({n['path']})")
+            return "\n".join(lines)
+
+        return None
 
     async def _try_skill(self, text: str) -> str | None:
         """Исполняет скилл, если сообщение — явный вызов. Иначе None.
