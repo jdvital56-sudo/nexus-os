@@ -413,6 +413,15 @@ class DreamCadence:
         """Start the scheduler"""
         if self.scheduler.running:
             return
+
+        # Расписание ведёт ровно один процесс (I-3). Второй бэкенд —
+        # проверочный, забытый, лишний воркер — молча спит: иначе фаундер
+        # получает столько же одинаковых сообщений, сколько запущено копий
+        from ..core import singleton
+
+        if not singleton.acquire("dream_cadence"):
+            return
+
         self.scheduler.add_job(
             self.nightly_job,
             trigger=self.trigger,
@@ -452,9 +461,14 @@ class DreamCadence:
 
     def stop(self):
         """Stop the scheduler"""
+        from ..core import singleton
+
         if self.scheduler.running:
             self.scheduler.shutdown()
             logger.info("Dream Cadence остановлен")
+        # Замок отпускаем в любом случае: иначе после падения процесса
+        # следующий запуск решит, что расписание уже кто-то ведёт
+        singleton.release()
 
 
 # Singleton instance

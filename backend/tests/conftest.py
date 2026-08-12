@@ -68,6 +68,9 @@ def temp_data_dir(tmp_path, monkeypatch):
     import backend.services.dialog_history as history_svc
     monkeypatch.setattr(history_svc, "HISTORY_FILE", tmp_path / "dialog_history.json")
 
+    import backend.core.singleton as singleton_mod
+    monkeypatch.setattr(singleton_mod, "LOCK_FILE", tmp_path / "scheduler.lock")
+
     # Боевые ключи лежат в переменных окружения машины. Без этой заглушки
     # тесты ходили бы в реальные API за реальные деньги.
     for field in ("openai_api_key", "anthropic_api_key", "deepseek_api_key",

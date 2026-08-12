@@ -150,6 +150,10 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
   // много раз в секунду, состояние React тут только мешало бы
   const camera = useRef({ zoom: 1, panX: 0, panY: 0 });
   const drag = useRef<{ x: number; y: number; panX: number; panY: number; moved: number } | null>(null);
+  // Узел, который тянут мышью. Пока он схвачен, связанные с ним подтягиваются
+  const dragged = useRef<Placed | null>(null);
+  // Угол поворота последнего кадра — нужен, чтобы перевести курсор в мир
+  const angleRef = useRef(0);
   const [hoverLabel, setHoverLabel] = useState<{ node: GalaxyNode; x: number; y: number } | null>(null);
 
   const placed = useMemo(() => layout(nodes, links), [nodes, links]);
@@ -214,8 +218,36 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
       frame = requestAnimationFrame(render);
       const t = (now - started) / 1000;
       const angle = slow ? 0 : (t / TURN_SECONDS) * Math.PI * 2;
+      angleRef.current = angle;
       const cos = Math.cos(angle);
       const sin = Math.sin(angle);
+
+      // Пока узел держат, соседи подтягиваются за ним — карта ведёт себя
+      // как связанная сеть, а не как картинка, по которой возят точку
+      if (dragged.current) {
+        for (let it = 0; it < 3; it++) {
+          for (const l of links) {
+            const a = byId.get(l.source);
+            const b = byId.get(l.target);
+            if (!a || !b) continue;
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const dz = b.z - a.z;
+            const d = Math.hypot(dx, dy, dz) || 1;
+            const shift = ((d - 150) / d) * 0.09;
+            if (a !== dragged.current) {
+              a.x += dx * shift;
+              a.y += dy * shift;
+              a.z += dz * shift;
+            }
+            if (b !== dragged.current) {
+              b.x -= dx * shift;
+              b.y -= dy * shift;
+              b.z -= dz * shift;
+            }
+          }
+        }
+      }
       const cx = width / 2;
       const cy = height / 2;
 
@@ -229,7 +261,9 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
         const k = FOCAL / (FOCAL + rz);
         p.sx = cx + rx * k * zoom + panX;
         p.sy = cy + p.y * k * zoom + panY;
-        p.sr = (1.6 + Math.min(p.degree, 20) * 0.34) * k * zoom;
+        // Шарики заметно крупнее: мелкие точки выглядели пылью, а узел —
+        // это вещь, о которой система что-то знает
+        p.sr = (4.5 + Math.min(p.degree, 20) * 0.75) * k * zoom;
         // 1 — у самого зрителя, 0 — на дальнем краю
         p.depth = Math.max(0, Math.min(1, (FOCAL * 0.5 - rz) / (FOCAL * 0.9)));
       }
@@ -240,11 +274,28 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
       const focus = hoverId.current ?? selectedId ?? null;
       const focusSet = focus ? new Set([focus, ...(neighbours.get(focus) ?? [])]) : null;
 
+      // Кто сейчас ближе всех к зрителю. Эти двое горят всегда, даже когда
+      // мышь никто не трогает: облако поворачивается — и очередь переходит
+      // к следующему узлу. Считать «примерно по глубине» оказалось мало,
+      // ясная звезда должна быть всегда.
+      let first: Placed | null = null;
+      let second: Placed | null = null;
+      for (const p of placed) {
+        if (!first || p.depth > first.depth) {
+          second = first;
+          first = p;
+        } else if (!second || p.depth > second.depth) {
+          second = p;
+        }
+      }
+      // Медленное дыхание ведущей звезды — чтобы взгляд её находил
+      const pulse = 0.9 + 0.1 * Math.sin(t * 1.6);
+
       const heatOf = (p: Placed): number => {
         if (focusSet) return focusSet.has(p.id) ? 1 : 0.05;
-        // Само собой разгорается то, что ближе всего к зрителю. Пока
-        // облако поворачивается, очередь доходит до каждого узла.
-        let heat = Math.pow(p.depth, 6);
+        let heat = 0.35 * Math.pow(p.depth, 8);
+        if (p === first) heat = pulse;
+        else if (p === second) heat = Math.max(heat, 0.7 * pulse);
         if (ptr) {
           const near = Math.max(0, 1 - Math.hypot(p.sx - ptr.x, p.sy - ptr.y) / POINTER_RADIUS);
           heat = Math.max(heat, near * near);
@@ -272,25 +323,23 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
         ctx.lineTo(b.sx, b.sy);
         ctx.stroke();
 
-        // Точки идут по нити всегда — они и показывают, что связь живая.
-        // Раньше их гасил порог, и на спокойной карте не двигалось ничего.
+        // Одна точка на нить: две читались как поток данных, а тут
+        // спокойный обмен. Идёт всегда — она и показывает, что связь живая
         const speed = 0.03 + Math.min(l.weight, 4) * 0.012;
         const bright = focusSet ? (lit ? 1 : 0.06) : 0.3 + 0.7 * Math.pow((a.depth + b.depth) / 2, 3);
-        for (let i = 0; i < 2; i++) {
-          const prog = (t * speed + i * 0.5 + (li % 7) / 7) % 1;
-          ctx.globalAlpha = Math.min(0.95, 0.2 + bright * 0.75);
-          ctx.fillStyle = lit ? `rgb(${SOLAR})` : '#ffffff';
-          ctx.beginPath();
-          ctx.arc(
-            a.sx + (b.sx - a.sx) * prog,
-            a.sy + (b.sy - a.sy) * prog,
-            (bright > 0.5 ? 1.5 : 0.9) * Math.min(zoom, 2),
-            0,
-            7,
-          );
-          ctx.fill();
-          ctx.globalAlpha = 1;
-        }
+        const prog = (t * speed + (li % 11) / 11) % 1;
+        ctx.globalAlpha = Math.min(0.95, 0.2 + bright * 0.75);
+        ctx.fillStyle = lit ? `rgb(${SOLAR})` : '#ffffff';
+        ctx.beginPath();
+        ctx.arc(
+          a.sx + (b.sx - a.sx) * prog,
+          a.sy + (b.sy - a.sy) * prog,
+          (bright > 0.5 ? 1.8 : 1.1) * Math.min(zoom, 2),
+          0,
+          7,
+        );
+        ctx.fill();
+        ctx.globalAlpha = 1;
       });
 
       // Узлы: дальние рисуются раньше, ближние ложатся поверх
@@ -367,9 +416,14 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
       className={`h-full w-full ${drag.current ? 'cursor-grabbing' : 'cursor-crosshair'}`}
       onMouseDown={(e) => {
         const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const hit = pick(x, y);
+        // Схватил узел — тянем его; схватил пустоту — двигаем всю карту
+        dragged.current = hit ?? null;
         drag.current = {
-          x: e.clientX - rect.left,
-          y: e.clientY - rect.top,
+          x,
+          y,
           panX: camera.current.panX,
           panY: camera.current.panY,
           moved: 0,
@@ -384,6 +438,23 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
           const dx = x - drag.current.x;
           const dy = y - drag.current.y;
           drag.current.moved = Math.max(drag.current.moved, Math.hypot(dx, dy));
+
+          const node = dragged.current;
+          if (node) {
+            // Экран → мир: глубину узла оставляем прежней, меняем только
+            // то, что видно на плоскости экрана, и раскручиваем поворот назад
+            const { zoom, panX, panY } = camera.current;
+            const rzOld = node.x * Math.sin(angleRef.current) + node.z * Math.cos(angleRef.current);
+            const k = FOCAL / (FOCAL + rzOld);
+            const rx = (x - rect.width / 2 - panX) / (k * zoom);
+            const cos = Math.cos(angleRef.current);
+            const sin = Math.sin(angleRef.current);
+            node.x = rx * cos + rzOld * sin;
+            node.z = -rx * sin + rzOld * cos;
+            node.y = (y - rect.height / 2 - panY) / (k * zoom);
+            return;
+          }
+
           camera.current.panX = drag.current.panX + dx;
           camera.current.panY = drag.current.panY + dy;
           return;
@@ -398,6 +469,7 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
         const rect = e.currentTarget.getBoundingClientRect();
         const wasDrag = (drag.current?.moved ?? 0) > 4;
         drag.current = null;
+        dragged.current = null;
         // Тащили карту — это не выбор узла
         if (wasDrag) return;
         const hit = pick(e.clientX - rect.left, e.clientY - rect.top);
@@ -410,6 +482,7 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
         pointer.current = null;
         hoverId.current = null;
         drag.current = null;
+        dragged.current = null;
         setHoverLabel(null);
       }}
       title={hoverLabel?.node.label}
