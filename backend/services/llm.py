@@ -121,6 +121,15 @@ class LLMService:
         """
         within_budget = budget.check(kind)
 
+        # Сжатие контекста: выключено по умолчанию, при любой ошибке молча
+        # возвращает исходные сообщения. Экономия падает прямо в дневной бюджет.
+        from . import compression
+
+        raw = [m.to_dict() for m in messages]
+        packed, compress_stats = compression.compress_messages(raw, model=self.model)
+        if compress_stats.get("applied"):
+            messages = [LLMMessage(role=m["role"], content=m["content"]) for m in packed]
+
         if self.provider == "ollama":
             response = await self._ollama_chat(messages, temperature, max_tokens, json_mode)
         elif self.provider == "gemini":
@@ -133,6 +142,8 @@ class LLMService:
         cost = budget.record(response.model, response.usage)
         if cost:
             response.usage["cost_usd"] = round(cost, 6)
+        if compress_stats.get("applied"):
+            response.usage["tokens_saved_by_compression"] = compress_stats["saved"]
         response.over_budget = not within_budget
         return response
     
