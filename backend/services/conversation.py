@@ -13,6 +13,7 @@ from typing import Any
 from ..agents.persona_manager import PersonaManager
 from ..core import eventbus
 from . import budget
+from . import chat_log
 from . import dialog_history
 from . import entity_extraction
 from . import memory as memory_svc
@@ -161,6 +162,15 @@ class ConversationService:
         try:
             await asyncio.to_thread(
                 dialog_history.append_turn, channel, user_id, text, reply, persona
+            )
+            # Полная лента — то, что человек читает на экране. Буфер выше
+            # режется до 600 символов ради промпта, и длинные ответы в чате
+            # обрывались на полуслове
+            await asyncio.to_thread(
+                chat_log.append_turn,
+                channel,
+                user_id,
+                [("user", text, ""), ("assistant", reply, persona)],
             )
         except Exception:
             logger.exception("Не удалось записать историю диалога %s:%s", channel, user_id)

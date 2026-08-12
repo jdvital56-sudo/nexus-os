@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Send, Eraser, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
 import { getChatHistory, getPersonas, getVoiceStatus, resetChat, sendChatMessage, speak } from '../lib/api';
-import { listen, speechSupported, type Listener } from '../lib/speech';
+import { listen, listenForWakeWord, speechSupported, type Listener } from '../lib/speech';
 import { JarvisHudWidget, type JarvisState } from '../components/JarvisHudWidget';
 import { BTN, BTN_GHOST, ErrorBox, INPUT } from '../components/ui';
 import type { Persona } from '../types';
@@ -39,6 +39,15 @@ export default function ChatScreen() {
   const recognizer = useRef<Listener | null>(null);
   const player = useRef<HTMLAudioElement | null>(null);
 
+  // Режим «по имени»: микрофон открыт, но наружу ничего не уходит, пока не
+  // прозвучало «Джарвис». Разбудили — отвечает и слушает дальше; минута
+  // тишины или «Джарвис, отключись» — снова спит.
+  const [wakeMode, setWakeMode] = useState(false);
+  const [awake, setAwake] = useState(false);
+  const awakeRef = useRef(false);
+  const sleepTimer = useRef<number | null>(null);
+  const wakeListener = useRef<Listener | null>(null);
+
   useEffect(() => {
     getChatHistory()
       .then((h) => setLines(h.messages))
@@ -63,6 +72,63 @@ export default function ChatScreen() {
       setState('ONLINE');
       setError('Не удалось озвучить ответ.');
     }
+  };
+
+  // Засыпание: минута тишины возвращает Джарвиса в режим ожидания. Иначе
+  // он продолжит отправлять всё, что услышит в комнате
+  const armSleep = () => {
+    if (sleepTimer.current) window.clearTimeout(sleepTimer.current);
+    sleepTimer.current = window.setTimeout(() => {
+      awakeRef.current = false;
+      setAwake(false);
+      setState('ONLINE');
+    }, 60_000);
+  };
+
+  const wake = (rest: string) => {
+    awakeRef.current = true;
+    setAwake(true);
+    setState('LISTENING');
+    armSleep();
+    // «Джарвис, поставь встречу завтра» — вопрос сказан сразу за именем
+    if (rest.trim()) heard(rest.trim());
+  };
+
+  const heard = (said: string) => {
+    // «Джарвис, отключись» — уходит спать, не отвечая
+    if (/отключись|отбой|спасибо,?\s*всё|хватит|стоп/i.test(said)) {
+      awakeRef.current = false;
+      setAwake(false);
+      setState('ONLINE');
+      return;
+    }
+    armSleep();
+    submit(said, true);
+  };
+
+  const toggleWakeMode = () => {
+    if (wakeMode) {
+      wakeListener.current?.stop();
+      wakeListener.current = null;
+      if (sleepTimer.current) window.clearTimeout(sleepTimer.current);
+      awakeRef.current = false;
+      setAwake(false);
+      setWakeMode(false);
+      setState('ONLINE');
+      return;
+    }
+
+    setError(null);
+    wakeListener.current = listenForWakeWord('ru-RU', {
+      isAwake: () => awakeRef.current,
+      onWake: wake,
+      onCommand: heard,
+      onError: (reason) => {
+        setError(reason);
+        setWakeMode(false);
+      },
+    });
+    setWakeMode(Boolean(wakeListener.current));
   };
 
   const toggleMic = () => {
@@ -94,8 +160,22 @@ export default function ChatScreen() {
     feed.current?.scrollTo({ top: feed.current.scrollHeight, behavior: 'smooth' });
   }, [lines, state]);
 
+  // Уходя с экрана, отпускаем микрофон: он не должен слушать комнату,
+  // когда человек ушёл на другую страницу
+  useEffect(() => {
+    return () => {
+      wakeListener.current?.stop();
+      recognizer.current?.stop();
+      if (sleepTimer.current) window.clearTimeout(sleepTimer.current);
+      player.current?.pause();
+    };
+  }, []);
+
   const send = async () => {
-    const value = text.trim();
+    await submit(text.trim());
+  };
+
+  const submit = async (value: string, speakReply = false) => {
     if (!value || state === 'PROCESSING') return;
 
     setLines((prev) => [...prev, { role: 'user', text: value }]);
@@ -106,7 +186,7 @@ export default function ChatScreen() {
     try {
       const res = await sendChatMessage(value, persona || undefined);
       setLines((prev) => [...prev, { role: 'assistant', text: res.reply, persona: res.persona }]);
-      if (speakBack && voiceReady) {
+      if ((speakBack || speakReply) && voiceReady) {
         say(res.reply);
       } else {
         // Короткое «говорю» — чтобы было видно, что ответ только что пришёл
@@ -225,6 +305,23 @@ export default function ChatScreen() {
             className={`${INPUT} flex-1`}
             autoFocus
           />
+
+          {speechSupported() && (
+            <button
+              onClick={toggleWakeMode}
+              className={`${BTN_GHOST} ${
+                wakeMode ? (awake ? 'border-pink-500/60 text-pink-300' : 'border-primary/50 text-primary') : ''
+              }`}
+              title={
+                wakeMode
+                  ? 'Скажи «Джарвис» — он проснётся. «Джарвис, отключись» или минута тишины — уснёт'
+                  : 'Откликаться на слово «Джарвис»'
+              }
+            >
+              {wakeMode ? <Mic className="h-4 w-4" aria-hidden /> : <MicOff className="h-4 w-4" aria-hidden />}
+              {wakeMode ? (awake ? 'Слушаю' : 'Жду «Джарвис»') : 'По имени'}
+            </button>
+          )}
 
           {speechSupported() && (
             <button

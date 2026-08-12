@@ -74,6 +74,9 @@ def temp_data_dir(tmp_path, monkeypatch):
     import backend.services.watchdog as watchdog_svc
     monkeypatch.setattr(watchdog_svc, "STATE_FILE", tmp_path / "watchdog_state.json")
 
+    import backend.services.chat_log as chat_log_svc
+    monkeypatch.setattr(chat_log_svc, "LOG_FILE", tmp_path / "chat_log.json")
+
     import backend.core.singleton as singleton_mod
     monkeypatch.setattr(singleton_mod, "LOCK_FILE", tmp_path / "scheduler.lock")
 
