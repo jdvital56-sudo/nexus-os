@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
+import { useLang } from '../lib/i18n';
 import { 
   LayoutDashboard, 
   Brain, 
@@ -42,12 +43,13 @@ const menuItems = [
 
 export default function Sidebar() {
   const location = useLocation();
+  const { lang, setLang, t } = useLang();
 
   return (
     <aside className="w-64 bg-darker border-r border-gray-800 h-screen fixed left-0 top-0 overflow-y-auto">
       <div className="p-6">
         <h1 className="text-2xl font-bold text-primary">Nexus OS</h1>
-        <p className="text-xs text-gray-500 mt-1">Личная операционная система</p>
+        <p className="text-xs text-gray-500 mt-1">{t('Личная операционная система')}</p>
       </div>
       
       <nav className="mt-6">
@@ -66,16 +68,29 @@ export default function Sidebar() {
               }`}
             >
               <Icon className="w-5 h-5 mr-3" />
-              {item.label}
+              {t(item.label)}
             </Link>
           );
         })}
       </nav>
       
-      <div className="absolute bottom-0 left-0 right-0 p-6 border-t border-gray-800">
+      <div className="absolute bottom-0 left-0 right-0 border-t border-gray-800 p-6">
+        <div className="mb-3 flex gap-1" title={t('Язык интерфейса')}>
+          {(['ru', 'en'] as const).map((code) => (
+            <button
+              key={code}
+              onClick={() => setLang(code)}
+              className={`cursor-pointer rounded px-2 py-1 text-xs uppercase transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-primary ${
+                lang === code ? 'bg-primary/10 text-primary' : 'text-gray-500 hover:text-white'
+              }`}
+            >
+              {code}
+            </button>
+          ))}
+        </div>
         <div className="flex items-center space-x-3">
-          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-          <span className="text-xs text-gray-400">System Online</span>
+          <div className="h-2 w-2 animate-pulse rounded-full bg-green-500 motion-reduce:animate-none" />
+          <span className="text-xs text-gray-400">{lang === 'ru' ? 'Система на связи' : 'System online'}</span>
         </div>
       </div>
     </aside>

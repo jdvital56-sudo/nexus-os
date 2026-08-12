@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { AlertCircle } from 'lucide-react';
+import { useLang } from '../lib/i18n';
 
 // Общие блоки экранов. Раньше каждый экран нёс свои инлайн-стили, из-за
 // чего одна и та же карточка выглядела в трёх местах по-разному, а любая
@@ -45,6 +46,7 @@ export function Empty({ title, hint }: { title: string; hint?: string }) {
 }
 
 export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const { t } = useLang();
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-red-500/40 bg-red-500/10 p-4">
       <AlertCircle className="h-5 w-5 shrink-0 text-red-400" aria-hidden />
@@ -54,7 +56,7 @@ export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () =
           onClick={onRetry}
           className="ml-auto cursor-pointer text-sm text-red-100 underline focus:outline-none focus:ring-2 focus:ring-red-400"
         >
-          Повторить
+          {t('Повторить')}
         </button>
       )}
     </div>

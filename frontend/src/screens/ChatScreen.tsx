@@ -4,6 +4,7 @@ import { getChatHistory, getPersonas, resetChat, sendChatMessage } from '../lib/
 import { JarvisHudWidget, type JarvisState } from '../components/JarvisHudWidget';
 import { BTN, BTN_GHOST, ErrorBox, INPUT } from '../components/ui';
 import type { Persona } from '../types';
+import { useLang } from '../lib/i18n';
 
 // Разговор с Джарвисом прямо в системе. Это не второй мозг: экран стучится
 // в тот же контур мышления, что и Телеграм, поэтому память, персоны,
@@ -21,6 +22,7 @@ interface Line {
 }
 
 export default function ChatScreen() {
+  const { t } = useLang();
   const [lines, setLines] = useState<Line[]>([]);
   const [text, setText] = useState('');
   const [state, setState] = useState<JarvisState>('ONLINE');
@@ -32,7 +34,7 @@ export default function ChatScreen() {
   useEffect(() => {
     getChatHistory()
       .then((h) => setLines(h.messages))
-      .catch(() => setError('Бэкенд недоступен. Запущен ли он на :8420?'));
+      .catch(() => setError(t('Бэкенд недоступен. Запущен ли он на :8420?')));
     getPersonas().then(setPersonas).catch(() => {});
   }, []);
 
@@ -57,7 +59,7 @@ export default function ChatScreen() {
       setTimeout(() => setState('ONLINE'), 1600);
     } catch (e: any) {
       setState('ONLINE');
-      setError(e?.response?.data?.detail ?? 'Ответ не пришёл.');
+      setError(e?.response?.data?.detail ?? t('Ответ не пришёл.'));
     }
   };
 
@@ -75,14 +77,14 @@ export default function ChatScreen() {
       <div className="flex min-w-0 flex-1 flex-col p-6 lg:p-8">
         <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-white lg:text-3xl">Разговор</h1>
+            <h1 className="text-2xl font-bold text-white lg:text-3xl">{t('Разговор')}</h1>
             <p className="mt-1 text-sm text-gray-400">
-              Тот же Джарвис, что в Телеграме: общая память, общий характер. Нить разговора здесь своя.
+              {t('Тот же Джарвис, что в Телеграме: общая память, общий характер. Нить разговора здесь своя.')}
             </p>
           </div>
           <button onClick={clear} className={BTN_GHOST} title="Память фактов останется">
             <Eraser className="h-4 w-4" aria-hidden />
-            Начать заново
+            {t('Начать заново')}
           </button>
         </header>
 
@@ -95,7 +97,7 @@ export default function ChatScreen() {
         <div ref={feed} className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {lines.length === 0 && (
             <div className="mt-10 text-center text-sm text-gray-500">
-              Спроси что угодно. Он помнит прошлые разговоры и твои заметки.
+              {t('Спроси что угодно. Он помнит прошлые разговоры и твои заметки.')}
             </div>
           )}
 
@@ -124,7 +126,7 @@ export default function ChatScreen() {
           {state === 'PROCESSING' && (
             <div className="flex justify-start">
               <div className="rounded-lg border border-gray-800 bg-dark px-4 py-2.5 text-sm text-gray-400">
-                думаю…
+                {t('думаю…')}
               </div>
             </div>
           )}
@@ -137,7 +139,7 @@ export default function ChatScreen() {
             className="cursor-pointer rounded-md border border-gray-800 bg-darker px-3 py-2 text-sm text-gray-200 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary"
             title="Кому адресовать. По умолчанию система выбирает сама по смыслу вопроса"
           >
-            <option value="">персона по смыслу</option>
+            <option value="">{t('персона по смыслу')}</option>
             {personas.map((p) => (
               <option key={p.name} value={p.name}>
                 {p.name}
@@ -154,14 +156,14 @@ export default function ChatScreen() {
                 send();
               }
             }}
-            placeholder="Сообщение…"
+            placeholder={t('Сообщение…')}
             className={`${INPUT} flex-1`}
             autoFocus
           />
 
           <button onClick={send} className={BTN} disabled={!text.trim() || state === 'PROCESSING'}>
             <Send className="h-4 w-4" aria-hidden />
-            Отправить
+            {t('Отправить')}
           </button>
         </div>
       </div>
@@ -171,8 +173,8 @@ export default function ChatScreen() {
         <JarvisHudWidget state={state} activeModel={persona ? persona.toUpperCase() : ''} />
         <p className="mt-6 max-w-[12rem] text-center text-xs leading-relaxed text-gray-500">
           {state === 'PROCESSING'
-            ? 'Собирает ответ: смотрит память, заметки и нить разговора.'
-            : 'Готов. Память общая с Телеграмом.'}
+            ? t('Собирает ответ: смотрит память, заметки и нить разговора.')
+            : t('Готов. Память общая с Телеграмом.')}
         </p>
       </aside>
     </div>
