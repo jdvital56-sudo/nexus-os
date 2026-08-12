@@ -14,6 +14,7 @@ import PipelineScreen from './screens/PipelineScreen';
 import PersonasScreen from './screens/PersonasScreen';
 import WalletScreen from './screens/WalletScreen';
 import ArtifactsScreen from './screens/ArtifactsScreen';
+import ChatScreen from './screens/ChatScreen';
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
         <main className="ml-64 flex-1 p-8">
           <Routes>
             <Route path="/" element={<HomeScreen />} />
+            <Route path="/chat" element={<ChatScreen />} />
             <Route path="/memory" element={<MemoryScreen />} />
             <Route path="/skills" element={<SkillsScreen />} />
             <Route path="/agents" element={<AgentsScreen />} />

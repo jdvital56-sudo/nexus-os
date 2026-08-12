@@ -75,6 +75,16 @@ export const getCharacter = () => data<Character>(api.get('/personas/character')
 export const setCharacter = (payload: Partial<Character>) =>
   data<Character>(api.put('/personas/character', payload));
 
+// --- Веб-чат ---
+// Тот же контур мышления, что у Телеграма, только другой канал
+export const getChatHistory = () =>
+  data<{ messages: Array<{ role: string; text: string; persona: string; at: string }> }>(
+    api.get('/chat/history'),
+  );
+export const sendChatMessage = (text: string, persona?: string) =>
+  data<{ reply: string; persona: string }>(api.post('/chat/message', { text, persona }));
+export const resetChat = () => data<{ removed: number }>(api.post('/chat/reset'));
+
 // --- Артефакты ---
 // Система файлы не стирает: помечает и объясняет причину, стирает человек
 export const getArtifacts = () => data<any[]>(api.get('/artifacts'));

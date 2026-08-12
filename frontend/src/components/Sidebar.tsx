@@ -13,13 +13,15 @@ import {
   Workflow,
   Drama,
   CreditCard,
-  Package
+  Package,
+  MessageSquare
 } from 'lucide-react';
 
 // Названия по-русски: система личная, и половина экранов уже говорит
 // по-русски. Смесь языков в одном меню читается хуже любого из них.
 const menuItems = [
   { path: '/', label: 'Дашборд', icon: LayoutDashboard },
+  { path: '/chat', label: 'Разговор', icon: MessageSquare },
   { path: '/graph', label: 'Второй мозг', icon: Network },
   { path: '/memory', label: 'Память', icon: Brain },
   { path: '/dream-review', label: 'Ночной прогон', icon: Calendar },
