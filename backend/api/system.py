@@ -8,6 +8,7 @@
 import os
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from ..core.auth import get_token_dep
 from ..core.config import settings
@@ -109,10 +110,51 @@ def status(_=Depends(auth)):
         "runtime": _runtime(),
         # Автопилот выключен по умолчанию и это должно быть видно, а не
         # угадываться: включённый Jarvis тратит деньги сам (R-2)
-        "autopilot": {
-            "enabled": settings.autopilot,
-            "interval_min": settings.jarvis_interval_min,
-            "max_runs_per_day": settings.jarvis_max_runs_per_day,
-            "quiet_hours": [settings.quiet_hours_start, settings.quiet_hours_end],
-        },
+        "autopilot": _autopilot_state(),
     }
+
+
+def _autopilot_state() -> dict:
+    from ..agents import autopilot as autopilot_mod
+    from ..services import runtime_settings
+
+    return {
+        "enabled": autopilot_mod.is_enabled(),
+        "source": "кнопка" if runtime_settings.autopilot_override() is not None else ".env",
+        "interval_min": settings.jarvis_interval_min,
+        "max_runs_per_day": settings.jarvis_max_runs_per_day,
+        "quiet_hours": [settings.quiet_hours_start, settings.quiet_hours_end],
+        "blocked_by": _blocked_reason(),
+    }
+
+
+def _blocked_reason() -> str | None:
+    """Почему прогон не пойдёт прямо сейчас — чтобы это не гадали."""
+    from ..agents import autopilot as autopilot_mod
+
+    try:
+        return autopilot_mod.why_blocked()
+    except Exception:
+        return None
+
+
+class AutopilotToggle(BaseModel):
+    enabled: bool
+
+
+@router.get("/autopilot")
+def autopilot_state(_=Depends(auth)):
+    return _autopilot_state()
+
+
+@router.post("/autopilot")
+def set_autopilot(req: AutopilotToggle, _=Depends(auth)):
+    """Включает или выключает автопилот без правки .env и перезапуска.
+
+    Решение человека сильнее переменной среды: переменная — позиция по
+    умолчанию при старте, нажатие кнопки — сегодняшнее решение.
+    """
+    from ..services import runtime_settings
+
+    runtime_settings.set_autopilot(req.enabled)
+    return _autopilot_state()

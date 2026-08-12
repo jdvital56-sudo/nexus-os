@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 from ..core.config import DATA_DIR, ensure_data_dir
+from ..core.errors import ConflictError
 from ..models.schemas import TaskCreate, TaskStatus
 from . import tasks as task_svc
 from . import graph as graph_svc
@@ -24,6 +25,8 @@ def _ensure_skills_dir():
 
 def list_skills() -> list[dict]:
     """List all available skill contracts."""
+    from . import runtime_settings
+
     _ensure_skills_dir()
     skills = []
     for f in sorted(_get_skills_dir().glob("*.json")):
@@ -35,10 +38,24 @@ def list_skills() -> list[dict]:
                 "description": data.get("description", ""),
                 "category": data.get("category", "general"),
                 "steps": len(data.get("steps", [])),
+                "enabled": runtime_settings.is_skill_enabled(f.stem),
             })
         except Exception:
             pass
     return skills
+
+
+def set_enabled(skill_id: str, enabled: bool) -> dict:
+    """Включает или выключает скилл. Сам контракт остаётся на диске.
+
+    Выключение — не удаление: файл никуда не девается, скилл просто
+    перестаёт запускаться, пока его не вернут.
+    """
+    from . import runtime_settings
+
+    get_skill(skill_id)  # проверяем, что такой есть — иначе NotFound
+    runtime_settings.set_skill_enabled(skill_id, enabled)
+    return {"id": skill_id, "enabled": enabled}
 
 
 def get_skill(skill_id: str) -> dict:
@@ -60,7 +77,15 @@ def execute_skill(skill_id: str, params: dict[str, Any] = None) -> dict:
 
     Returns execution log with step results.
     """
+    from . import runtime_settings
+
     contract = get_skill(skill_id)
+
+    # Выключенный скилл не запускается ни человеком, ни агентом — иначе
+    # переключатель был бы украшением, а не запретом.
+    if not runtime_settings.is_skill_enabled(skill_id):
+        raise ConflictError(f"Скилл '{skill_id}' выключен — включите его перед запуском")
+
     params = params or {}
     log = []
 

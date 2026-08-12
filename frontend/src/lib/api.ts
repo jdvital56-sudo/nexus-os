@@ -5,6 +5,7 @@ import type {
   DreamFinding,
   GraphMap,
   GraphStats,
+  AutopilotState,
   SystemStatusResponse,
   WalletSummary,
 } from '../types';
@@ -31,6 +32,24 @@ const data = <T>(p: Promise<{ data: T }>): Promise<T> => p.then(r => r.data);
 export const getSystemStatus = () =>
   data<SystemStatusResponse>(api.get('/system/status'));
 export const getWalletSummary = () => data<WalletSummary>(api.get('/wallet/summary'));
+
+// --- Скиллы ---
+// Список отдаёт только число шагов, сами шаги — отдельным запросом
+export const getSkills = () => data<any[]>(api.get('/skills'));
+export const getSkill = (id: string) => data<any>(api.get(`/skills/${id}`));
+export const runSkill = (id: string, params: Record<string, any> = {}) =>
+  data<any>(api.post(`/skills/${id}/run`, { params }));
+// Выключение — не удаление: контракт остаётся на диске, скилл просто
+// перестаёт запускаться, пока его не вернут
+export const setSkillEnabled = (id: string, enabled: boolean) =>
+  data<{ id: string; enabled: boolean }>(api.post(`/skills/${id}/enabled`, { enabled }));
+
+// --- Автопилот ---
+// Нажатие сильнее .env: переменная — позиция по умолчанию при старте,
+// кнопка — сегодняшнее решение
+export const getAutopilot = () => data<AutopilotState>(api.get('/system/autopilot'));
+export const setAutopilot = (enabled: boolean) =>
+  data<AutopilotState>(api.post('/system/autopilot', { enabled }));
 
 // --- База знаний ---
 export const getNote = (name: string) =>

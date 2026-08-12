@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DollarSign, Moon, CreditCard, Bot, AlertCircle, RefreshCw, Check, Minus } from 'lucide-react';
 import type { SystemStatusResponse, WalletSummary, SpendDay } from '../types';
-import { getSystemStatus, getWalletSummary } from '../lib/api';
+import { getSystemStatus, getWalletSummary, setAutopilot } from '../lib/api';
 import { days, money, plural } from '../lib/format';
 import { JarvisHudWidget } from '../components/JarvisHudWidget';
 
@@ -103,6 +103,20 @@ export default function HomeScreen() {
   const [wallet, setWallet] = useState<WalletSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [switching, setSwitching] = useState(false);
+
+  // Включённый автопилот тратит деньги сам (R-2), поэтому переключатель
+  // подписан словом и показывает, что именно сейчас мешает прогону —
+  // «выключен» и «включён, но тихие часы» это разные состояния.
+  const toggleAutopilot = (next: boolean) => {
+    setSwitching(true);
+    setAutopilot(next)
+      .then(state =>
+        setStatus(prev => (prev ? { ...prev, autopilot: state } : prev)),
+      )
+      .catch(() => setError('Не удалось переключить автопилот'))
+      .finally(() => setSwitching(false));
+  };
 
   const load = () => {
     setLoading(true);
@@ -186,6 +200,27 @@ export default function HomeScreen() {
       icon: Bot,
       tone: autopilot.enabled ? 'text-amber-400' : 'text-gray-400',
       bg: autopilot.enabled ? 'bg-amber-400/10' : 'bg-gray-700/40',
+      action: (
+        <div className="mt-3 flex flex-col gap-1.5">
+          <button
+            onClick={() => toggleAutopilot(!autopilot.enabled)}
+            disabled={switching}
+            aria-pressed={autopilot.enabled}
+            className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-wait disabled:opacity-60 ${
+              autopilot.enabled
+                ? 'border-amber-500/40 text-amber-200 hover:border-amber-400'
+                : 'border-gray-700 text-gray-300 hover:border-gray-600 hover:text-white'
+            }`}
+          >
+            {switching ? 'Переключаю…' : autopilot.enabled ? 'Выключить' : 'Включить'}
+          </button>
+          {/* «Выключен» и «включён, но сейчас тихие часы» — разные
+              состояния, и человек не должен их угадывать */}
+          {autopilot.enabled && autopilot.blocked_by && (
+            <span className="text-xs text-gray-500">сейчас не пойдёт: {autopilot.blocked_by}</span>
+          )}
+        </div>
+      ),
     },
   ];
 
@@ -197,15 +232,19 @@ export default function HomeScreen() {
           <p className="mt-1 text-sm text-gray-400">Что система знает о себе прямо сейчас</p>
         </div>
         <div className="flex items-center gap-4">
+          {/* Раньше здесь было просто «Обновить» рядом с индикатором
+              Jarvis, и это читалось как «обновить Jarvis». Кнопка всего
+              лишь перезапрашивает числа — теперь так и подписана. */}
           <button
             onClick={load}
+            title="Перезапросить данные с бэкенда. Автопилот это не запускает."
             className="flex cursor-pointer items-center gap-2 rounded-md border border-gray-800 px-3 py-2 text-sm text-gray-300 transition-colors duration-200 hover:border-gray-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-primary"
           >
             <RefreshCw
               className={`h-4 w-4 ${loading ? 'animate-spin motion-reduce:animate-none' : ''}`}
               aria-hidden
             />
-            Обновить
+            Обновить данные
           </button>
           <JarvisHudWidget
             state={autopilot.enabled ? 'PROCESSING' : 'ONLINE'}
@@ -237,6 +276,7 @@ export default function HomeScreen() {
               </div>
               <p className={`mt-3 text-2xl font-bold text-white ${NUM}`}>{card.value}</p>
               <p className="mt-1 text-xs text-gray-400">{card.hint}</p>
+              {'action' in card && card.action}
             </article>
           );
         })}

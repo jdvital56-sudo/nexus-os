@@ -65,6 +65,9 @@ def temp_data_dir(tmp_path, monkeypatch):
     import backend.services.curator as curator_svc
     monkeypatch.setattr(curator_svc, "ARCHIVE_FILE", tmp_path / "memory_archive.json")
 
+    import backend.services.runtime_settings as rs_svc
+    monkeypatch.setattr(rs_svc, "SETTINGS_FILE", tmp_path / "runtime_settings.json")
+
     import backend.services.dialog_history as history_svc
     monkeypatch.setattr(history_svc, "HISTORY_FILE", tmp_path / "dialog_history.json")
 

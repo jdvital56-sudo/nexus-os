@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Play, Sparkles, ChevronDown, ChevronRight } from 'lucide-react';
-import { getSkill, getSkills, runSkill } from '../lib/api';
+import { getSkill, getSkills, runSkill, setSkillEnabled } from '../lib/api';
 import { plural } from '../lib/format';
 
 // Скиллы — это записанный порядок действий: создать задачу, положить узел в
@@ -23,6 +23,8 @@ interface Skill {
   description: string;
   category?: string;
   steps: number;
+  /** Выключенный скилл остаётся на диске, но не запускается */
+  enabled?: boolean;
 }
 
 interface SkillDetail {
@@ -68,6 +70,7 @@ export default function SkillsScreen() {
   const [details, setDetails] = useState<Record<string, SkillDetail>>({});
   const [values, setValues] = useState<Record<string, Record<string, string>>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
   const [result, setResult] = useState<{ id: string; log: RunEntry[]; name: string } | null>(null);
 
   const load = useCallback(() => {
@@ -96,6 +99,22 @@ export default function SkillsScreen() {
       setDetails((prev) => ({ ...prev, [skill.id]: detail }));
     } catch {
       setError('Не удалось прочитать шаги скилла.');
+    }
+  };
+
+  const toggleEnabled = async (skill: Skill) => {
+    const next = skill.enabled === false;
+    setToggling(skill.id);
+    try {
+      await setSkillEnabled(skill.id, next);
+      setSkills((prev) =>
+        prev.map((s) => (s.id === skill.id ? { ...s, enabled: next } : s)),
+      );
+      setError(null);
+    } catch {
+      setError('Не удалось переключить скилл.');
+    } finally {
+      setToggling(null);
     }
   };
 
@@ -213,14 +232,33 @@ export default function SkillsScreen() {
                     </div>
                   )}
 
-                  <button
-                    onClick={() => run(skill)}
-                    disabled={busy === skill.id}
-                    className="flex cursor-pointer items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-darker transition-colors duration-200 hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
-                  >
-                    <Play className="h-4 w-4" aria-hidden />
-                    {busy === skill.id ? 'Выполняю…' : 'Выполнить'}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={() => run(skill)}
+                      disabled={busy === skill.id || skill.enabled === false}
+                      title={skill.enabled === false ? 'Скилл выключен' : undefined}
+                      className="flex cursor-pointer items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-darker transition-colors duration-200 hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Play className="h-4 w-4" aria-hidden />
+                      {busy === skill.id ? 'Выполняю…' : 'Выполнить'}
+                    </button>
+
+                    {/* Выключение — не удаление: контракт остаётся на диске,
+                        скилл просто перестаёт запускаться. Поэтому подпись
+                        «Выключить», а не «Удалить». */}
+                    <button
+                      onClick={() => toggleEnabled(skill)}
+                      disabled={toggling === skill.id}
+                      aria-pressed={skill.enabled !== false}
+                      className="cursor-pointer rounded-md border border-gray-700 px-3 py-2 text-sm text-gray-300 transition-colors duration-200 hover:border-gray-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-wait disabled:opacity-60"
+                    >
+                      {toggling === skill.id
+                        ? 'Переключаю…'
+                        : skill.enabled === false
+                          ? 'Включить'
+                          : 'Выключить'}
+                    </button>
+                  </div>
 
                   {result?.id === skill.id && (
                     <div className="mt-4 rounded-md bg-darker p-3">

@@ -46,6 +46,17 @@ def _count_run() -> int:
 
 
 def is_enabled() -> bool:
+    """Решение человека из интерфейса сильнее переменной среды.
+
+    Переменная — позиция по умолчанию при старте, нажатие кнопки —
+    сегодняшнее решение. Иначе автопилот нельзя было бы выключить, не
+    правя .env и не перезапуская бэкенд.
+    """
+    from ..services import runtime_settings
+
+    override = runtime_settings.autopilot_override()
+    if override is not None:
+        return override
     return bool(settings.autopilot)
 
 
@@ -64,7 +75,7 @@ def in_quiet_hours(now: datetime | None = None) -> bool:
 def why_blocked() -> str | None:
     """Что мешает прогону прямо сейчас. None — можно работать."""
     if not is_enabled():
-        return "автопилот выключен (NEXUS_AUTOPILOT=off)"
+        return "автопилот выключен"
     if in_quiet_hours():
         return f"тихие часы {settings.quiet_hours_start}:00–{settings.quiet_hours_end}:00"
     if runs_today() >= settings.jarvis_max_runs_per_day:
