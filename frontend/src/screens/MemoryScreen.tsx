@@ -1,113 +1,214 @@
-import { useEffect, useState } from 'react'
-import { getMemoryFacts, getMemoryStats, addMemoryFact } from '../lib/api'
+import { useEffect, useMemo, useState } from 'react';
+import { Plus } from 'lucide-react';
+import { addMemoryFact, getMemoryFacts, getMemoryStats } from '../lib/api';
+import { BTN, BTN_GHOST, CARD, Empty, ErrorBox, INPUT, NUM, PageHeader, Skeleton, when } from '../components/ui';
+import { plural } from '../lib/format';
 
-const LAYER_COLORS: Record<string, string> = {
-  inbox: '#6d7f97',
-  operational: '#22d3ee',
-  canonical: '#a78bfa',
-  memory: '#f5b642',
-}
+// Память из четырёх слоёв: сырое, рабочее, канон и то, чему система верит
+// в первую очередь. Слой виден полосой слева и подписан словом — по цвету
+// одному его не угадать.
+
+const LAYERS: Record<string, { label: string; hint: string; border: string; text: string }> = {
+  inbox: {
+    label: 'Входящее',
+    hint: 'сырое: реплики, расшифровки, всё непросмотренное',
+    border: 'border-l-gray-600',
+    text: 'text-gray-300',
+  },
+  operational: {
+    label: 'Рабочее',
+    hint: 'то, на что система ссылается в делах',
+    border: 'border-l-blue-400',
+    text: 'text-blue-300',
+  },
+  canonical: {
+    label: 'Канон',
+    hint: 'методики, цены, шаблоны — редко меняется',
+    border: 'border-l-secondary',
+    text: 'text-secondary',
+  },
+  memory: {
+    label: 'Память',
+    hint: 'чему система доверяет в первую очередь',
+    border: 'border-l-primary',
+    text: 'text-primary',
+  },
+};
 
 export default function MemoryScreen() {
-  const [facts, setFacts] = useState<any[]>([])
-  const [stats, setStats] = useState<any>({})
-  const [layer, setLayer] = useState<string>('')
-  const [showAdd, setShowAdd] = useState(false)
-  const [form, setForm] = useState({ content: '', layer: 'inbox', source: '', confidence: 0.5 })
+  const [facts, setFacts] = useState<any[] | null>(null);
+  const [stats, setStats] = useState<any>({});
+  const [layer, setLayer] = useState('');
+  const [query, setQuery] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ content: '', layer: 'memory', source: 'вручную', confidence: 0.8 });
 
   const load = () => {
-    const params: Record<string, string> = {}
-    if (layer) params.layer = layer
-    getMemoryFacts(params).then(setFacts).catch(() => {})
-    getMemoryStats().then(setStats).catch(() => {})
-  }
+    const params: Record<string, string> = {};
+    if (layer) params.layer = layer;
+    getMemoryFacts(params)
+      .then((f) => {
+        setFacts(f);
+        setError(null);
+      })
+      .catch(() => setError('Бэкенд недоступен. Запущен ли он на :8420?'));
+    getMemoryStats().then(setStats).catch(() => {});
+  };
 
-  useEffect(() => { load() }, [layer])
+  useEffect(load, [layer]);
 
-  const handleAdd = async () => {
-    if (!form.content) return
-    await addMemoryFact(form)
-    setForm({ content: '', layer: 'inbox', source: '', confidence: 0.5 })
-    setShowAdd(false)
-    load()
-  }
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = facts ?? [];
+    return q ? list.filter((f) => (f.content ?? '').toLowerCase().includes(q)) : list;
+  }, [facts, query]);
+
+  const add = async () => {
+    if (!form.content.trim()) return;
+    try {
+      await addMemoryFact(form);
+      setForm({ ...form, content: '' });
+      setShowAdd(false);
+      load();
+    } catch {
+      setError('Факт не записался.');
+    }
+  };
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div>
-          <h2 style={{ fontSize: 24, fontWeight: 800, color: '#f5b642' }}>Memory</h2>
-          <p style={{ color: '#6d7f97', fontSize: 13 }}>
-            {stats.active || 0} active facts · avg confidence {stats.avg_confidence || 0}
-          </p>
-        </div>
-        <button onClick={() => setShowAdd(!showAdd)} style={{
-          padding: '8px 16px', background: '#f5b642', color: '#04121a', border: 'none',
-          borderRadius: 8, fontWeight: 700, cursor: 'pointer',
-        }}>+ Add Fact</button>
-      </div>
+    <div className="p-6 lg:p-8">
+      <PageHeader
+        title="Память"
+        subtitle={
+          stats.active != null
+            ? `${plural(stats.active, 'факт', 'факта', 'фактов')} · средняя достоверность ${stats.avg_confidence ?? 0}`
+            : 'Чему система верит и откуда это узнала.'
+        }
+        action={
+          <button onClick={() => setShowAdd(!showAdd)} className={BTN}>
+            <Plus className="h-4 w-4" aria-hidden />
+            Записать факт
+          </button>
+        }
+      />
 
-      {/* Layer filter */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        {[{ l: '', label: 'All' }, { l: 'inbox', label: 'Inbox' }, { l: 'operational', label: 'Operational' }, { l: 'canonical', label: 'Canon' }, { l: 'memory', label: 'Memory' }].map(({ l, label }) => (
-          <button key={l} onClick={() => setLayer(l)} style={{
-            padding: '6px 14px', background: layer === l ? '#1a2434' : 'transparent',
-            border: `1px solid ${layer === l ? '#f5b642' : '#1e2a3a'}`,
-            borderRadius: 8, color: layer === l ? '#f5b642' : '#6d7f97',
-            cursor: 'pointer', fontSize: 13,
-          }}>{label}</button>
-        ))}
-      </div>
+      {error && (
+        <div className="mb-6">
+          <ErrorBox message={error} onRetry={load} />
+        </div>
+      )}
 
       {showAdd && (
-        <div style={{ background: '#0f1520', border: '1px solid #1e2a3a', borderRadius: 12, padding: 16, marginBottom: 16 }}>
-          <textarea value={form.content} onChange={e => setForm({...form, content: e.target.value})} placeholder="Fact content..." rows={3}
-            style={{ width: '100%', padding: '8px 12px', background: '#0a0e14', border: '1px solid #1e2a3a', borderRadius: 6, color: '#e8eef6', marginBottom: 8, fontSize: 14, resize: 'vertical' }} />
-          <div style={{ display: 'flex', gap: 8 }}>
-            <select value={form.layer} onChange={e => setForm({...form, layer: e.target.value})}
-              style={{ padding: '8px', background: '#0a0e14', border: '1px solid #1e2a3a', borderRadius: 6, color: '#e8eef6' }}>
-              <option value="inbox">Inbox</option>
-              <option value="operational">Operational</option>
-              <option value="canonical">Canonical</option>
-              <option value="memory">Memory</option>
-            </select>
-            <input value={form.source} onChange={e => setForm({...form, source: e.target.value})} placeholder="Source"
-              style={{ flex: 1, padding: '8px', background: '#0a0e14', border: '1px solid #1e2a3a', borderRadius: 6, color: '#e8eef6', fontSize: 14 }} />
-            <input type="number" value={form.confidence} onChange={e => setForm({...form, confidence: parseFloat(e.target.value)})} min={0} max={1} step={0.1}
-              style={{ width: 80, padding: '8px', background: '#0a0e14', border: '1px solid #1e2a3a', borderRadius: 6, color: '#e8eef6', fontSize: 14 }} />
-            <button onClick={handleAdd} style={{
-              padding: '8px 16px', background: '#f5b642', color: '#04121a', border: 'none',
-              borderRadius: 8, fontWeight: 700, cursor: 'pointer',
-            }}>Save</button>
+        <div className={`${CARD} mb-6 space-y-3`}>
+          <textarea
+            value={form.content}
+            onChange={(e) => setForm({ ...form, content: e.target.value })}
+            placeholder="Что система должна знать"
+            rows={3}
+            className={INPUT}
+            autoFocus
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            {Object.entries(LAYERS).map(([key, l]) => (
+              <button
+                key={key}
+                onClick={() => setForm({ ...form, layer: key })}
+                className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
+                  form.layer === key
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+                }`}
+                title={l.hint}
+              >
+                {l.label}
+              </button>
+            ))}
+            <button onClick={add} className={`${BTN} ml-auto`} disabled={!form.content.trim()}>
+              Записать
+            </button>
+            <button onClick={() => setShowAdd(false)} className={BTN_GHOST}>
+              Отмена
+            </button>
           </div>
         </div>
       )}
 
-      <div style={{ display: 'grid', gap: 8 }}>
-        {facts.map(f => (
-          <div key={f.id} style={{
-            background: '#0f1520', border: '1px solid #1e2a3a', borderLeft: `3px solid ${LAYER_COLORS[f.layer] || '#6d7f97'}`,
-            borderRadius: 10, padding: '14px 18px',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 11, color: LAYER_COLORS[f.layer], textTransform: 'uppercase', letterSpacing: 1 }}>{f.layer}</span>
-              <div style={{ display: 'flex', gap: 8, fontSize: 11, color: '#6d7f97' }}>
-                <span>conf: {f.confidence}</span>
-                {f.source && <span>src: {f.source}</span>}
-              </div>
-            </div>
-            <div style={{ color: '#fff', marginTop: 6, fontSize: 14 }}>{f.content}</div>
-            {f.tags?.length > 0 && (
-              <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
-                {f.tags.map((t: string) => (
-                  <span key={t} style={{ fontSize: 11, color: '#f5b642', background: 'rgba(245,182,66,.1)', padding: '2px 8px', borderRadius: 999 }}>{t}</span>
-                ))}
-              </div>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => setLayer('')}
+          className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
+            layer === ''
+              ? 'border-primary/40 bg-primary/10 text-primary'
+              : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+          }`}
+        >
+          Все слои
+        </button>
+        {Object.entries(LAYERS).map(([key, l]) => (
+          <button
+            key={key}
+            onClick={() => setLayer(key)}
+            title={l.hint}
+            className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
+              layer === key
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+            }`}
+          >
+            {l.label}
+            {stats.by_layer?.[key] != null && (
+              <span className={`ml-2 text-xs text-gray-500 ${NUM}`}>{stats.by_layer[key]}</span>
             )}
-          </div>
+          </button>
         ))}
-        {facts.length === 0 && <div style={{ color: '#6d7f97', textAlign: 'center', padding: 40 }}>No memory facts yet</div>}
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Поиск по тексту"
+          className={`${INPUT} ml-auto max-w-xs`}
+        />
+      </div>
+
+      {facts === null && !error && <Skeleton />}
+
+      {facts?.length === 0 && (
+        <Empty
+          title="Фактов пока нет."
+          hint="Память наполняется сама из разговоров с ботом — или запиши первый факт вручную."
+        />
+      )}
+
+      {facts && facts.length > 0 && shown.length === 0 && (
+        <Empty title={`По запросу «${query}» ничего не нашлось.`} />
+      )}
+
+      <div className="space-y-2">
+        {shown.map((f) => {
+          const l = LAYERS[f.layer] ?? LAYERS.inbox;
+          return (
+            <article key={f.id} className={`${CARD} border-l-4 ${l.border}`}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`text-[11px] uppercase tracking-wider ${l.text}`}>{l.label}</span>
+                <span className={`ml-auto text-[11px] text-gray-500 ${NUM}`}>
+                  достоверность {f.confidence}
+                </span>
+              </div>
+              <p className="mt-1 whitespace-pre-wrap break-words text-sm text-gray-100">{f.content}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-1">
+                {f.tags?.slice(0, 6).map((t: string) => (
+                  <span key={t} className="rounded-full bg-gray-800 px-2 py-0.5 text-[11px] text-gray-300">
+                    {t}
+                  </span>
+                ))}
+                <span className="ml-auto text-[11px] text-gray-500">
+                  {f.source} · {when(f.created_at)}
+                </span>
+              </div>
+            </article>
+          );
+        })}
       </div>
     </div>
-  )
+  );
 }
