@@ -1,277 +1,145 @@
-# NEXSYS
+# Nexus OS
 
-Local-first AI agent operating system with knowledge graph, memory, and multi-agent orchestration.
+Личная AI-операционная система: память, граф знаний, агенты и один общий
+контур мышления для всех каналов — Telegram, веб-чат, а позже голос.
 
-## Features
+Работает локально. Данные лежат на диске, а не в чужом облаке.
 
-- 🧠 **Knowledge Graph** — NetworkX-based graph with nodes, edges, and semantic relationships
-- 🔍 **Vector Search** — ChromaDB integration with NumPy fallback for semantic search
-- 🤖 **Multi-Agent System** — 6 specialized agents (Builder, Librarian, Reviewer, Researcher, Monitor, Jarvis)
-- 💾 **Memory Layers** — Short-term, working, and long-term memory with confidence scoring
-- 📚 **Document Management** — Import, tag, and link documents to knowledge graph
-- ✅ **Task System** — Task creation, assignment, and tracking with priorities
-- 🎯 **Skills Engine** — JSON-defined skill contracts for repeatable actions
-- 🔌 **LLM Integration** — Support for Ollama, OpenAI, and Anthropic providers
-- 🔒 **Secure Auth** — Token-based authentication with configurable expiry
-- 📊 **Logging & Monitoring** — Configurable logging with file support
+> **Про имя.** Проект раньше назывался NEXSYS. В интерфейсе имени больше нет,
+> но переменные окружения по-прежнему начинаются с `NEXSYS_`, а папка данных
+> называется `~/.nexsys`. Это не опечатка: переименование папки трогает всю
+> память и граф, поэтому делается отдельно и с копией.
 
-## Quick Start
+## Что работает вживую
 
-### Prerequisites
+- **Telegram-бот** отвечает через выбранную модель, помнит нить разговора и
+  прошлые факты, принимает голосовые (расшифровка — при наличии ключа Gemini).
+- **Веб-чат** — тот же контур мышления, другой канал. Нить у каналов раздельная.
+- **Второй мозг**: граф знаний наполняется из диалога и заметок Obsidian,
+  показан объёмной картой.
+- **Память** из четырёх слоёв с достоверностью и источником.
+- **Ночной прогон** (Dream Cadence) разбирает прошедший день и складывает
+  находки; человек нажимает «применить» или «пропустить».
+- **Скиллы** — записанный порядок действий, выполняется без модели.
+- **Бюджет**: дневной потолок трат на модели; фоновые задачи глушатся,
+  интерактивные — нет.
+- **Реестр подписок** считает деньги и напоминает о списаниях.
 
-- Python 3.10+
-- Node.js 18+
-- (Optional) Ollama for local LLM: `ollama run llama3.1:8b`
+## Установка
 
-### Installation
+Нужны Python 3.11+ и Node.js 18+.
 
 ```bash
-# Backend
-cd backend
-pip install -r requirements.txt
-
-# Frontend
-cd ../frontend
-npm install
+python -m venv .venv
+.venv\Scripts\pip install -r backend/requirements.txt
+cd frontend && npm install
 ```
 
-### Configuration
-
-Copy `.env.example` to `.env` and customize:
+Скопируй `.env.example` в `.env` и впиши ключи:
 
 ```bash
 cp .env.example .env
 ```
 
-Key settings:
-- `NEXSYS_LLM_PROVIDER` — Choose: `ollama`, `openai`, or `anthropic`
-- `NEXSYS_VECTOR_STORE` — Choose: `chroma` or `numpy` (fallback)
-- `NEXSYS_API_PORT` — Default: `8420`
-- `NEXSYS_LOG_LEVEL` — Default: `INFO`
+Основное:
 
-### Running
+- `NEXSYS_LLM_PROVIDER` — `ollama`, `openai`, `anthropic` или `deepseek`
+- `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` — ключи Пантеона
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USER_ID` — бот и единственный
+  разрешённый собеседник
+- `OBSIDIAN_VAULT_PATH` — путь к базе знаний
+- `NEXUS_DAILY_LLM_BUDGET_USD` — дневной потолок трат, по умолчанию 5
+- `NEXSYS_API_PORT` — порт бэкенда, по умолчанию 8420
+
+## Запуск
+
+Бэкенд запускается **из корня проекта**, не из папки `backend`:
 
 ```bash
-# Development mode (backend + frontend)
-python -m cli.main start
+.venv\Scripts\python -m uvicorn backend.main:app --host 127.0.0.1 --port 8420
+```
 
-# Or separately:
-# Backend
-cd backend && uvicorn main:app --reload --host 127.0.0.1 --port 8420
+Фронтенд:
 
-# Frontend
+```bash
 cd frontend && npm run dev
 ```
 
-### Docker
+Telegram-бот — отдельным процессом:
 
 ```bash
-docker-compose up -d
+.venv\Scripts\python hermes/bot.py
 ```
 
-## CLI Commands
+Интерфейс открывается на http://localhost:5173
+
+**Важно:** расписание (ночной прогон, утренние напоминания, автопилот) ведёт
+ровно один процесс бэкенда. Второй экземпляр видит замок и не ставит задачи —
+иначе напоминания приходят по разу на каждый запущенный бэкенд.
+
+## Командная строка
+
+Отдельной команды `nexsys` нет — пакет не устанавливается в систему. Всё
+через модуль:
 
 ```bash
-# Initialize project
-nexsys init
-
-# Start all services
-nexsys start
-
-# Health check
-nexsys doctor
-
-# Run specific agent
-nexsys agent run librarian
-
-# Execute skill
-nexsys skill run publish-post --params '{"topic": "AI", "platform": "twitter"}'
+.venv\Scripts\python -m cli.main --help
+.venv\Scripts\python -m cli.main doctor        # проверка окружения
+.venv\Scripts\python -m cli.main memory-stats  # что в памяти
+.venv\Scripts\python -m cli.main import-docs <путь>
 ```
 
-## API Endpoints
+## Доступ
 
-| Endpoint | Description |
-|----------|-------------|
-| `/api/health` | Health check |
-| `/api/documents` | Document CRUD + import |
-| `/api/tasks` | Task management |
-| `/api/graph` | Knowledge graph operations |
-| `/api/agents` | Agent management + execution |
-| `/api/memory` | Memory layers |
-| `/api/vector-search` | Semantic search |
-| `/api/skills` | Skill execution |
-| `/api/docs` | Interactive API docs (Swagger) |
-| `/api/redoc` | Alternative API docs (ReDoc) |
+Бэкенд слушает только петлевой адрес и требует токен. Токен создаётся при
+первом запуске и лежит в `~/.nexsys/auth.json`; фронтенд читает его из
+`frontend/.env.local` как `VITE_API_TOKEN`.
 
-## Architecture
+## API
 
-### Backend Stack
-- **Framework**: FastAPI + Pydantic
-- **Graph**: NetworkX
-- **Vector Store**: ChromaDB (with NumPy fallback)
-- **Storage**: JSON-хранилище (`data/`)
-- **Auth**: JWT with python-jose
+Разделы: `chat`, `system`, `memory`, `graph`, `documents`, `tasks`, `agents`,
+`personas`, `skills`, `dream`, `wallet`, `artifacts`, `obsidian`, `gmail`,
+`calendar`, `sources`, `curator`, `pipeline`, `vectors`, `fireflies`,
+`webhooks`, `health`.
 
-### Frontend Stack
-- **Build**: Vite
-- **Language**: TypeScript
-- **UI**: React + Canvas visualization
+Полный список с формами запросов — на http://localhost:8420/api/docs
 
-### Agents
+Живая лента событий: WebSocket на `/ws` (в корне, не под `/api`).
 
-| Agent | Role | Responsibility |
-|-------|------|----------------|
-| **Builder** | Implementation | Executes build tasks, creates features |
-| **Librarian** | Organization | Links documents to graph, manages tags |
-| **Reviewer** | Quality | Checks for orphan nodes, flags issues |
-| **Researcher** | Discovery | Identifies knowledge gaps, plans research |
-| **Monitor** | Health | Detects anomalies, creates alerts |
-| **Jarvis** | Orchestrator | Coordinates all agents, strategic decisions |
+## Чего пока нет
 
-### Execution Cycle
+- **Голос.** Система принимает голосовые, но отвечает текстом: синтеза речи нет.
+- **Два языка интерфейса.** Экраны по-русски; переключателя нет.
+- **Google.** Почта и календарь ждут файл доступа, причём в разных местах:
+  почта — `credentials.json` в корне проекта, календарь —
+  `google_credentials.json` в папке данных. Это нестыковка, а не задумка.
+- **Отправка писем.** Её нет намеренно: система готовит черновик, отправляет
+  человек.
 
-Each agent follows the **O-O-T-A-V** cycle:
-1. **Orient** — Read system state
-2. **Observe** — Collect relevant data
-3. **Think** — Plan actions
-4. **Act** — Execute actions
-5. **Verify** — Check results
+## Поиск неисправностей
 
-## Skills System
+**Экран пустой или «бэкенд недоступен».** Проверь, что бэкенд запущен на 8420
+и что фронтенд открыт на 5173 — Vite занимает 5174, если 5173 уже занят, и
+тогда в браузере оказывается вторая, чужая копия.
 
-Skills are JSON contracts defining repeatable workflows:
+**После правок ничего не изменилось.** Питон не перечитывает код на лету:
+бэкенд надо перезапустить.
 
-```json
-{
-  "name": "Publish Post",
-  "description": "Create and publish a social media post",
-  "category": "content",
-  "steps": [
-    {"action": "create_task", "params": {"title": "Draft post: {topic}", "tags": ["content"]}},
-    {"action": "add_graph_node", "params": {"id": "post:{topic}", "label": "Post: {topic}"}},
-    {"action": "log", "params": {"message": "Post created for {topic}"}}
-  ]
-}
-```
+**Токен не подходит.** Сверь `~/.nexsys/auth.json` и `frontend/.env.local`.
 
-Default skills:
-- `publish-post` — Social media content creation
-- `reply-comment` — Comment response drafting
-- `crisis-escalate` — Emergency escalation workflow
-- `collect-metrics` — Performance metrics gathering
+**Ошибки ChromaDB.** `pip install chromadb`; без него векторный поиск падает
+на текстовый.
 
-## Vector Search
+**Модель не отвечает.** Для Ollama — проверь `ollama list` и
+`curl http://localhost:11434/api/tags`. Для облачных — ключ в `.env`.
 
-Two modes available:
+**Конфликт портов.** Порты меняются в `.env`:
 
-### ChromaDB (Recommended)
 ```bash
-NEXSYS_VECTOR_STORE=chroma
-```
-- Persistent storage
-- Production-ready
-- Automatic embeddings
-
-### NumPy Fallback
-```bash
-NEXSYS_VECTOR_STORE=numpy
-```
-- No dependencies
-- Uses sentence-transformers if available
-- Falls back to text search
-
-## LLM Providers
-
-### Ollama (Local)
-```env
-NEXSYS_LLM_PROVIDER=ollama
-NEXSYS_LLM_MODEL=llama3.1:8b
-NEXSYS_LLM_BASE_URL=http://localhost:11434
-```
-
-### OpenAI
-```env
-NEXSYS_LLM_PROVIDER=openai
-NEXSYS_LLM_MODEL=gpt-4o-mini
-NEXSYS_LLM_API_KEY=sk-...
-```
-
-### Anthropic
-```env
-NEXSYS_LLM_PROVIDER=anthropic
-NEXSYS_LLM_MODEL=claude-3-sonnet-20240229
-NEXSYS_LLM_API_KEY=sk-ant-...
-```
-
-## Project Structure
-
-```
-nexus-os/
-├── backend/
-│   ├── api/          # REST endpoints
-│   ├── core/         # Config, auth, errors
-│   ├── models/       # Pydantic schemas
-│   ├── services/     # Business logic
-│   └── tests/        # Test suite
-├── frontend/
-│   ├── src/          # React components
-│   └── public/       # Static assets
-├── cli/              # Command-line interface
-├── nexus-os/         # Core OS modules
-├── .env.example      # Environment template
-├── docker-compose.yml
-└── README.md
-```
-
-## Development
-
-### Code Quality
-```bash
-# Install dev dependencies
-pip install ruff black mypy pytest-cov
-
-# Run linters
-ruff check backend/
-black --check backend/
-mypy backend/
-
-# Run tests
-pytest backend/tests/ --cov=backend
-```
-
-### Pre-commit Hooks
-```bash
-pip install pre-commit
-pre-commit install
-```
-
-## Troubleshooting
-
-### Token not showing
-Check `~/.nexsys/auth.json` for your auth token.
-
-### ChromaDB errors
-Ensure ChromaDB is installed: `pip install chromadb`
-
-### LLM connection failed
-- Verify Ollama is running: `ollama list`
-- Check API key for OpenAI/Anthropic
-- Test connection: `curl http://localhost:11434/api/tags`
-
-### Port conflicts
-Change ports in `.env`:
-```env
 NEXSYS_API_PORT=8421
 NEXSYS_FRONTEND_PORT=5174
 ```
 
-## License
+## Лицензия
 
-Private
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Run tests before submitting PR
-4. Update documentation as needed
+Частный проект.
