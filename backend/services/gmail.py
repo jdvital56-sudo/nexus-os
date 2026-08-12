@@ -39,7 +39,10 @@ class GmailClient:
         self.service = None
 
     def is_configured(self) -> bool:
-        return os.path.exists(CREDENTIALS_FILE)
+        """Вход в Google общий с календарём — файл кладётся один раз."""
+        from . import google_auth
+
+        return google_auth.has_credentials() or google_auth.has_token()
 
     def _connect(self):
         if self.service is not None:

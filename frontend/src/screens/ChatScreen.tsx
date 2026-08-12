@@ -160,6 +160,23 @@ export default function ChatScreen() {
     feed.current?.scrollTo({ top: feed.current.scrollHeight, behavior: 'smooth' });
   }, [lines, state]);
 
+  // Свернул окно или ушёл на другую вкладку — микрофон отпускаем. Человек
+  // не должен гадать, слушает его браузер в фоне или нет
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === 'hidden' && wakeListener.current) {
+        wakeListener.current.stop();
+        wakeListener.current = null;
+        awakeRef.current = false;
+        setAwake(false);
+        setWakeMode(false);
+        setState('ONLINE');
+      }
+    };
+    document.addEventListener('visibilitychange', onHide);
+    return () => document.removeEventListener('visibilitychange', onHide);
+  }, []);
+
   // Уходя с экрана, отпускаем микрофон: он не должен слушать комнату,
   // когда человек ушёл на другую страницу
   useEffect(() => {
@@ -319,7 +336,7 @@ export default function ChatScreen() {
               }
             >
               {wakeMode ? <Mic className="h-4 w-4" aria-hidden /> : <MicOff className="h-4 w-4" aria-hidden />}
-              {wakeMode ? (awake ? 'Слушаю' : 'Жду «Джарвис»') : 'По имени'}
+              {wakeMode ? (awake ? 'Слушаю — выключить' : 'Жду «Джарвис» — выключить') : 'Включить микрофон'}
             </button>
           )}
 
@@ -358,7 +375,28 @@ export default function ChatScreen() {
       {/* Кольцо рядом с разговором: видно состояние, а не только текст */}
       <aside className="hidden w-72 shrink-0 flex-col items-center justify-center border-l border-gray-800 bg-darker xl:flex">
         <JarvisHudWidget state={state} activeModel={persona ? persona.toUpperCase() : ''} />
-        <p className="mt-6 max-w-[12rem] text-center text-xs leading-relaxed text-gray-500">
+        <div
+          className={`mt-6 flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${
+            wakeMode
+              ? 'border-pink-500/40 text-pink-300'
+              : 'border-gray-800 text-gray-500'
+          }`}
+        >
+          <span
+            className={`h-2 w-2 rounded-full ${
+              wakeMode ? 'bg-pink-400 animate-pulse motion-reduce:animate-none' : 'bg-gray-600'
+            }`}
+          />
+          {wakeMode ? 'микрофон включён' : 'микрофон выключен'}
+        </div>
+
+        {wakeMode && (
+          <p className="mt-2 max-w-[13rem] text-center text-[11px] leading-relaxed text-gray-500">
+            Слушает на твоём компьютере. Наружу ничего не уходит, пока не скажешь «Джарвис».
+          </p>
+        )}
+
+        <p className="mt-4 max-w-[12rem] text-center text-xs leading-relaxed text-gray-500">
           {state === 'PROCESSING'
             ? t('Собирает ответ: смотрит память, заметки и нить разговора.')
             : t('Готов. Память общая с Телеграмом.')}

@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 def is_configured() -> bool:
-    """Check if Google Calendar credentials exist."""
-    return CREDENTIALS_FILE.exists() or TOKEN_FILE.exists()
+    """Готов ли календарь: вход в Google общий для почты и календаря."""
+    from . import google_auth
+
+    return google_auth.has_credentials() or google_auth.has_token()
 
 
 def get_upcoming_events(days: int = 7, max_results: int = 20) -> list[dict]:
@@ -89,26 +91,13 @@ def _format_event(event: dict) -> dict:
 
 
 def _get_credentials():
-    """Load or refresh Google OAuth2 credentials."""
+    """Учётные данные из общего входа. None — если вход не пройден."""
+    from . import google_auth
+
     try:
-        from google.oauth2.credentials import Credentials
-        from google.auth.transport.requests import Request
-    except ImportError:
+        return google_auth.load_credentials()
+    except google_auth.GoogleNotConnected:
         return None
-
-    if not TOKEN_FILE.exists():
-        return None
-
-    creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), [
-        "https://www.googleapis.com/auth/calendar.readonly",
-        "https://www.googleapis.com/auth/calendar.events",
-    ])
-
-    if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
-
-    return creds if creds.valid else None
 
 
 def _read_cached_events() -> list[dict]:
