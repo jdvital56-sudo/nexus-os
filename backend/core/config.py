@@ -73,6 +73,11 @@ class Settings(BaseModel):
     
     # Apollo.io API Key (for contact/company search)
     apollo_api_key: str = os.getenv("NEXSYS_APOLLO_API_KEY", "")
+
+    # Firecrawl — обход источников. Имя без префикса NEXSYS: ключ уже лежит
+    # в переменных среды Windows под этим именем, и там же его ждёт MCP-сервер.
+    # Заводить второе имя ради единообразия значит просить вписать ключ дважды.
+    firecrawl_api_key: str = os.getenv("FIRECRAWL_API_KEY", "")
     
     # Telegram Configuration
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
