@@ -53,3 +53,46 @@ async def test_transcription_with_key_asks_gemini(monkeypatch):
     assert result == "расшифрованный текст"
     assert seen["path"] == "/tmp/voice.ogg"
     assert "дословно" in seen["prompt"]
+
+
+# --- Ключ Gemini не подхватывался из .env (найдено 2026-08-12) ---
+
+
+def test_gemini_key_is_read_from_short_name(monkeypatch):
+    """В .env ключ называется GEMINI_API_KEY, а код читал только
+    NEXSYS_GEMINI_API_KEY — вписанный ключ молча не работал, и голосовые
+    не расшифровывались."""
+    import importlib
+
+    monkeypatch.setenv("GEMINI_API_KEY", "ключ-из-env")
+    monkeypatch.delenv("NEXSYS_GEMINI_API_KEY", raising=False)
+
+    import backend.core.config as cfg
+
+    reloaded = importlib.reload(cfg)
+    assert reloaded.settings.gemini_api_key == "ключ-из-env"
+
+    # Возвращаем модуль в исходное состояние — его держат другие тесты
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    importlib.reload(cfg)
+
+
+def test_long_name_still_works(monkeypatch):
+    """Старое имя не ломаем: у кого прописано NEXSYS_GEMINI_API_KEY.
+
+    Короткое имя выставляем пустым, а не удаляем: иначе dotenv подставит
+    его обратно из .env разработчика, и проверять будет нечего.
+    """
+    import importlib
+
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setenv("NEXSYS_GEMINI_API_KEY", "старое-имя")
+
+    import backend.core.config as cfg
+
+    reloaded = importlib.reload(cfg)
+    assert reloaded.settings.gemini_api_key == "старое-имя"
+
+    monkeypatch.delenv("NEXSYS_GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    importlib.reload(cfg)

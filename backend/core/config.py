@@ -69,7 +69,10 @@ class Settings(BaseModel):
     quiet_hours_end: int = int(os.getenv("NEXUS_QUIET_HOURS_END", "8"))
 
     # Google Gemini API Key (for audio processing and advanced features)
-    gemini_api_key: str = os.getenv("NEXSYS_GEMINI_API_KEY", "")
+    # В .env и .env.example ключ называется GEMINI_API_KEY, а код читал
+    # NEXSYS_GEMINI_API_KEY — из-за этого вписанный ключ не подхватывался и
+    # голосовые не расшифровывались. Читаем оба имени, короткое главнее.
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "") or os.getenv("NEXSYS_GEMINI_API_KEY", "")
     
     # Apollo.io API Key (for contact/company search)
     apollo_api_key: str = os.getenv("NEXSYS_APOLLO_API_KEY", "")
