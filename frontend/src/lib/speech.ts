@@ -1,0 +1,73 @@
+// Распознавание речи в браузере. Встроено в Chrome и Edge, ничего не весит
+// и ничего не стоит — поэтому для ввода голосом в вебе берём его, а не
+// отправляем звук на бэкенд.
+//
+// Telegram-канал устроен иначе: там голосовое приходит файлом и
+// расшифровывается на сервере через Gemini. Это разные пути намеренно —
+// в браузере уже есть готовое ухо, гонять байты незачем.
+
+type Recognition = any;
+
+export function speechSupported(): boolean {
+  return typeof window !== 'undefined' &&
+    Boolean((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+}
+
+export interface Listener {
+  stop: () => void;
+}
+
+/**
+ * Слушает микрофон и отдаёт распознанный текст.
+ * onPartial — то, что слышно прямо сейчас, чтобы человек видел процесс.
+ */
+export function listen(
+  lang: string,
+  onFinal: (text: string) => void,
+  onPartial?: (text: string) => void,
+  onError?: (reason: string) => void,
+): Listener | null {
+  const Ctor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  if (!Ctor) {
+    onError?.('Браузер не умеет распознавать речь. Chrome или Edge умеют.');
+    return null;
+  }
+
+  const rec: Recognition = new Ctor();
+  rec.lang = lang;
+  rec.interimResults = Boolean(onPartial);
+  rec.continuous = false;
+  rec.maxAlternatives = 1;
+
+  rec.onresult = (event: any) => {
+    let partial = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const result = event.results[i];
+      if (result.isFinal) {
+        onFinal(String(result[0].transcript).trim());
+      } else {
+        partial += result[0].transcript;
+      }
+    }
+    if (partial) onPartial?.(partial.trim());
+  };
+
+  rec.onerror = (event: any) => {
+    const reasons: Record<string, string> = {
+      'not-allowed': 'Микрофон запрещён в настройках браузера.',
+      'no-speech': 'Ничего не услышал.',
+      'audio-capture': 'Микрофон не найден.',
+      network: 'Распознавание не смогло выйти в сеть.',
+    };
+    onError?.(reasons[event.error] ?? `Распознавание сломалось: ${event.error}`);
+  };
+
+  try {
+    rec.start();
+  } catch (e) {
+    onError?.('Микрофон уже слушает.');
+    return null;
+  }
+
+  return { stop: () => rec.stop() };
+}

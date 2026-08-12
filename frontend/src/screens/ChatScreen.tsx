@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Eraser } from 'lucide-react';
-import { getChatHistory, getPersonas, resetChat, sendChatMessage } from '../lib/api';
+import { Send, Eraser, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
+import { getChatHistory, getPersonas, getVoiceStatus, resetChat, sendChatMessage, speak } from '../lib/api';
+import { listen, speechSupported, type Listener } from '../lib/speech';
 import { JarvisHudWidget, type JarvisState } from '../components/JarvisHudWidget';
 import { BTN, BTN_GHOST, ErrorBox, INPUT } from '../components/ui';
 import type { Persona } from '../types';
@@ -31,12 +32,63 @@ export default function ChatScreen() {
   const [persona, setPersona] = useState<string>('');
   const feed = useRef<HTMLDivElement>(null);
 
+  // Голос: слушаем микрофон браузера, отвечаем файлом с бэкенда
+  const [listening, setListening] = useState(false);
+  const [voiceReady, setVoiceReady] = useState(false);
+  const [speakBack, setSpeakBack] = useState(false);
+  const recognizer = useRef<Listener | null>(null);
+  const player = useRef<HTMLAudioElement | null>(null);
+
   useEffect(() => {
     getChatHistory()
       .then((h) => setLines(h.messages))
       .catch(() => setError(t('Бэкенд недоступен. Запущен ли он на :8420?')));
     getPersonas().then(setPersonas).catch(() => {});
+    getVoiceStatus()
+      .then((v) => setVoiceReady(v.ready))
+      .catch(() => setVoiceReady(false));
   }, []);
+
+  // Произносит ответ вслух. Молча ничего не включаем: голос стоит трафика
+  const say = async (text: string) => {
+    try {
+      const blob = await speak(text);
+      player.current?.pause();
+      const audio = new Audio(URL.createObjectURL(blob));
+      player.current = audio;
+      setState('SPEAKING');
+      audio.onended = () => setState('ONLINE');
+      await audio.play();
+    } catch {
+      setState('ONLINE');
+      setError('Не удалось озвучить ответ.');
+    }
+  };
+
+  const toggleMic = () => {
+    if (listening) {
+      recognizer.current?.stop();
+      setListening(false);
+      return;
+    }
+    setError(null);
+    setState('LISTENING');
+    setListening(true);
+    recognizer.current = listen(
+      'ru-RU',
+      (final) => {
+        setListening(false);
+        setState('ONLINE');
+        setText((prev) => (prev ? `${prev} ${final}` : final));
+      },
+      (partial) => setText(partial),
+      (reason) => {
+        setListening(false);
+        setState('ONLINE');
+        setError(reason);
+      },
+    );
+  };
 
   useEffect(() => {
     feed.current?.scrollTo({ top: feed.current.scrollHeight, behavior: 'smooth' });
@@ -54,9 +106,13 @@ export default function ChatScreen() {
     try {
       const res = await sendChatMessage(value, persona || undefined);
       setLines((prev) => [...prev, { role: 'assistant', text: res.reply, persona: res.persona }]);
-      // Короткое «говорю» — чтобы было видно, что ответ только что пришёл
-      setState('SPEAKING');
-      setTimeout(() => setState('ONLINE'), 1600);
+      if (speakBack && voiceReady) {
+        say(res.reply);
+      } else {
+        // Короткое «говорю» — чтобы было видно, что ответ только что пришёл
+        setState('SPEAKING');
+        setTimeout(() => setState('ONLINE'), 1600);
+      }
     } catch (e: any) {
       setState('ONLINE');
       setError(e?.response?.data?.detail ?? t('Ответ не пришёл.'));
@@ -118,6 +174,15 @@ export default function ChatScreen() {
                     </div>
                   )}
                   <p className="whitespace-pre-wrap break-words">{line.text}</p>
+                  {!mine && voiceReady && (
+                    <button
+                      onClick={() => say(line.text)}
+                      className="mt-2 flex cursor-pointer items-center gap-1 text-[11px] text-gray-500 transition-colors duration-200 hover:text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      <Volume2 className="h-3 w-3" aria-hidden />
+                      озвучить
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -160,6 +225,31 @@ export default function ChatScreen() {
             className={`${INPUT} flex-1`}
             autoFocus
           />
+
+          {speechSupported() && (
+            <button
+              onClick={toggleMic}
+              className={`${BTN_GHOST} ${listening ? 'border-pink-500/50 text-pink-300' : ''}`}
+              title={listening ? 'Слушаю — нажми, чтобы остановить' : 'Говорить голосом'}
+            >
+              {listening ? <MicOff className="h-4 w-4" aria-hidden /> : <Mic className="h-4 w-4" aria-hidden />}
+              {listening ? 'Слушаю…' : 'Голосом'}
+            </button>
+          )}
+
+          <button
+            onClick={() => setSpeakBack(!speakBack)}
+            disabled={!voiceReady}
+            className={`${BTN_GHOST} ${speakBack ? 'border-primary/50 text-primary' : ''}`}
+            title={
+              voiceReady
+                ? 'Читать ответы вслух'
+                : 'Голос выключен: NEXUS_TTS_ENGINE в .env'
+            }
+          >
+            {speakBack ? <Volume2 className="h-4 w-4" aria-hidden /> : <VolumeX className="h-4 w-4" aria-hidden />}
+            {speakBack ? 'Вслух' : 'Молча'}
+          </button>
 
           <button onClick={send} className={BTN} disabled={!text.trim() || state === 'PROCESSING'}>
             <Send className="h-4 w-4" aria-hidden />
