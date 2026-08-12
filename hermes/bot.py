@@ -76,10 +76,12 @@ class HermesAgent:
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
+        # Чужому не отвечаем ничего — как и все остальные обработчики.
+        # Ответ «Unauthorized» подтверждал бы постороннему, что бот жив;
+        # отказ виден в логах, там его и надо искать при диагностике.
         if not self._authorize_user(update.effective_user.id):
-            await update.message.reply_text("⛔ Unauthorized access")
             return
-        
+
         await update.message.reply_text(
             "👋 Привет! Я Hermes, твой AI-ассистент.\n\n"
             "Доступные команды:\n"
