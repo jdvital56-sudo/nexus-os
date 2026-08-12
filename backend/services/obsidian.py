@@ -137,10 +137,17 @@ def search_notes(query: str, limit: int = _SEARCH_LIMIT) -> list[dict]:
 
 
 def read_note(name: str) -> dict:
-    """Читает заметку по имени или относительному пути."""
-    root = vault_path()
+    """Читает заметку по имени или относительному пути.
 
-    candidate = root / name
+    Имя приходит снаружи (из карты графа, из диалога), поэтому путь
+    обязательно проверяется: «../../.ssh/id_rsa» не должен читаться только
+    потому, что кто-то так назвал узел.
+    """
+    root = vault_path().resolve()
+
+    candidate = (root / name).resolve()
+    if not candidate.is_relative_to(root):
+        raise FileNotFoundError(f"Заметка '{name}' вне хранилища")
     if candidate.is_file():
         return {
             "title": candidate.stem,

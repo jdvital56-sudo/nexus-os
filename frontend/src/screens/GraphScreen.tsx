@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import MemoryGalaxy, { type GalaxyLink, type GalaxyNode } from '../components/MemoryGalaxy';
-import { getGraphMap } from '../lib/api';
+import { getGraphMap, getNote } from '../lib/api';
 import { links as linksWord, nodes as nodesWord } from '../lib/format';
 import type { ApiGraphNode, GraphMap } from '../types';
 
@@ -34,17 +34,19 @@ function colorOf(type: string): string {
   return TYPE_COLORS[type] ?? '#6B7280';
 }
 
-// Одиночные узлы — почти всегда шум: слово, которое встретилось в одной
-// заметке и больше нигде. На карте из полутысячи точек они и создают кашу.
-const LONER_LIMIT = 1;
+// Порог по числу связей. Единица по умолчанию: узел с одной связью почти
+// всегда шум — слово из одной заметки, которое больше нигде не встретилось.
+const DEFAULT_MIN_LINKS = 2;
 
 export default function GraphScreen() {
   const [map, setMap] = useState<GraphMap | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
-  const [hideLoners, setHideLoners] = useState(true);
+  const [minLinks, setMinLinks] = useState(DEFAULT_MIN_LINKS);
   const [query, setQuery] = useState('');
+  const [note, setNote] = useState<{ title: string; path: string; content: string } | null>(null);
+  const [noteError, setNoteError] = useState<string | null>(null);
 
   useEffect(() => {
     getGraphMap(500)
@@ -62,9 +64,7 @@ export default function GraphScreen() {
     }
 
     const visible = map.nodes.filter(
-      (n) =>
-        !hiddenTypes.has(n.node_type) &&
-        (!hideLoners || (degree.get(n.id) ?? 0) > LONER_LIMIT),
+      (n) => !hiddenTypes.has(n.node_type) && (degree.get(n.id) ?? 0) >= minLinks,
     );
     const ids = new Set(visible.map((n) => n.id));
 
@@ -81,7 +81,7 @@ export default function GraphScreen() {
         .map((e) => ({ source: e.source, target: e.target, weight: e.weight })),
       byId: new Map(map.nodes.map((n) => [n.id, n])),
     };
-  }, [map, hiddenTypes, hideLoners]);
+  }, [map, hiddenTypes, minLinks]);
 
   // Поиск по названию: выбранный узел карта сама подтянет в центр
   const found = useMemo(() => {
@@ -95,6 +95,23 @@ export default function GraphScreen() {
 
   const selected = selectedId ? byId.get(selectedId) : null;
   const selectedDegree = galaxyNodes.find((n) => n.id === selectedId)?.degree ?? 0;
+
+  // Двойной щелчок по узлу-заметке открывает саму заметку: без этого карта
+  // остаётся картинкой, из которой нельзя провалиться в содержимое
+  const openNote = async (id: string) => {
+    setSelectedId(id);
+    setNote(null);
+    setNoteError(null);
+    if (!id.startsWith('note:')) {
+      setNoteError('Это не заметка — у понятий нет своего файла.');
+      return;
+    }
+    try {
+      setNote(await getNote(id.slice('note:'.length)));
+    } catch (e: any) {
+      setNoteError(e?.response?.data?.detail ?? 'Заметку открыть не удалось.');
+    }
+  };
 
   const toggleType = (type: string) => {
     setHiddenTypes((prev) => {
@@ -136,7 +153,12 @@ export default function GraphScreen() {
         nodes={galaxyNodes}
         links={galaxyLinks}
         selectedId={selectedId}
-        onSelect={setSelectedId}
+        onSelect={(id) => {
+          setSelectedId(id);
+          setNote(null);
+          setNoteError(null);
+        }}
+        onOpen={openNote}
       />
 
       {/* Легенда — она же фильтр по типам */}
@@ -172,14 +194,22 @@ export default function GraphScreen() {
           </ul>
         )}
 
-        <label className="mb-3 flex cursor-pointer items-center gap-2 text-xs text-gray-300">
+        <label className="mb-3 block text-xs text-gray-300">
+          <span className="mb-1 flex items-center justify-between">
+            Минимум связей
+            <span className="font-mono tabular-nums text-gray-400">{minLinks}</span>
+          </span>
           <input
-            type="checkbox"
-            checked={hideLoners}
-            onChange={(e) => setHideLoners(e.target.checked)}
-            className="cursor-pointer accent-primary"
+            type="range"
+            min={0}
+            max={6}
+            value={minLinks}
+            onChange={(e) => setMinLinks(Number(e.target.value))}
+            className="w-full cursor-pointer accent-primary"
           />
-          Прятать одиночек
+          <span className="text-[11px] text-gray-500">
+            {minLinks === 0 ? 'видно всё, включая одиночек' : 'редкие узлы скрыты'}
+          </span>
         </label>
         <ul className="space-y-1">
           {types.map(([type, count]) => {
@@ -208,8 +238,8 @@ export default function GraphScreen() {
         </ul>
         <p className="mt-3 text-[11px] leading-snug text-gray-500">
           Карта поворачивается сама, ближний узел разгорается. Наведи — зажжётся другой,
-          нажми — останутся только он и соседи. Колесо приближает, узел можно тянуть,
-          двойной щелчок возвращает вид.
+          нажми — останутся только он и соседи, двойной щелчок откроет саму заметку.
+          Колесо приближает, узел можно тянуть, двойной щелчок по пустоте вернёт вид.
         </p>
       </div>
 
@@ -249,6 +279,34 @@ export default function GraphScreen() {
               </div>
             )}
           </dl>
+
+          {/* Сама заметка: двойной щелчок по узлу — и текст здесь */}
+          {note && (
+            <div className="mt-3 border-t border-gray-800 pt-3">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <h4 className="text-xs text-gray-400">{note.path}</h4>
+                <a
+                  href={`obsidian://open?path=${encodeURIComponent(note.path)}`}
+                  className="shrink-0 text-[11px] text-primary underline"
+                >
+                  открыть в Obsidian
+                </a>
+              </div>
+              <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-darker p-3 text-xs leading-relaxed text-gray-200">
+                {note.content.slice(0, 4000)}
+              </pre>
+            </div>
+          )}
+
+          {noteError && !note && (
+            <p className="mt-3 border-t border-gray-800 pt-3 text-xs text-gray-400">{noteError}</p>
+          )}
+
+          {!note && !noteError && selected.id.startsWith('note:') && (
+            <p className="mt-3 text-[11px] text-gray-500">
+              Двойной щелчок по узлу — покажу текст заметки.
+            </p>
+          )}
 
           {Object.keys(selected.metadata ?? {}).length > 0 && (
             <div className="mt-3 border-t border-gray-800 pt-3">

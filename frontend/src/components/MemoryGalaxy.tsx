@@ -30,6 +30,8 @@ interface Props {
   nodes: GalaxyNode[];
   links: GalaxyLink[];
   onSelect?: (id: string | null) => void;
+  /** Двойной щелчок — провалиться внутрь узла (например, открыть заметку). */
+  onOpen?: (id: string) => void;
   selectedId?: string | null;
 }
 
@@ -148,7 +150,7 @@ function layout(nodes: GalaxyNode[], links: GalaxyLink[]): Placed[] {
   return placed;
 }
 
-export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Props) {
+export default function MemoryGalaxy({ nodes, links, onSelect, onOpen, selectedId }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const pointer = useRef<{ x: number; y: number } | null>(null);
   const hoverId = useRef<string | null>(null);
@@ -503,7 +505,14 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
         const hit = pick(e.clientX - rect.left, e.clientY - rect.top);
         onSelect?.(hit?.id ?? null);
       }}
-      onDoubleClick={() => {
+      onDoubleClick={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const hit = pick(e.clientX - rect.left, e.clientY - rect.top);
+        // По узлу — провалиться внутрь, по пустоте — вернуть вид
+        if (hit && onOpen) {
+          onOpen(hit.id);
+          return;
+        }
         camera.current = { zoom: 1, panX: 0, panY: 0 };
       }}
       onMouseLeave={() => {

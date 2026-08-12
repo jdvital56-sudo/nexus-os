@@ -261,3 +261,41 @@ async def test_search_command_still_finds_secret_note_by_title(vault_with_secret
 
     assert "credentials" in reply.lower()
     assert "SuperSecret123" not in reply
+
+
+# --- Провалиться из карты графа в саму заметку (2026-08-12) ---
+
+
+def test_note_is_readable_by_stem(client, tmp_path, monkeypatch):
+    from backend.services import obsidian as vault
+
+    monkeypatch.setattr(vault.settings, "obsidian_vault_path", str(tmp_path))
+    (tmp_path / "Спа-оффер.md").write_text("Цены и условия", encoding="utf-8")
+
+    r = client.get("/api/obsidian/note", params={"name": "Спа-оффер"})
+
+    assert r.status_code == 200
+    assert r.json()["content"] == "Цены и условия"
+
+
+def test_note_outside_the_vault_is_refused(client, tmp_path, monkeypatch):
+    """Имя узла приходит снаружи: «../секрет» не должно читаться."""
+    from backend.services import obsidian as vault
+
+    vault_dir = tmp_path / "vault"
+    vault_dir.mkdir()
+    (tmp_path / "секрет.md").write_text("пароли", encoding="utf-8")
+    monkeypatch.setattr(vault.settings, "obsidian_vault_path", str(vault_dir))
+
+    r = client.get("/api/obsidian/note", params={"name": "../секрет.md"})
+
+    assert r.status_code == 404
+    assert "пароли" not in r.text
+
+
+def test_missing_note_is_404(client, tmp_path, monkeypatch):
+    from backend.services import obsidian as vault
+
+    monkeypatch.setattr(vault.settings, "obsidian_vault_path", str(tmp_path))
+
+    assert client.get("/api/obsidian/note", params={"name": "нет такой"}).status_code == 404

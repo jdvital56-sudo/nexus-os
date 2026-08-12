@@ -32,6 +32,12 @@ export const getSystemStatus = () =>
   data<SystemStatusResponse>(api.get('/system/status'));
 export const getWalletSummary = () => data<WalletSummary>(api.get('/wallet/summary'));
 
+// --- База знаний ---
+export const getNote = (name: string) =>
+  data<{ title: string; path: string; content: string }>(
+    api.get('/obsidian/note', { params: { name } }),
+  );
+
 // --- Ночной прогон ---
 export const getDreamFindings = (status?: string) =>
   data<DreamFinding[]>(api.get('/dream/findings', { params: status ? { status } : {} }));

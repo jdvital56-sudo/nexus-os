@@ -1,5 +1,5 @@
 """Obsidian sync API routes."""
-from fastapi import APIRouter, Query, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from ..services import obsidian_sync as svc
 from ..core.auth import get_token_dep
@@ -36,6 +36,20 @@ def sync(req: SyncRequest, _=Depends(auth)):
         return svc.sync_vault(req.vault_path, incremental=req.incremental)
     except FileNotFoundError as e:
         return {"error": str(e)}
+
+
+@router.get("/note")
+def read_note(name: str = Query(..., description="Имя заметки или путь внутри хранилища"), _=Depends(auth)):
+    """Содержимое заметки — чтобы из карты второго мозга можно было
+    провалиться в саму заметку, а не только смотреть на кружок."""
+    from ..services import obsidian as vault
+
+    try:
+        return vault.read_note(name)
+    except vault.VaultNotConfigured as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.post("/reset")
