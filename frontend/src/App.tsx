@@ -12,6 +12,8 @@ import DocumentsScreen from './screens/DocumentsScreen';
 import TasksScreen from './screens/TasksScreen';
 import PipelineScreen from './screens/PipelineScreen';
 import PersonasScreen from './screens/PersonasScreen';
+import WalletScreen from './screens/WalletScreen';
+import ArtifactsScreen from './screens/ArtifactsScreen';
 
 export default function App() {
   return (
@@ -25,6 +27,8 @@ export default function App() {
             <Route path="/skills" element={<SkillsScreen />} />
             <Route path="/agents" element={<AgentsScreen />} />
             <Route path="/personas" element={<PersonasScreen />} />
+            <Route path="/wallet" element={<WalletScreen />} />
+            <Route path="/artifacts" element={<ArtifactsScreen />} />
             <Route path="/dream-review" element={<DreamReviewScreen />} />
             <Route path="/graph" element={<GraphScreen />} />
             <Route path="/documents" element={<DocumentsScreen />} />

@@ -11,7 +11,9 @@ import {
   Calendar,
   CheckSquare,
   Workflow,
-  Drama
+  Drama,
+  CreditCard,
+  Package
 } from 'lucide-react';
 
 // Названия по-русски: система личная, и половина экранов уже говорит
@@ -26,7 +28,9 @@ const menuItems = [
   { path: '/personas', label: 'Пантеон', icon: Drama },
   { path: '/tasks', label: 'Задачи', icon: CheckSquare },
   { path: '/documents', label: 'Документы', icon: FileText },
+  { path: '/artifacts', label: 'Артефакты', icon: Package },
   { path: '/pipeline', label: 'Контент', icon: Workflow },
+  { path: '/wallet', label: 'Подписки', icon: CreditCard },
   { path: '/activity', label: 'События', icon: Activity },
   { path: '/settings', label: 'Настройки', icon: Settings },
 ];

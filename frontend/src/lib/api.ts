@@ -35,6 +35,16 @@ export const getSystemStatus = () =>
   data<SystemStatusResponse>(api.get('/system/status'));
 export const getWalletSummary = () => data<WalletSummary>(api.get('/wallet/summary'));
 
+// --- Подписки ---
+export const getServices = (status: string | null = 'active') =>
+  data<any[]>(api.get('/wallet', { params: status ? { status } : { status: '' } }));
+export const createService = (payload: Record<string, any>) =>
+  data<any>(api.post('/wallet', payload));
+export const updateService = (id: string, payload: Record<string, any>) =>
+  data<any>(api.put(`/wallet/${id}`, payload));
+export const cancelService = (id: string) => data<any>(api.post(`/wallet/${id}/cancelled`));
+export const removeService = (id: string) => data<any>(api.delete(`/wallet/${id}`));
+
 // --- Скиллы ---
 // Список отдаёт только число шагов, сами шаги — отдельным запросом
 export const getSkills = () => data<any[]>(api.get('/skills'));
@@ -64,6 +74,17 @@ export const setHermesPrompt = (system_prompt: string) =>
 export const getCharacter = () => data<Character>(api.get('/personas/character'));
 export const setCharacter = (payload: Partial<Character>) =>
   data<Character>(api.put('/personas/character', payload));
+
+// --- Артефакты ---
+// Система файлы не стирает: помечает и объясняет причину, стирает человек
+export const getArtifacts = () => data<any[]>(api.get('/artifacts'));
+export const getArtifact = (id: string) =>
+  data<{ content: string }>(api.get(`/artifacts/${id}/content`));
+export const requestArtifactDelete = (id: string, reason: string) =>
+  data<any>(api.post(`/artifacts/${id}/request-delete`, { reason }));
+export const cancelArtifactDelete = (id: string) =>
+  data<any>(api.post(`/artifacts/${id}/cancel-delete`));
+export const adoptArtifacts = () => data<{ adopted: any[] }>(api.post('/artifacts/adopt'));
 
 // --- База знаний ---
 export const getNote = (name: string) =>
