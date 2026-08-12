@@ -46,6 +46,27 @@ def set_system_prompt(req: SystemPromptUpdate, _=Depends(auth)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+class CharacterUpdate(BaseModel):
+    humor: int | None = None
+    warmth: int | None = None
+    verbosity: int | None = None
+    address: str | None = None
+    language: str | None = None
+
+
+@router.get("/character")
+def get_character(_=Depends(auth)):
+    """Характер Hermes: ползунки и то, во что они разворачиваются для модели."""
+    character = svc.get_character()
+    return {**character, "prompt": svc.describe_character(character)}
+
+
+@router.put("/character")
+def set_character(req: CharacterUpdate, _=Depends(auth)):
+    character = svc.set_character(req.model_dump(exclude_unset=True))
+    return {**character, "prompt": svc.describe_character(character)}
+
+
 @router.post("/reset")
 def reset(_=Depends(auth)):
     return svc.reset_to_defaults()

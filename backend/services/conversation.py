@@ -368,15 +368,22 @@ class ConversationService:
 
     @staticmethod
     def _compose_prompt(persona_prompt: str) -> str:
-        """Общие правила Hermes идут перед характером конкретной персоны."""
+        """Собирает промпт: общие правила, характер, затем сама персона.
+
+        Характер идёт последним из общего — он ближе к персоне и уточняет
+        её, а не спорит с ней. Ползунки из Пантеона попадают сюда текстом.
+        """
         try:
             from . import personas as persona_store
 
             common = persona_store.get_system_prompt()
+            character = persona_store.describe_character(persona_store.get_character())
         except Exception:
             logger.debug("Системный промпт недоступен", exc_info=True)
             return persona_prompt
-        return f"{common}\n\n{persona_prompt}" if common else persona_prompt
+
+        parts = [p for p in (common, character, persona_prompt) if p]
+        return "\n\n".join(parts)
 
     def _select_persona(self, text: str, persona: str | None) -> dict[str, Any]:
         """Явно заданная персона важнее автоопределения."""

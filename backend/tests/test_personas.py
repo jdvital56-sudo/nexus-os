@@ -189,3 +189,70 @@ def test_api_creates_and_deletes(client):
     assert client.post("/api/personas", json=payload).status_code == 201
     assert client.delete("/api/personas/Церера").status_code == 200
     assert svc.get_persona("Церера") is None
+
+
+# --- Характер Hermes: ползунки вместо правки промпта (2026-08-12) ---
+
+
+def test_character_has_sane_defaults(client):
+    c = client.get("/api/personas/character").json()
+
+    assert 0 <= c["humor"] <= 10
+    assert c["address"] in ("ты", "вы", "сэр")
+    assert c["language"] == "auto"
+    assert c["prompt"]
+
+
+def test_dials_turn_into_words_for_the_model(client):
+    """Модель не понимает «юмор 9» — уровень разворачивается во фразу."""
+    dry = client.put("/api/personas/character", json={"humor": 0, "verbosity": 1}).json()
+    assert "Не шути" in dry["prompt"]
+    assert "коротко" in dry["prompt"]
+
+    lively = client.put("/api/personas/character", json={"humor": 9, "verbosity": 9}).json()
+    assert "Шути охотно" in lively["prompt"]
+    assert "Разворачивай" in lively["prompt"]
+
+
+def test_address_and_language_reach_the_prompt(client):
+    c = client.put("/api/personas/character", json={"address": "сэр", "language": "en"}).json()
+
+    assert "сэр" in c["prompt"]
+    assert "English" in c["prompt"]
+
+
+def test_out_of_range_dial_is_clamped(client):
+    c = client.put("/api/personas/character", json={"humor": 99, "warmth": -5}).json()
+
+    assert c["humor"] == 10
+    assert c["warmth"] == 0
+
+
+def test_unknown_address_is_ignored(client):
+    before = client.get("/api/personas/character").json()["address"]
+
+    after = client.put("/api/personas/character", json={"address": "эй ты"}).json()
+
+    assert after["address"] == before
+
+
+def test_character_survives_restart(client):
+    client.put("/api/personas/character", json={"humor": 8})
+
+    assert client.get("/api/personas/character").json()["humor"] == 8
+
+
+def test_character_reaches_the_dialog():
+    """Главное: ползунок влияет на следующий ответ, а не только на экран."""
+    from backend.services import personas as store
+    from backend.services.conversation import ConversationService
+
+    store.set_character({"humor": 10, "address": "сэр"})
+    svc = ConversationService(semantic_dedup=False, extract_entities=False)
+
+    prompt = svc._compose_prompt("Ты Orpheus.")
+
+    assert "Шути охотно" in prompt
+    assert "сэр" in prompt
+    # Характер уточняет персону, а не заменяет её
+    assert prompt.index("Шути охотно") < prompt.index("Ты Orpheus.")

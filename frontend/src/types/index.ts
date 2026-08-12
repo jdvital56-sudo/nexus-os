@@ -40,6 +40,26 @@ export interface AutopilotState {
   blocked_by?: string | null;
 }
 
+// Пантеон: персона — это модель плюс характер, заданный промптом
+export interface Persona {
+  name: string;
+  description: string;
+  model: string;
+  provider: string;
+  system_prompt: string;
+}
+
+// Характер Hermes поверх любой персоны. Ползунки 0..10 превращаются в
+// указания модели — их видно в поле prompt.
+export interface Character {
+  humor: number;
+  warmth: number;
+  verbosity: number;
+  address: 'ты' | 'вы' | 'сэр';
+  language: 'auto' | 'ru' | 'en';
+  prompt?: string;
+}
+
 export interface RuntimeInfo {
   version: string;
   api_url: string;

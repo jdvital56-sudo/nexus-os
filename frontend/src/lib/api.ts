@@ -6,6 +6,8 @@ import type {
   GraphMap,
   GraphStats,
   AutopilotState,
+  Character,
+  Persona,
   SystemStatusResponse,
   WalletSummary,
 } from '../types';
@@ -50,6 +52,18 @@ export const setSkillEnabled = (id: string, enabled: boolean) =>
 export const getAutopilot = () => data<AutopilotState>(api.get('/system/autopilot'));
 export const setAutopilot = (enabled: boolean) =>
   data<AutopilotState>(api.post('/system/autopilot', { enabled }));
+
+// --- Пантеон персон и характер ---
+export const getPersonas = () => data<Persona[]>(api.get('/personas'));
+export const updatePersona = (name: string, payload: Partial<Persona>) =>
+  data<Persona>(api.put(`/personas/${encodeURIComponent(name)}`, payload));
+export const getHermesPrompt = () =>
+  data<{ system_prompt: string }>(api.get('/personas/system-prompt'));
+export const setHermesPrompt = (system_prompt: string) =>
+  data<{ system_prompt: string }>(api.put('/personas/system-prompt', { system_prompt }));
+export const getCharacter = () => data<Character>(api.get('/personas/character'));
+export const setCharacter = (payload: Partial<Character>) =>
+  data<Character>(api.put('/personas/character', payload));
 
 // --- База знаний ---
 export const getNote = (name: string) =>

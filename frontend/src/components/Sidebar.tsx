@@ -10,7 +10,8 @@ import {
   Network,
   Calendar,
   CheckSquare,
-  Workflow
+  Workflow,
+  Drama
 } from 'lucide-react';
 
 // Названия по-русски: система личная, и половина экранов уже говорит
@@ -22,6 +23,7 @@ const menuItems = [
   { path: '/dream-review', label: 'Ночной прогон', icon: Calendar },
   { path: '/skills', label: 'Скиллы', icon: Sparkles },
   { path: '/agents', label: 'Агенты', icon: Bot },
+  { path: '/personas', label: 'Пантеон', icon: Drama },
   { path: '/tasks', label: 'Задачи', icon: CheckSquare },
   { path: '/documents', label: 'Документы', icon: FileText },
   { path: '/pipeline', label: 'Контент', icon: Workflow },

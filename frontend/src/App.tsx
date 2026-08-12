@@ -11,6 +11,7 @@ import SettingsScreen from './screens/SettingsScreen';
 import DocumentsScreen from './screens/DocumentsScreen';
 import TasksScreen from './screens/TasksScreen';
 import PipelineScreen from './screens/PipelineScreen';
+import PersonasScreen from './screens/PersonasScreen';
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="/memory" element={<MemoryScreen />} />
             <Route path="/skills" element={<SkillsScreen />} />
             <Route path="/agents" element={<AgentsScreen />} />
+            <Route path="/personas" element={<PersonasScreen />} />
             <Route path="/dream-review" element={<DreamReviewScreen />} />
             <Route path="/graph" element={<GraphScreen />} />
             <Route path="/documents" element={<DocumentsScreen />} />
