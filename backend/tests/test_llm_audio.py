@@ -58,41 +58,31 @@ async def test_transcription_with_key_asks_gemini(monkeypatch):
 # --- Ключ Gemini не подхватывался из .env (найдено 2026-08-12) ---
 
 
-def test_gemini_key_is_read_from_short_name(monkeypatch):
+def test_short_env_name_wins(monkeypatch):
     """В .env ключ называется GEMINI_API_KEY, а код читал только
-    NEXSYS_GEMINI_API_KEY — вписанный ключ молча не работал, и голосовые
-    не расшифровывались."""
-    import importlib
+    NEXSYS_GEMINI_API_KEY — вписанный ключ молча не работал."""
+    from backend.core.config import env_any
 
-    monkeypatch.setenv("GEMINI_API_KEY", "ключ-из-env")
-    monkeypatch.delenv("NEXSYS_GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GEMINI_API_KEY", "короткое")
+    monkeypatch.setenv("NEXSYS_GEMINI_API_KEY", "длинное")
 
-    import backend.core.config as cfg
-
-    reloaded = importlib.reload(cfg)
-    assert reloaded.settings.gemini_api_key == "ключ-из-env"
-
-    # Возвращаем модуль в исходное состояние — его держат другие тесты
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    importlib.reload(cfg)
+    assert env_any("GEMINI_API_KEY", "NEXSYS_GEMINI_API_KEY") == "короткое"
 
 
-def test_long_name_still_works(monkeypatch):
-    """Старое имя не ломаем: у кого прописано NEXSYS_GEMINI_API_KEY.
-
-    Короткое имя выставляем пустым, а не удаляем: иначе dotenv подставит
-    его обратно из .env разработчика, и проверять будет нечего.
-    """
-    import importlib
+def test_long_env_name_still_works(monkeypatch):
+    """Старое имя не ломаем: у кого прописано NEXSYS_GEMINI_API_KEY."""
+    from backend.core.config import env_any
 
     monkeypatch.setenv("GEMINI_API_KEY", "")
-    monkeypatch.setenv("NEXSYS_GEMINI_API_KEY", "старое-имя")
+    monkeypatch.setenv("NEXSYS_GEMINI_API_KEY", "длинное")
 
-    import backend.core.config as cfg
+    assert env_any("GEMINI_API_KEY", "NEXSYS_GEMINI_API_KEY") == "длинное"
 
-    reloaded = importlib.reload(cfg)
-    assert reloaded.settings.gemini_api_key == "старое-имя"
 
-    monkeypatch.delenv("NEXSYS_GEMINI_API_KEY", raising=False)
+def test_no_key_gives_empty(monkeypatch):
+    from backend.core.config import env_any
+
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    importlib.reload(cfg)
+    monkeypatch.delenv("NEXSYS_GEMINI_API_KEY", raising=False)
+
+    assert env_any("GEMINI_API_KEY", "NEXSYS_GEMINI_API_KEY") == ""

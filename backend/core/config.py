@@ -10,6 +10,21 @@ from pydantic import BaseModel
 load_dotenv()
 
 
+def env_any(*names: str, default: str = "") -> str:
+    """Первое непустое значение из нескольких имён переменной.
+
+    Одна и та же настройка живёт под двумя именами: короткое в .env
+    (`GEMINI_API_KEY`) и старое с приставкой (`NEXSYS_GEMINI_API_KEY`).
+    Код читал только длинное, и вписанный фаундером ключ молча не
+    подхватывался — голосовые не расшифровывались, хотя ключ был на месте.
+    """
+    for name in names:
+        value = os.getenv(name, "")
+        if value:
+            return value
+    return default
+
+
 class Settings(BaseModel):
     """Settings class for NEXSYS configuration."""
     
@@ -69,10 +84,7 @@ class Settings(BaseModel):
     quiet_hours_end: int = int(os.getenv("NEXUS_QUIET_HOURS_END", "8"))
 
     # Google Gemini API Key (for audio processing and advanced features)
-    # В .env и .env.example ключ называется GEMINI_API_KEY, а код читал
-    # NEXSYS_GEMINI_API_KEY — из-за этого вписанный ключ не подхватывался и
-    # голосовые не расшифровывались. Читаем оба имени, короткое главнее.
-    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "") or os.getenv("NEXSYS_GEMINI_API_KEY", "")
+    gemini_api_key: str = env_any("GEMINI_API_KEY", "NEXSYS_GEMINI_API_KEY")
     
     # Apollo.io API Key (for contact/company search)
     apollo_api_key: str = os.getenv("NEXSYS_APOLLO_API_KEY", "")
