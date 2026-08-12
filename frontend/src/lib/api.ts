@@ -75,6 +75,20 @@ export const getCharacter = () => data<Character>(api.get('/personas/character')
 export const setCharacter = (payload: Partial<Character>) =>
   data<Character>(api.put('/personas/character', payload));
 
+// --- Почта и календарь ---
+// Отправки писем нет намеренно: система готовит черновик, отправляет человек
+export const getGmailStatus = () =>
+  data<{ configured: boolean; can_send: boolean; note: string }>(api.get('/gmail/status'));
+export const getDrafts = (limit = 20) => data<any[]>(api.get('/gmail/drafts', { params: { limit } }));
+export const createDraft = (payload: Record<string, any>) =>
+  data<any>(api.post('/gmail/drafts', payload));
+export const searchMail = (q: string) => data<any[]>(api.get('/gmail/search', { params: { q } }));
+
+export const getCalendarStatus = () =>
+  data<{ configured: boolean; instructions: string | null }>(api.get('/calendar/status'));
+export const getCalendarEvents = (days = 7) =>
+  data<{ count: number; events: any[] }>(api.get('/calendar/events', { params: { days } }));
+
 // --- Веб-чат ---
 // Тот же контур мышления, что у Телеграма, только другой канал
 export const getChatHistory = () =>

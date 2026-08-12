@@ -15,6 +15,8 @@ import PersonasScreen from './screens/PersonasScreen';
 import WalletScreen from './screens/WalletScreen';
 import ArtifactsScreen from './screens/ArtifactsScreen';
 import ChatScreen from './screens/ChatScreen';
+import MailScreen from './screens/MailScreen';
+import CalendarScreen from './screens/CalendarScreen';
 
 export default function App() {
   return (
@@ -31,6 +33,8 @@ export default function App() {
             <Route path="/personas" element={<PersonasScreen />} />
             <Route path="/wallet" element={<WalletScreen />} />
             <Route path="/artifacts" element={<ArtifactsScreen />} />
+            <Route path="/mail" element={<MailScreen />} />
+            <Route path="/calendar" element={<CalendarScreen />} />
             <Route path="/dream-review" element={<DreamReviewScreen />} />
             <Route path="/graph" element={<GraphScreen />} />
             <Route path="/documents" element={<DocumentsScreen />} />
