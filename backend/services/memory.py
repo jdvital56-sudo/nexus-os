@@ -47,6 +47,13 @@ class MemoryFact(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
+    # Окно действия факта. «Ставка клиента — 50 тысяч» было правдой до марта
+    # и остаётся правдой про март: неверно не само утверждение, а его срок.
+    # valid_from пустой — считаем, что действует с момента появления;
+    # valid_until пустой — действует до сих пор.
+    valid_from: str | None = None
+    valid_until: str | None = None
+
     @property
     def is_expired(self) -> bool:
         if self.ttl_hours is None:
@@ -54,9 +61,29 @@ class MemoryFact(BaseModel):
         created = datetime.fromisoformat(self.created_at)
         return datetime.utcnow() > created + timedelta(hours=self.ttl_hours)
 
+    def is_valid_at(self, moment: datetime) -> bool:
+        """Действовал ли факт в указанный момент."""
+        start = self.valid_from or self.created_at
+        try:
+            if datetime.fromisoformat(start) > moment:
+                return False
+        except (ValueError, TypeError):
+            pass  # битая дата не должна прятать факт
+
+        if self.valid_until:
+            try:
+                return datetime.fromisoformat(self.valid_until) > moment
+            except (ValueError, TypeError):
+                return True
+        return True
+
     @property
     def is_active(self) -> bool:
-        return self.superseded_by is None and not self.is_expired
+        return (
+            self.superseded_by is None
+            and not self.is_expired
+            and self.is_valid_at(datetime.utcnow())
+        )
 
 
 MEMORY_FILE = DATA_DIR / "memory.json"
@@ -183,7 +210,10 @@ def update_fact(fact_id: str, **kwargs) -> MemoryFact:
     for i, f in enumerate(facts):
         if f["id"] == fact_id:
             for k, v in kwargs.items():
-                if k in f and v is not None:
+                # Поля, добавленные позже, в старых записях отсутствуют —
+                # без сверки со схемой invalidate() на них молча ничего бы
+                # не делал, а факт остался бы вечно действующим.
+                if (k in f or k in MemoryFact.model_fields) and v is not None:
                     f[k] = v
             f["updated_at"] = datetime.utcnow().isoformat()
             facts[i] = f
@@ -193,8 +223,13 @@ def update_fact(fact_id: str, **kwargs) -> MemoryFact:
 
 
 def supersede(old_id: str, new_content: str, source: str = "", confidence: float = 0.5) -> MemoryFact:
-    """Replace an old fact with a new one. Old fact marked as superseded."""
+    """Replace an old fact with a new one. Old fact marked as superseded.
+
+    Заодно закрывает окно действия старого факта: он не становится ложью,
+    он перестаёт быть текущим. Вопрос «как было в марте» на него ответит.
+    """
     old = get_fact(old_id)
+    moment = datetime.utcnow().isoformat()
 
     # Create new fact in same layer
     new_fact = add_fact(
@@ -206,10 +241,29 @@ def supersede(old_id: str, new_content: str, source: str = "", confidence: float
         tags=old.tags,
         related_docs=old.related_docs,
     )
+    update_fact(new_fact.id, valid_from=moment)
 
     # Mark old as superseded
-    update_fact(old_id, superseded_by=new_fact.id)
+    update_fact(old_id, superseded_by=new_fact.id, valid_until=moment)
     return new_fact
+
+
+def invalidate(fact_id: str, at: datetime | None = None) -> MemoryFact:
+    """Закрывает окно действия факта, не удаляя его.
+
+    Так исчезают противоречия: старая ставка не спорит с новой, у них просто
+    разные сроки. История остаётся, вопрос «как было тогда» отвечается.
+    """
+    moment = (at or datetime.utcnow()).isoformat()
+    return update_fact(fact_id, valid_until=moment)
+
+
+def facts_as_of(moment: datetime, limit: int = 100) -> list[MemoryFact]:
+    """Что система считала правдой в указанный момент."""
+    facts = [MemoryFact(**f) for f in _load()]
+    valid = [f for f in facts if f.is_valid_at(moment) and not f.is_expired]
+    valid.sort(key=lambda f: (-f.confidence, f.created_at))
+    return valid[:limit]
 
 
 def promote(fact_id: str, to_layer: MemoryLayer) -> MemoryFact:
