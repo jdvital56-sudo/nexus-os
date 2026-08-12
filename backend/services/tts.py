@@ -110,7 +110,11 @@ async def synthesize(text: str, voice: str | None = None) -> Path:
     Файл кладётся во временную папку артефактов: озвучка — мусор процесса,
     а не то, что человек будет искать в своих файлах.
     """
-    text = (text or "").strip()
+    from .textclean import for_speech
+
+    # Синтезатор читает разметку вслух: «звёздочка звёздочка автохоткей».
+    # Чистим до всего остального, включая подсчёт длины
+    text = for_speech(text or "")
     if not text:
         raise ValueError("Нечего озвучивать")
 

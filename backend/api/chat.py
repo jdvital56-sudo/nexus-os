@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from ..core.auth import get_token_dep
 from ..services import dialog_history
+from ..services.textclean import strip_markdown
 from ..services.conversation import get_conversation_service
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,9 @@ async def send(req: Message, _=Depends(auth)):
         (m.get("persona") for m in reversed(thread) if m.get("role") == "assistant"),
         "",
     )
-    return {"reply": reply, "persona": persona}
+    # Разметку не показываем: в чате она видна как мусор, а голосом
+    # читается вслух названиями символов
+    return {"reply": strip_markdown(reply), "persona": persona}
 
 
 @router.post("/reset")

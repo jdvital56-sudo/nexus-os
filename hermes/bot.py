@@ -32,21 +32,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
-def strip_markdown(text: str) -> str:
-    """Убирает markdown-разметку: в Telegram она видна как мусор.
-
-    Модель просят писать простым текстом, но привычка сильнее — это
-    страховка на случай, если разметка всё же просочилась.
-    """
-    import re
-
-    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)   # заголовки
-    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text, flags=re.DOTALL)  # жирный
-    text = re.sub(r"__(.+?)__", r"\1", text, flags=re.DOTALL)      # он же
-    text = re.sub(r"(?<!\w)\*(?!\s)(.+?)(?<!\s)\*(?!\w)", r"\1", text, flags=re.DOTALL)
-    text = re.sub(r"^\s*[\*\+]\s+", "- ", text, flags=re.MULTILINE)  # маркеры списка
-    text = re.sub(r"`{1,3}", "", text)                              # код
-    return text.strip()
+# Чистка разметки живёт в backend/services/textclean.py: ею пользуются
+# Телеграм, веб-чат и озвучка. Раньше копия была только здесь, и веб-чат
+# с голосом её не видели — модель ставила звёздочки, а синтезатор читал
+# их вслух: «звёздочка звёздочка автохоткей».
+from backend.services.textclean import strip_markdown  # noqa: E402
 
 
 class HermesAgent:
