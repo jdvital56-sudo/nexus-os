@@ -6,7 +6,7 @@ def test_health(client):
     assert r.status_code == 200
     data = r.json()
     assert data["status"] == "ok"
-    assert data["service"] == "nexsys"
+    assert data["service"] == "nexus-os"
 
 
 # --- Ошибки должны быть видны фронтенду (найдено 2026-08-12) ---

@@ -1,4 +1,4 @@
-"""NEXSYS — FastAPI application entry point."""
+"""Nexus OS — FastAPI application entry point."""
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,7 +29,7 @@ else:
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="NEXSYS",
+    title="Nexus OS",
     description="Local-first AI agent operating system",
     version="0.1.0",
     docs_url="/api/docs",
@@ -76,7 +76,7 @@ app.include_router(system.router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "nexsys", "version": "0.1.0"}
+    return {"status": "ok", "service": "nexus-os", "version": "0.1.0"}
 
 
 @app.on_event("startup")
@@ -112,15 +112,15 @@ async def startup():
 
 
     # Log startup info (without exposing token in production)
-    logger.info(f"NEXSYS v0.1.0 starting on {API_HOST}:{API_PORT}")
+    logger.info(f"Nexus OS v0.1.0 starting on {API_HOST}:{API_PORT}")
     logger.info(f"CORS allowed origins: {', '.join(CORS_ORIGINS)}")
     
     # Only print token in development (check via environment)
     import os
     if os.getenv("NEXSYS_ENV", "development") == "development":
-        print(f"[NEXSYS] Auth token: {token}")
+        print(f"[Nexus OS] Auth token: {token}")
     else:
-        print(f"[NEXSYS] Auth token initialized (check {DATA_DIR / 'auth.json'})")
+        print(f"[Nexus OS] Auth token initialized (check {DATA_DIR / 'auth.json'})")
     
-    print(f"[NEXSYS] API running at http://{API_HOST}:{API_PORT}")
-    print(f"[NEXSYS] Docs available at http://{API_HOST}:{API_PORT}/api/docs")
+    print(f"[Nexus OS] API running at http://{API_HOST}:{API_PORT}")
+    print(f"[Nexus OS] Docs available at http://{API_HOST}:{API_PORT}/api/docs")

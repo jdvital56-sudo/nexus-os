@@ -13,18 +13,20 @@ import {
   Workflow
 } from 'lucide-react';
 
+// Названия по-русски: система личная, и половина экранов уже говорит
+// по-русски. Смесь языков в одном меню читается хуже любого из них.
 const menuItems = [
-  { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/memory', label: 'Memory Graph', icon: Brain },
-  { path: '/skills', label: 'Skills', icon: Sparkles },
-  { path: '/agents', label: 'Agents', icon: Bot },
-  { path: '/dream-review', label: 'Dream Review', icon: Calendar },
-  { path: '/graph', label: 'Knowledge Graph', icon: Network },
-  { path: '/documents', label: 'Documents', icon: FileText },
-  { path: '/tasks', label: 'Tasks', icon: CheckSquare },
-  { path: '/pipeline', label: 'Pipeline', icon: Workflow },
-  { path: '/activity', label: 'Activity', icon: Activity },
-  { path: '/settings', label: 'Settings', icon: Settings },
+  { path: '/', label: 'Дашборд', icon: LayoutDashboard },
+  { path: '/graph', label: 'Второй мозг', icon: Network },
+  { path: '/memory', label: 'Память', icon: Brain },
+  { path: '/dream-review', label: 'Ночной прогон', icon: Calendar },
+  { path: '/skills', label: 'Скиллы', icon: Sparkles },
+  { path: '/agents', label: 'Агенты', icon: Bot },
+  { path: '/tasks', label: 'Задачи', icon: CheckSquare },
+  { path: '/documents', label: 'Документы', icon: FileText },
+  { path: '/pipeline', label: 'Контент', icon: Workflow },
+  { path: '/activity', label: 'События', icon: Activity },
+  { path: '/settings', label: 'Настройки', icon: Settings },
 ];
 
 export default function Sidebar() {
@@ -33,8 +35,8 @@ export default function Sidebar() {
   return (
     <aside className="w-64 bg-darker border-r border-gray-800 h-screen fixed left-0 top-0 overflow-y-auto">
       <div className="p-6">
-        <h1 className="text-2xl font-bold text-primary">NEXUS OS</h1>
-        <p className="text-xs text-gray-500 mt-1">Claude Code Operating System</p>
+        <h1 className="text-2xl font-bold text-primary">Nexus OS</h1>
+        <p className="text-xs text-gray-500 mt-1">Личная операционная система</p>
       </div>
       
       <nav className="mt-6">

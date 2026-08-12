@@ -34,6 +34,21 @@ export interface AutopilotState {
   interval_min: number;
   max_runs_per_day: number;
   quiet_hours: [number, number];
+  /** Откуда взято текущее состояние: нажатие кнопки или настройка .env */
+  source?: 'кнопка' | '.env';
+  /** Что мешает прогону прямо сейчас. null — ничего не мешает */
+  blocked_by?: string | null;
+}
+
+export interface RuntimeInfo {
+  version: string;
+  api_url: string;
+  data_dir: string;
+  artifacts_dir: string;
+  auth_file: string;
+  scheduler_pid: number | null;
+  daily_budget_usd: number;
+  max_reply_tokens: number;
 }
 
 export interface SystemStatusResponse {
@@ -41,6 +56,7 @@ export interface SystemStatusResponse {
   integrations: Integration[];
   dream: DreamState;
   autopilot: AutopilotState;
+  runtime: RuntimeInfo;
 }
 
 export interface WalletSummary {
