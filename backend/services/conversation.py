@@ -48,6 +48,15 @@ _NOTE_WRITE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# «поставь встречу в четверг в 15:00», «запиши в календарь созвон завтра»
+# Триггер разбирается без модели: постановка встречи должна быть
+# предсказуемой и мгновенной, а не зависеть от настроения LLM
+_CALENDAR_TRIGGER = re.compile(
+    r"^\s*(?:/встреча|(?:по)?ставь?\s+(?:встречу|созвон|напоминание)|назначь\s+встречу|"
+    r"запиши\s+в\s+календарь|добавь\s+в\s+календарь|создай\s+встречу)\s*(?P<rest>.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
 # «/notes запрос» — найти в базе знаний
 _NOTE_SEARCH = re.compile(
     r"^\s*(?:/notes|найди\s+в\s+заметках)\s+(?P<query>.+)$",
@@ -101,6 +110,13 @@ class ConversationService:
         """
         if not text or not text.strip():
             raise ValueError("Пустое сообщение")
+
+        calendar_reply = await self._try_calendar(text)
+        if calendar_reply is not None:
+            self._emit_message(channel, "user", "Календарь", text)
+            self._emit_message(channel, "assistant", "Календарь", calendar_reply)
+            await self._log_turn(channel, user_id, text, calendar_reply, "Календарь")
+            return calendar_reply
 
         note_reply = await self._try_note(text)
         if note_reply is not None:
@@ -241,6 +257,45 @@ class ConversationService:
             logger.warning("Извлечение сущностей отложено: %s", e)
         except Exception:
             logger.exception("Извлечение сущностей из %s не удалось", channel)
+
+    async def _try_calendar(self, text: str) -> str | None:
+        """Ставит встречу по фразе. Не команда — возвращает None.
+
+        Время разбирается кодом, а не моделью: «в четверг в 15:00» должно
+        попадать в четверг в 15:00 всегда, а не с вероятностью. И отвечаем
+        человеческой датой, чтобы ошибку было видно сразу, а не на встрече.
+        """
+        match = _CALENDAR_TRIGGER.match(text)
+        if not match:
+            return None
+
+        rest = (match.group("rest") or "").strip()
+        if not rest:
+            return "Скажи, что и когда поставить: «поставь встречу с Ольгой завтра в 15:00»."
+
+        from . import calendar as calendar_svc
+        from . import when_ru
+
+        moment = when_ru.parse(rest)
+        if moment is None:
+            return (
+                f"Не понял, когда именно. Скажи со временем: «{rest} завтра в 15:00»."
+            )
+
+        title = moment.text or "Встреча"
+        try:
+            event = await asyncio.to_thread(
+                calendar_svc.create_event, title, moment.start, moment.duration_minutes
+            )
+        except calendar_svc.CalendarNotConnected as e:
+            return f"📅 {e}"
+        except Exception as e:
+            logger.exception("Не удалось создать событие")
+            return f"Не удалось поставить встречу: {e}"
+
+        when = when_ru.human(moment.start)
+        tail = "" if moment.explicit_time else " (время не назвал — поставил на 10:00)"
+        return f"📅 Поставил: «{title}» {when}{tail}."
 
     async def _try_note(self, text: str) -> str | None:
         """Работа с базой знаний из диалога. Не команда — возвращает None.
