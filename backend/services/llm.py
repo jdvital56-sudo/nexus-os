@@ -17,7 +17,9 @@ from ..core.config import (
     LLM_MODEL,
     LLM_API_KEY,
     LLM_BASE_URL,
+    settings,
 )
+from . import budget
 
 logger = logging.getLogger(__name__)
 
@@ -38,29 +40,63 @@ class LLMResponse:
         self.content = content
         self.model = model
         self.usage = usage or {}
-    
+        # Ответ получен сверх дневного бюджета — канал должен предупредить (I-4)
+        self.over_budget = False
+
     def to_dict(self) -> dict:
         return {
             "content": self.content,
             "model": self.model,
             "usage": self.usage,
+            "over_budget": self.over_budget,
         }
+
+
+# Куда ходить, если базовый URL не задан явно
+DEFAULT_BASE_URLS = {
+    "openai": "https://api.openai.com/v1",
+    "deepseek": "https://api.deepseek.com/v1",
+}
+
+# Telegram шлёт голосовые в ogg/opus; остальное — на случай других каналов
+AUDIO_MIME_TYPES = {
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".aac": "audio/aac",
+    ".webm": "audio/webm",
+}
+
+
+class TranscriptionUnavailable(RuntimeError):
+    """Распознавание речи выключено: нет ключа провайдера."""
+
+
+def guess_audio_mime(path: str) -> str:
+    """Определяет mime по расширению — Gemini отвергает неверный тип."""
+    return AUDIO_MIME_TYPES.get(os.path.splitext(path)[1].lower(), "audio/mpeg")
 
 
 class LLMService:
     """Unified LLM service with provider abstraction."""
-    
+
     def __init__(
         self,
         provider: str = None,
         model: str = None,
         api_key: str = None,
         base_url: str = None,
+        system_prompt: str = "",
     ):
         self.provider = provider or LLM_PROVIDER
         self.model = model or LLM_MODEL
         self.api_key = api_key or LLM_API_KEY
-        self.base_url = base_url or LLM_BASE_URL
+        self.base_url = base_url or DEFAULT_BASE_URLS.get(self.provider) or LLM_BASE_URL
+        self.system_prompt = system_prompt
         
         # Gemini specific config
         self.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
@@ -73,36 +109,84 @@ class LLMService:
         temperature: float = 0.7,
         max_tokens: int = 1024,
         stream: bool = False,
+        kind: str = budget.INTERACTIVE,
+        json_mode: bool = False,
     ) -> LLMResponse:
-        """Send chat completion request."""
+        """Send chat completion request.
+
+        `kind` решает судьбу вызова при исчерпанном дневном бюджете (I-4):
+        фоновый отклоняется, интерактивный проходит с пометкой.
+        `json_mode` требует от провайдера строгий JSON — без него модель на
+        длинных запросах отвечает прозой, и разбор ломается.
+        """
+        within_budget = budget.check(kind)
+
+        # Сжатие контекста: выключено по умолчанию, при любой ошибке молча
+        # возвращает исходные сообщения. Экономия падает прямо в дневной бюджет.
+        from . import compression
+
+        raw = [m.to_dict() for m in messages]
+        packed, compress_stats = compression.compress_messages(raw, model=self.model)
+        if compress_stats.get("applied"):
+            messages = [LLMMessage(role=m["role"], content=m["content"]) for m in packed]
+
         if self.provider == "ollama":
-            return await self._ollama_chat(messages, temperature, max_tokens)
+            response = await self._ollama_chat(messages, temperature, max_tokens, json_mode)
         elif self.provider == "gemini":
-            return await self._gemini_chat(messages, temperature, max_tokens)
-        elif self.provider in ("openai", "anthropic"):
-            return await self._openai_compat_chat(messages, temperature, max_tokens)
+            response = await self._gemini_chat(messages, temperature, max_tokens)
+        elif self.provider in ("openai", "anthropic", "deepseek"):
+            response = await self._openai_compat_chat(messages, temperature, max_tokens, json_mode)
         else:
             raise ValueError(f"Unsupported LLM provider: {self.provider}")
+
+        cost = budget.record(response.model, response.usage)
+        if cost:
+            response.usage["cost_usd"] = round(cost, 6)
+        if compress_stats.get("applied"):
+            response.usage["tokens_saved_by_compression"] = compress_stats["saved"]
+        response.over_budget = not within_budget
+        return response
     
     async def generate_plan(self, audio_path: str, prompt: str) -> str:
         """Generate plan from audio using Gemini 2.0 Flash."""
+        return await self._gemini_audio(audio_path, prompt, max_tokens=2048)
+
+    async def transcribe_audio(self, audio_path: str) -> str:
+        """Расшифровывает голосовое сообщение через Gemini.
+
+        Отдельного STT-провайдера в системе нет, но мультимодальный Gemini
+        уже подключён — используем его существующий ключ. Если ключа нет,
+        честно говорим об этом вместо молчаливого падения.
+        """
+        if not self.gemini_api_key:
+            raise TranscriptionUnavailable(
+                "Распознавание речи выключено: не задан GEMINI_API_KEY"
+            )
+        prompt = (
+            "Расшифруй эту аудиозапись дословно. "
+            "Верни только текст сказанного, без комментариев и пояснений."
+        )
+        return await self._gemini_audio(audio_path, prompt, max_tokens=1024)
+
+    async def _gemini_audio(self, audio_path: str, prompt: str, max_tokens: int) -> str:
+        """Общий путь для аудио-запросов к Gemini."""
         if not self.gemini_api_key:
             raise ValueError("GEMINI_API_KEY not set for audio processing")
-        
+
         url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-        
+
         # Read audio file and encode as base64
         import base64
         with open(audio_path, "rb") as f:
             audio_data = base64.b64encode(f.read()).decode("utf-8")
-        
+
         payload = {
             "contents": [{
                 "parts": [
                     {"text": prompt},
                     {
                         "inline_data": {
-                            "mime_type": "audio/mpeg",
+                            "mime_type": guess_audio_mime(audio_path),
                             "data": audio_data
                         }
                     }
@@ -110,14 +194,14 @@ class LLMService:
             }],
             "generationConfig": {
                 "temperature": 0.1,
-                "maxOutputTokens": 2048,
+                "maxOutputTokens": max_tokens,
             }
         }
-        
+
         headers = {
             "Content-Type": "application/json",
         }
-        
+
         async with httpx.AsyncClient(timeout=120.0) as client:
             try:
                 response = await client.post(
@@ -127,19 +211,36 @@ class LLMService:
                 )
                 response.raise_for_status()
                 data = response.json()
-                
+
                 content = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
                 return content
             except Exception as e:
                 logger.error(f"Gemini audio processing failed: {e}")
                 raise
     
-    async def generate_response(self, user_message: str, context: str = "") -> str:
+    async def generate_response(
+        self,
+        user_message: str,
+        context: str = "",
+        kind: str = budget.INTERACTIVE,
+        json_mode: bool = False,
+    ) -> str:
         """Generate response for chat using configured LLM."""
         full_prompt = f"Context: {context}\n\nUser: {user_message}\n\nAssistant:"
-        messages = [LLMMessage(role="user", content=full_prompt)]
-        
-        response = await self.chat(messages, temperature=0.7, max_tokens=512)
+        messages = []
+        # В режиме JSON системный промпт персоны только мешает: он тянет
+        # модель в разговорный тон, а нам нужна голая структура
+        if self.system_prompt and not json_mode:
+            messages.append(LLMMessage(role="system", content=self.system_prompt))
+        messages.append(LLMMessage(role="user", content=full_prompt))
+
+        response = await self.chat(
+            messages,
+            temperature=0.7,
+            max_tokens=settings.max_reply_tokens,
+            kind=kind,
+            json_mode=json_mode,
+        )
         return response.content
     
     async def _ollama_chat(
@@ -147,6 +248,7 @@ class LLMService:
         messages: List[LLMMessage],
         temperature: float,
         max_tokens: int,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Chat with Ollama."""
         url = f"{self.base_url}/api/chat"
@@ -154,6 +256,7 @@ class LLMService:
             "model": self.model,
             "messages": [m.to_dict() for m in messages],
             "stream": False,
+            **({"format": "json"} if json_mode else {}),
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
@@ -232,6 +335,7 @@ class LLMService:
         messages: List[LLMMessage],
         temperature: float,
         max_tokens: int,
+        json_mode: bool = False,
     ) -> LLMResponse:
         """Chat with OpenAI-compatible API."""
         if self.provider == "anthropic":
@@ -271,6 +375,9 @@ class LLMService:
                 "temperature": temperature,
                 "max_tokens": max_tokens,
             }
+            if json_mode:
+                # Поддерживают OpenAI и DeepSeek; Anthropic идёт другой веткой
+                payload["response_format"] = {"type": "json_object"}
         
         async with httpx.AsyncClient(timeout=60.0) as client:
             try:

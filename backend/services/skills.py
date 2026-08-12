@@ -7,9 +7,11 @@ import json
 from pathlib import Path
 from typing import Any
 from ..core.config import DATA_DIR, ensure_data_dir
+from ..core.errors import ConflictError
 from ..models.schemas import TaskCreate, TaskStatus
 from . import tasks as task_svc
 from . import graph as graph_svc
+from ..core.jsonio import read_json, write_json
 
 
 def _get_skills_dir() -> Path:
@@ -23,21 +25,37 @@ def _ensure_skills_dir():
 
 def list_skills() -> list[dict]:
     """List all available skill contracts."""
+    from . import runtime_settings
+
     _ensure_skills_dir()
     skills = []
     for f in sorted(_get_skills_dir().glob("*.json")):
         try:
-            data = json.loads(f.read_text())
+            data = read_json(f, {})
             skills.append({
                 "id": f.stem,
                 "name": data.get("name", f.stem),
                 "description": data.get("description", ""),
                 "category": data.get("category", "general"),
                 "steps": len(data.get("steps", [])),
+                "enabled": runtime_settings.is_skill_enabled(f.stem),
             })
         except Exception:
             pass
     return skills
+
+
+def set_enabled(skill_id: str, enabled: bool) -> dict:
+    """Включает или выключает скилл. Сам контракт остаётся на диске.
+
+    Выключение — не удаление: файл никуда не девается, скилл просто
+    перестаёт запускаться, пока его не вернут.
+    """
+    from . import runtime_settings
+
+    get_skill(skill_id)  # проверяем, что такой есть — иначе NotFound
+    runtime_settings.set_skill_enabled(skill_id, enabled)
+    return {"id": skill_id, "enabled": enabled}
 
 
 def get_skill(skill_id: str) -> dict:
@@ -46,7 +64,7 @@ def get_skill(skill_id: str) -> dict:
     path = _get_skills_dir() / f"{skill_id}.json"
     if not path.exists():
         raise FileNotFoundError(f"Skill '{skill_id}' not found")
-    return json.loads(path.read_text())
+    return read_json(path, {})
 
 
 def execute_skill(skill_id: str, params: dict[str, Any] = None) -> dict:
@@ -59,7 +77,15 @@ def execute_skill(skill_id: str, params: dict[str, Any] = None) -> dict:
 
     Returns execution log with step results.
     """
+    from . import runtime_settings
+
     contract = get_skill(skill_id)
+
+    # Выключенный скилл не запускается ни человеком, ни агентом — иначе
+    # переключатель был бы украшением, а не запретом.
+    if not runtime_settings.is_skill_enabled(skill_id):
+        raise ConflictError(f"Скилл '{skill_id}' выключен — включите его перед запуском")
+
     params = params or {}
     log = []
 
@@ -204,6 +230,6 @@ def create_default_skills():
     for skill_id, contract in defaults.items():
         path = _get_skills_dir() / f"{skill_id}.json"
         if not path.exists():
-            path.write_text(json.dumps(contract, indent=2, ensure_ascii=False))
+            write_json(path, contract)
 
     return list(defaults.keys())

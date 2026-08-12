@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import datetime
 from typing import Optional, List, Dict, Any
 from google.oauth2.credentials import Credentials
@@ -7,6 +8,8 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+
+logger = logging.getLogger(__name__)
 
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 CREDENTIALS_FILE = 'credentials.json'
@@ -20,8 +23,11 @@ class GoogleCalendarClient:
         
         # Check if credentials file exists
         if not os.path.exists(CREDENTIALS_FILE):
-            print(f"⚠️ WARNING: {CREDENTIALS_FILE} not found. Google Calendar features disabled.")
-            print("Please download credentials.json from Google Cloud Console and place it in the project root.")
+            logger.warning(
+                "%s not found. Google Calendar features disabled. "
+                "Download credentials.json from Google Cloud Console into the project root.",
+                CREDENTIALS_FILE,
+            )
 
     def authenticate(self) -> bool:
         """OAuth 2.0 авторизация"""
@@ -41,7 +47,7 @@ class GoogleCalendarClient:
                     self.creds = flow.run_local_server(port=0)
                 
                 # Save the credentials for the next run
-                with open(TOKEN_FILE, 'w') as token:
+                with open(TOKEN_FILE, 'w', encoding='utf-8') as token:
                     token.write(self.creds.to_json())
             
             self.service = build('calendar', 'v3', credentials=self.creds)
@@ -49,7 +55,7 @@ class GoogleCalendarClient:
             return True
             
         except Exception as e:
-            print(f"❌ Authentication error: {str(e)}")
+            logger.error("Google Calendar authentication error: %s", e)
             return False
 
     async def create_event(

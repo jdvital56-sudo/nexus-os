@@ -1,4 +1,4 @@
-"""NEXSYS — FastAPI application entry point."""
+"""Nexus OS — FastAPI application entry point."""
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +13,7 @@ from .core.config import (
 )
 from .core.errors import NexsysError, nexsys_error_handler, generic_error_handler
 from .core.auth import init_auth
-from .api import documents, tasks, graph, agents, webhooks, skills, calendar, obsidian, pipeline, memory, events, vector_search, fireflies, telephony
+from .api import documents, tasks, graph, agents, webhooks, skills, calendar, obsidian, pipeline, memory, events, vector_search, fireflies, telephony, personas, dream, wallet, artifacts, gmail, sources, system, curator, chat
 
 # Configure logging
 log_config = {
@@ -29,7 +29,7 @@ else:
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="NEXSYS",
+    title="Nexus OS",
     description="Local-first AI agent operating system",
     version="0.1.0",
     docs_url="/api/docs",
@@ -64,19 +64,37 @@ app.include_router(events.router)
 app.include_router(vector_search.router)
 app.include_router(fireflies.router)
 app.include_router(telephony.router)
+app.include_router(personas.router)
+app.include_router(dream.router)
+app.include_router(wallet.router)
+app.include_router(artifacts.router)
+app.include_router(gmail.router)
+app.include_router(sources.router)
+app.include_router(curator.router)
+app.include_router(system.router)
+app.include_router(chat.router)
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "nexsys", "version": "0.1.0"}
+    return {"status": "ok", "service": "nexus-os", "version": "0.1.0"}
 
 
 @app.on_event("startup")
-def startup():
+async def startup():
     """Initialize application on startup."""
     ensure_data_dir()
     token = init_auth()
-    
+
+    # Шина событий: запоминаем именно работающий цикл — emit() зовут из
+    # рабочих потоков (asyncio.to_thread), оттуда его иначе не достать
+    import asyncio as _asyncio
+
+    from .core import eventbus
+
+    eventbus.bind_loop(_asyncio.get_running_loop())
+    events.install()
+
     # Create default skills
     try:
         from .services.skills import create_default_skills
@@ -84,17 +102,26 @@ def startup():
         logger.info("Default skills created successfully")
     except Exception as e:
         logger.warning(f"Failed to create default skills: {e}")
-    
+
+    # Ночная аналитика живёт в этом же процессе: при нескольких воркерах
+    # APScheduler запустил бы джобу в каждом (I-3, риск R-4)
+    try:
+        from .agents.dream_cadence import start_dream_cadence
+        start_dream_cadence()
+    except Exception as e:
+        logger.warning(f"Dream Cadence не запущен: {e}")
+
+
     # Log startup info (without exposing token in production)
-    logger.info(f"NEXSYS v0.1.0 starting on {API_HOST}:{API_PORT}")
+    logger.info(f"Nexus OS v0.1.0 starting on {API_HOST}:{API_PORT}")
     logger.info(f"CORS allowed origins: {', '.join(CORS_ORIGINS)}")
     
     # Only print token in development (check via environment)
     import os
     if os.getenv("NEXSYS_ENV", "development") == "development":
-        print(f"[NEXSYS] Auth token: {token}")
+        print(f"[Nexus OS] Auth token: {token}")
     else:
-        print(f"[NEXSYS] Auth token initialized (check {DATA_DIR / 'auth.json'})")
+        print(f"[Nexus OS] Auth token initialized (check {DATA_DIR / 'auth.json'})")
     
-    print(f"[NEXSYS] API running at http://{API_HOST}:{API_PORT}")
-    print(f"[NEXSYS] Docs available at http://{API_HOST}:{API_PORT}/api/docs")
+    print(f"[Nexus OS] API running at http://{API_HOST}:{API_PORT}")
+    print(f"[Nexus OS] Docs available at http://{API_HOST}:{API_PORT}/api/docs")

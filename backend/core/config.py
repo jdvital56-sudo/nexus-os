@@ -5,6 +5,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
+# Строго до объявления Settings: значения полей вычисляются при создании
+# класса, поэтому .env, загруженный ниже по файлу, туда уже не попадёт.
+load_dotenv()
+
 
 class Settings(BaseModel):
     """Settings class for NEXSYS configuration."""
@@ -12,11 +16,7 @@ class Settings(BaseModel):
     # Base directories with env var override
     data_dir: Path = Path(os.getenv("NEXSYS_DATA_DIR", Path.home() / ".nexsys"))
     
-    # Database configuration (SQLite with migrations support)
-    database_url: str = os.getenv("NEXSYS_DATABASE_URL", f"sqlite:///{Path(os.getenv('NEXSYS_DATA_DIR', Path.home() / '.nexsys'))}/nexus.db")
-    use_sqlite: bool = os.getenv("NEXSYS_USE_SQLITE", "true").lower() == "true"
-    
-    # File-based storage (legacy/backup)
+    # File-based storage (JSON)
     graph_file: Path = None  # Will be set in __init__
     documents_file: Path = None
     tasks_file: Path = None
@@ -41,11 +41,47 @@ class Settings(BaseModel):
     llm_api_key: str = os.getenv("NEXSYS_LLM_API_KEY", "")
     llm_base_url: str = os.getenv("NEXSYS_LLM_BASE_URL", "http://localhost:11434")
     
+    # Ключи провайдеров Пантеона (имена из README_HERMES, не переименовывать до PR-25)
+    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
+
+    # Дневной потолок расходов на LLM в долларах (I-4)
+    daily_llm_budget_usd: float = float(os.getenv("NEXUS_DAILY_LLM_BUDGET_USD", "5"))
+
+    # Потолок длины ответа. 512 обрывало развёрнутые ответы на полуслове;
+    # деньги стережёт дневной бюджет, а не куцый лимит на сообщение
+    max_reply_tokens: int = int(os.getenv("NEXUS_MAX_REPLY_TOKENS", "2000"))
+
+    # Единая папка артефактов — всё, что система сгенерировала для человека
+    artifacts_path: str = os.getenv("HERMES_ARTIFACTS_PATH", "./artifacts")
+
+    # База знаний Obsidian: путь к папке хранилища
+    obsidian_vault_path: str = os.getenv("OBSIDIAN_VAULT_PATH", "")
+
+    # Автопилот выключен по умолчанию: включать только после того, как
+    # неделю отработала гигиена памяти (риск R-2)
+    autopilot: bool = os.getenv("NEXUS_AUTOPILOT", "off").lower() in ("on", "true", "1")
+    jarvis_interval_min: int = int(os.getenv("NEXUS_JARVIS_INTERVAL_MIN", "60"))
+    jarvis_max_runs_per_day: int = int(os.getenv("NEXUS_JARVIS_MAX_RUNS_PER_DAY", "12"))
+    quiet_hours_start: int = int(os.getenv("NEXUS_QUIET_HOURS_START", "23"))
+    quiet_hours_end: int = int(os.getenv("NEXUS_QUIET_HOURS_END", "8"))
+
     # Google Gemini API Key (for audio processing and advanced features)
     gemini_api_key: str = os.getenv("NEXSYS_GEMINI_API_KEY", "")
     
     # Apollo.io API Key (for contact/company search)
     apollo_api_key: str = os.getenv("NEXSYS_APOLLO_API_KEY", "")
+
+    # Сжатие контекста через Headroom. Выключено намеренно: сжатие лоссовое,
+    # включать только после проверки на живых прогонах (см. /api/system/compression).
+    compression: bool = os.getenv("NEXUS_COMPRESSION", "off").lower() in ("on", "true", "1")
+
+    # Firecrawl — обход источников. Имя без префикса NEXSYS: ключ уже лежит
+    # в переменных среды Windows под этим именем, и там же его ждёт MCP-сервер.
+    # Заводить второе имя ради единообразия значит просить вписать ключ дважды.
+    firecrawl_api_key: str = os.getenv("FIRECRAWL_API_KEY", "")
     
     # Telegram Configuration
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -88,17 +124,12 @@ class Settings(BaseModel):
             self.log_file.parent.mkdir(parents=True, exist_ok=True)
 
 
-# Load environment variables from .env file
-load_dotenv()
-
 # Global settings instance
 settings = Settings()
 
 
 # Legacy compatibility - keep old variable names for backward compatibility
 DATA_DIR = settings.data_dir
-DATABASE_URL = settings.database_url
-USE_SQLITE = settings.use_sqlite
 GRAPH_FILE = settings.graph_file
 DOCUMENTS_FILE = settings.documents_file
 TASKS_FILE = settings.tasks_file

@@ -12,11 +12,12 @@ import numpy as np
 from pathlib import Path
 from typing import Any, List, Optional, Dict
 from ..core.config import (
-    DATA_DIR, 
-    ensure_data_dir, 
+    DATA_DIR,
+    ensure_data_dir,
     CHROMA_PERSIST_DIR,
     VECTOR_STORE_TYPE,
 )
+from ..core.jsonio import read_json, write_json
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ def _load_vectors() -> dict:
     """Load vectors from JSON file (NumPy fallback)."""
     ensure_data_dir()
     if VECTORS_FILE.exists():
-        return json.loads(VECTORS_FILE.read_text())
+        return read_json(VECTORS_FILE, {})
     return {"ids": [], "texts": [], "vectors": [], "metadata": []}
 
 
@@ -94,7 +95,7 @@ def _save_vectors(data: dict):
         "vectors": [v.tolist() if isinstance(v, np.ndarray) else v for v in data["vectors"]],
         "metadata": data["metadata"],
     }
-    VECTORS_FILE.write_text(json.dumps(save_data, indent=2))
+    write_json(VECTORS_FILE, save_data)
 
 
 def embed_text(text: str) -> Optional[List[float]]:

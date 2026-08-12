@@ -33,5 +33,4 @@ repos:
         additional_dependencies:
           - fastapi
           - pydantic
-          - sqlalchemy
         files: ^backend/

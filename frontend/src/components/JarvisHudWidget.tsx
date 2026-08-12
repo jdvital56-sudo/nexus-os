@@ -1,210 +1,165 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
+
+export type JarvisState = 'ONLINE' | 'LISTENING' | 'SPEAKING' | 'PROCESSING';
 
 interface JarvisHudWidgetProps {
-  state?: 'ONLINE' | 'LISTENING' | 'SPEAKING' | 'PROCESSING';
+  state?: JarvisState;
   activeModel?: string;
+  /** Размер кольца в пикселях. По умолчанию — как на дашборде. */
+  size?: number;
 }
+
+// Кольцо собрано слоями, как приборная шкала: неподвижная дорожка, четыре
+// бирюзовых сегмента, янтарная дуга, которая бежит по кругу всегда, и
+// внутренние риски, ползущие в обратную сторону. Когда Джарвис говорит,
+// дуга ускоряется, а кольцо и ядро мелко дрожат.
+//
+// Всё движение — на CSS-анимациях. Прошлая версия крутила кольцо через
+// setInterval(50ms) и перерисовывала React двадцать раз в секунду просто
+// потому, что дашборд открыт.
+
+const CYAN = '#22D3EE';
+const AMBER = '#F5B642';
+
+const STATE_COLOR: Record<JarvisState, string> = {
+  ONLINE: '#34D399',
+  LISTENING: '#F472B6',
+  SPEAKING: CYAN,
+  PROCESSING: AMBER,
+};
+
+const CAPTION: Record<JarvisState, [string, string]> = {
+  ONLINE: ['НА СВЯЗИ', 'жду команды, сэр'],
+  LISTENING: ['СЛУШАЮ', 'слушаю, сэр…'],
+  SPEAKING: ['ГОВОРЮ', 'отвечаю…'],
+  PROCESSING: ['ДУМАЮ', 'считаю, сэр…'],
+};
+
+const R = 44;
+const CIRC = 2 * Math.PI * R;
+
+/** Четыре сегмента шкалы: длинный, короткий, длинный, короткий. */
+const SEGMENTS = `${CIRC * 0.28} ${CIRC * 0.06} ${CIRC * 0.14} ${CIRC * 0.06} ${CIRC * 0.28} ${CIRC * 0.06} ${CIRC * 0.06} ${CIRC * 0.06}`;
 
 export const JarvisHudWidget: React.FC<JarvisHudWidgetProps> = ({
   state = 'ONLINE',
-  activeModel = 'GEMINI-2.0',
+  activeModel = '',
+  size = 170,
 }) => {
-  const [rotation, setRotation] = useState(0);
-  const [pulseScale, setPulseScale] = useState(1);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setRotation((prev) => (prev + (state === 'LISTENING' || state === 'SPEAKING' ? 2 : 0.5)) % 360);
-    }, 50);
-    return () => clearInterval(interval);
-  }, [state]);
-
-  useEffect(() => {
-    if (state === 'LISTENING' || state === 'SPEAKING') {
-      const pulseInterval = setInterval(() => {
-        setPulseScale((prev) => (prev === 1 ? 1.15 : 1));
-      }, 400);
-      return () => clearInterval(pulseInterval);
-    } else {
-      setPulseScale(1);
-    }
-  }, [state]);
-
-  const getCoreColors = () => {
-    switch (state) {
-      case 'LISTENING':
-        return { bg: 'rgba(255, 42, 133, 0.2)', border: '#FF2A85', glow: '#FF2A85' };
-      case 'SPEAKING':
-      case 'PROCESSING':
-        return { bg: 'rgba(0, 242, 254, 0.25)', border: '#00F2FE', glow: '#00F2FE' };
-      default:
-        return { bg: 'rgba(0, 242, 254, 0.1)', border: 'rgba(0, 242, 254, 0.4)', glow: '#00F2FE' };
-    }
-  };
-
-  const colors = getCoreColors();
+  const accent = STATE_COLOR[state];
+  const lively = state !== 'ONLINE';
+  // Секунд на оборот. Быстрая дуга читается как тревога — здесь она идёт
+  // спокойно и ускоряется только когда Джарвис действительно занят
+  const orbit = state === 'SPEAKING' ? 3.4 : state === 'PROCESSING' ? 5 : lively ? 7 : 12;
+  const arc = CIRC * (state === 'SPEAKING' ? 0.26 : 0.18);
+  const [caption, subtitle] = CAPTION[state];
 
   return (
-    <div className="relative flex flex-col items-center justify-center select-none p-4">
-      {/* Outer Container */}
-      <div className="relative w-40 h-40 flex items-center justify-center">
-        {/* Outer Arc Shell - Track Ring */}
-        <svg
-          className="absolute inset-0 w-full h-full"
-          viewBox="0 0 100 100"
-          style={{ filter: `drop-shadow(0 0 8px ${colors.glow})` }}
-        >
-          {/* Main dashed ring */}
-          <circle
-            cx="50"
-            cy="50"
-            r="46"
-            fill="none"
-            stroke="#00F2FE"
-            strokeWidth="1.5"
-            strokeDasharray="60 15 30 15"
-            className="opacity-80"
-            style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center' }}
-          />
-          
-          {/* Secondary tick marks ring */}
-          <circle
-            cx="50"
-            cy="50"
-            r="42"
-            fill="none"
-            stroke="rgba(0, 242, 254, 0.3)"
-            strokeWidth="0.8"
-            strokeDasharray="3 5"
-            style={{ transform: `rotate(${-rotation * 0.5}deg)`, transformOrigin: 'center' }}
-          />
+    <div className="flex select-none flex-col items-center">
+      <div
+        className={state === 'SPEAKING' ? 'jarvis-animated' : undefined}
+        style={{
+          width: size,
+          height: size,
+          position: 'relative',
+          animation: state === 'SPEAKING' ? 'jarvis-tremor 0.18s linear infinite' : undefined,
+        }}
+        role="img"
+        aria-label={`Джарвис: ${caption.toLowerCase()}${activeModel ? `, модель ${activeModel}` : ''}`}
+      >
+        <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full">
+          {/* Внешний тонкий обод */}
+          <circle cx="50" cy="50" r="48" fill="none" stroke={CYAN} strokeWidth="0.5" opacity="0.25" />
 
-          {/* Bracket notches at 0°, 90°, 180°, 270° */}
-          {[0, 90, 180, 270].map((angle) => (
-            <g key={angle} style={{ transform: `rotate(${angle + rotation}deg)`, transformOrigin: 'center' }}>
-              <line
-                x1="50"
-                y1="8"
-                x2="50"
-                y2="14"
-                stroke="rgba(0, 242, 254, 0.6)"
-                strokeWidth="1.5"
-              />
-              <line
-                x1="50"
-                y1="86"
-                x2="50"
-                y2="92"
-                stroke="rgba(0, 242, 254, 0.6)"
-                strokeWidth="1.5"
-              />
-            </g>
-          ))}
-        </svg>
+          {/* Сегменты шкалы — медленно против часовой */}
+          <g
+            className="jarvis-animated"
+            style={{ transformOrigin: 'center', animation: `jarvis-orbit-reverse ${orbit * 8}s linear infinite` }}
+          >
+            <circle
+              cx="50"
+              cy="50"
+              r={R}
+              fill="none"
+              stroke={CYAN}
+              strokeWidth="2"
+              strokeDasharray={SEGMENTS}
+              opacity="0.75"
+            />
+          </g>
 
-        {/* Rotating Tech Ring */}
-        <svg
-          className="absolute inset-0 w-full h-full"
-          viewBox="0 0 100 100"
-          style={{ 
-            animation: state === 'LISTENING' || state === 'SPEAKING' 
-              ? 'spin 4s linear infinite' 
-              : 'spin 12s linear infinite'
-          }}
-        >
-          <circle
-            cx="50"
-            cy="50"
-            r="38"
-            fill="none"
-            stroke="rgba(0, 242, 254, 0.2)"
-            strokeWidth="1"
-            strokeDasharray="20 40 10 40"
-          />
-        </svg>
-
-        {/* Inner Glowing Core */}
-        <div
-          className="w-28 h-28 rounded-full flex items-center justify-center transition-all duration-300 border-2"
-          style={{
-            backgroundColor: colors.bg,
-            borderColor: colors.border,
-            boxShadow: `0 0 ${state === 'LISTENING' ? '30px' : '20px'} ${colors.glow}, inset 0 0 20px rgba(0, 242, 254, 0.2)`,
-            transform: `scale(${pulseScale})`,
-          }}
-        >
-          {/* Center Brand Text */}
-          <span
-            className="font-mono text-xs tracking-[0.35em] font-bold pl-1"
+          {/* Та самая янтарная полоска, бегущая по кругу */}
+          <g
+            className="jarvis-animated"
             style={{
-              color: '#FFFFFF',
-              textShadow: `0 0 10px ${colors.glow}`,
+              transformOrigin: 'center',
+              animation: `jarvis-orbit ${orbit}s linear infinite`,
+              filter: `drop-shadow(0 0 3px ${AMBER})`,
             }}
+          >
+            <circle
+              cx="50"
+              cy="50"
+              r={R}
+              fill="none"
+              stroke={AMBER}
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeDasharray={`${arc} ${CIRC - arc}`}
+            />
+          </g>
+
+          {/* Внутренние риски — в обратную сторону, дают ощущение механизма */}
+          <g
+            className="jarvis-animated"
+            style={{ transformOrigin: 'center', animation: `jarvis-orbit-reverse ${orbit * 3}s linear infinite` }}
+          >
+            <circle cx="50" cy="50" r="37" fill="none" stroke={CYAN} strokeWidth="0.8" strokeDasharray="1 5" opacity="0.5" />
+          </g>
+
+          {/* Скобки сверху и снизу — рамка прицела, стоит на месте */}
+          <path d="M 34 17 A 34 34 0 0 1 66 17" fill="none" stroke={CYAN} strokeWidth="1.2" opacity="0.55" />
+          <path d="M 34 83 A 34 34 0 0 0 66 83" fill="none" stroke={CYAN} strokeWidth="1.2" opacity="0.55" />
+
+          {/* Кольцо ядра */}
+          <circle cx="50" cy="50" r="29" fill="rgba(34, 211, 238, 0.05)" stroke={CYAN} strokeWidth="0.8" opacity="0.7" />
+        </svg>
+
+        <div
+          className={`absolute inset-0 m-auto flex items-center justify-center rounded-full ${lively ? 'jarvis-animated' : ''}`}
+          style={{
+            width: '52%',
+            height: '52%',
+            boxShadow: `0 0 ${lively ? 26 : 14}px rgba(34, 211, 238, 0.35), inset 0 0 22px rgba(34, 211, 238, 0.15)`,
+            borderRadius: '50%',
+            animation: lively ? 'jarvis-breathe 2.4s ease-in-out infinite' : undefined,
+            transition: 'box-shadow 300ms ease',
+          }}
+        >
+          <span
+            className="font-mono text-[0.6rem] font-bold tracking-[0.28em] text-white"
+            style={{ textShadow: `0 0 10px ${CYAN}`, paddingLeft: '0.28em' }}
           >
             J.A.R.V.I.S.
           </span>
         </div>
-
-        {/* Radial tick marks around outer edge */}
-        {Array.from({ length: 36 }).map((_, i) => (
-          <div
-            key={i}
-            className="absolute w-px h-2 bg-cyan-400/30"
-            style={{
-              top: '4px',
-              left: '50%',
-              transformOrigin: '50% 76px',
-              transform: `translateX(-50%) rotate(${i * 10}deg)`,
-            }}
-          />
-        ))}
       </div>
 
-      {/* State Text Indicator */}
-      <div className="mt-4 flex items-center gap-2 font-mono text-xs tracking-widest">
-        <span
-          className={`w-2.5 h-2.5 rounded-full ${
-            state === 'ONLINE' ? 'bg-emerald-400' : 'bg-pink-500 animate-pulse'
-          }`}
-          style={{
-            boxShadow: state === 'ONLINE' 
-              ? '0 0 10px #00FF9D' 
-              : `0 0 15px ${colors.glow}`,
-          }}
-        />
-        <span
-          className={`${
-            state === 'ONLINE' 
-              ? 'text-emerald-400' 
-              : state === 'LISTENING'
-              ? 'text-pink-400'
-              : 'text-cyan-400'
-          }`}
-          style={{
-            textShadow: `0 0 8px ${
-              state === 'ONLINE' ? '#00FF9D' : colors.glow
-            }`,
-          }}
+      <div className="mt-3 flex items-center gap-2 font-mono text-[0.7rem] tracking-[0.2em]" style={{ color: accent }}>
+        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: accent, boxShadow: `0 0 8px ${accent}` }} />
+        {caption}
+      </div>
+
+      <div className="mt-1 font-mono text-[0.6rem] tracking-wide text-gray-500">{subtitle}</div>
+
+      {activeModel && (
+        <div
+          className="mt-2 rounded-full border px-3 py-1 font-mono text-[0.6rem] tracking-wide"
+          style={{ borderColor: 'rgba(34, 211, 238, 0.3)', color: '#67E8F9', backgroundColor: 'rgba(2, 6, 23, 0.9)' }}
         >
-          {state === 'ONLINE' && '● ONLINE'}
-          {state === 'LISTENING' && '🎙 LISTENING, sir...'}
-          {state === 'SPEAKING' && '🔊 SPEAKING'}
-          {state === 'PROCESSING' && '⚙ PROCESSING'}
-        </span>
-      </div>
-
-      {/* Active Model Pill */}
-      <div
-        className="mt-3 px-4 py-1 rounded-full border text-[10px] font-mono tracking-wide"
-        style={{
-          backgroundColor: 'rgba(15, 23, 42, 0.9)',
-          borderColor: 'rgba(0, 242, 254, 0.3)',
-          color: '#67E8F9',
-          boxShadow: '0 0 10px rgba(0, 242, 254, 0.1)',
-        }}
-      >
-        ◈ {activeModel}
-      </div>
+          ◈ {activeModel}
+        </div>
+      )}
     </div>
   );
 };

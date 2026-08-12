@@ -1,8 +1,8 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { getGraphNodes, getGraphStats } from '../lib/api'
-import type { GraphNode, GraphStats } from '../types'
+import type { ApiGraphNode, GraphStats } from '../types'
 
-interface NodePosition extends GraphNode {
+interface NodePosition extends ApiGraphNode {
   x: number
   y: number
   vx: number
@@ -36,7 +36,7 @@ export default function OrbitalGraph() {
       const h = canvasRef.current?.height || 600
       const cx = w / 2
       const cy = h / 2
-      nodesRef.current = nodes.map((n: GraphNode, i: number) => {
+      nodesRef.current = nodes.map((n: ApiGraphNode, i: number) => {
         const angle = (i / Math.max(nodes.length, 1)) * Math.PI * 2
         const dist = 120 + Math.random() * 100
         return {

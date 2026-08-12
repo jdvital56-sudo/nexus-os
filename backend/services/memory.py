@@ -13,12 +13,18 @@ Key distinction:
 Each memory fact has: source, confidence, TTL (time-to-live), created/updated timestamps.
 """
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 from pydantic import BaseModel, Field
 from ..core.config import DATA_DIR, ensure_data_dir
+from ..core.errors import NotFoundError
+from ..core.jsonio import read_json, write_json
+from ..core import eventbus
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryLayer(str, Enum):
@@ -41,6 +47,13 @@ class MemoryFact(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
+    # Окно действия факта. «Ставка клиента — 50 тысяч» было правдой до марта
+    # и остаётся правдой про март: неверно не само утверждение, а его срок.
+    # valid_from пустой — считаем, что действует с момента появления;
+    # valid_until пустой — действует до сих пор.
+    valid_from: str | None = None
+    valid_until: str | None = None
+
     @property
     def is_expired(self) -> bool:
         if self.ttl_hours is None:
@@ -48,24 +61,57 @@ class MemoryFact(BaseModel):
         created = datetime.fromisoformat(self.created_at)
         return datetime.utcnow() > created + timedelta(hours=self.ttl_hours)
 
+    def is_valid_at(self, moment: datetime) -> bool:
+        """Действовал ли факт в указанный момент."""
+        start = self.valid_from or self.created_at
+        try:
+            if datetime.fromisoformat(start) > moment:
+                return False
+        except (ValueError, TypeError):
+            pass  # битая дата не должна прятать факт
+
+        if self.valid_until:
+            try:
+                return datetime.fromisoformat(self.valid_until) > moment
+            except (ValueError, TypeError):
+                return True
+        return True
+
     @property
     def is_active(self) -> bool:
-        return self.superseded_by is None and not self.is_expired
+        return (
+            self.superseded_by is None
+            and not self.is_expired
+            and self.is_valid_at(datetime.utcnow())
+        )
 
 
 MEMORY_FILE = DATA_DIR / "memory.json"
+
+# Индексация в векторный стор — боевое поведение. В тестах выключается:
+# поднимать ChromaDB на каждый факт долго, а текстовый поиск им хватает.
+INDEXING_ENABLED = True
+
+# Насколько слой ценен при вспоминании. Сырой диалог из INBOX — самый
+# шумный: там лежит каждое сообщение дословно, включая сам вопрос.
+LAYER_WEIGHTS = {
+    MemoryLayer.INBOX: 0.4,
+    MemoryLayer.OPERATIONAL: 1.0,
+    MemoryLayer.CANON: 1.5,
+    MemoryLayer.MEMORY: 1.5,
+}
 
 
 def _load() -> list[dict]:
     ensure_data_dir()
     if MEMORY_FILE.exists():
-        return json.loads(MEMORY_FILE.read_text())
+        return read_json(MEMORY_FILE, [])
     return []
 
 
 def _save(facts: list[dict]):
     ensure_data_dir()
-    MEMORY_FILE.write_text(json.dumps(facts, indent=2, ensure_ascii=False))
+    write_json(MEMORY_FILE, facts)
 
 
 def add_fact(
@@ -90,7 +136,38 @@ def add_fact(
     )
     facts.append(fact.model_dump())
     _save(facts)
+
+    # Индексируем здесь, а не у вызывающего: иначе факты, добавленные не
+    # через диалог, оставались бы невидимыми для recall()
+    _index_fact(fact)
+
+    eventbus.emit(
+        eventbus.MEMORY_FACT_ADDED,
+        {
+            "fact_id": fact.id,
+            "layer": fact.layer.value,
+            "summary": fact.content[:160],
+            "source": fact.source,
+        },
+    )
     return fact
+
+
+def _index_fact(fact: "MemoryFact") -> None:
+    """Кладёт факт в векторный индекс. Молча уступает, если он недоступен."""
+    if not INDEXING_ENABLED:
+        return
+    try:
+        from .vector_store import add_vector
+
+        text = f"[{fact.source}] {fact.content}" if fact.source else fact.content
+        add_vector(
+            f"memory:{fact.id}",
+            text,
+            {"type": "memory", "layer": fact.layer.value, "confidence": fact.confidence},
+        )
+    except Exception:
+        logger.debug("Факт %s не проиндексирован", fact.id, exc_info=True)
 
 
 def get_facts(
@@ -124,7 +201,7 @@ def get_fact(fact_id: str) -> MemoryFact:
     for f in facts:
         if f["id"] == fact_id:
             return MemoryFact(**f)
-    raise FileNotFoundError(f"Memory fact '{fact_id}' not found")
+    raise NotFoundError("Memory fact", fact_id)
 
 
 def update_fact(fact_id: str, **kwargs) -> MemoryFact:
@@ -133,18 +210,26 @@ def update_fact(fact_id: str, **kwargs) -> MemoryFact:
     for i, f in enumerate(facts):
         if f["id"] == fact_id:
             for k, v in kwargs.items():
-                if k in f and v is not None:
+                # Поля, добавленные позже, в старых записях отсутствуют —
+                # без сверки со схемой invalidate() на них молча ничего бы
+                # не делал, а факт остался бы вечно действующим.
+                if (k in f or k in MemoryFact.model_fields) and v is not None:
                     f[k] = v
             f["updated_at"] = datetime.utcnow().isoformat()
             facts[i] = f
             _save(facts)
             return MemoryFact(**f)
-    raise FileNotFoundError(f"Memory fact '{fact_id}' not found")
+    raise NotFoundError("Memory fact", fact_id)
 
 
 def supersede(old_id: str, new_content: str, source: str = "", confidence: float = 0.5) -> MemoryFact:
-    """Replace an old fact with a new one. Old fact marked as superseded."""
+    """Replace an old fact with a new one. Old fact marked as superseded.
+
+    Заодно закрывает окно действия старого факта: он не становится ложью,
+    он перестаёт быть текущим. Вопрос «как было в марте» на него ответит.
+    """
     old = get_fact(old_id)
+    moment = datetime.utcnow().isoformat()
 
     # Create new fact in same layer
     new_fact = add_fact(
@@ -156,10 +241,29 @@ def supersede(old_id: str, new_content: str, source: str = "", confidence: float
         tags=old.tags,
         related_docs=old.related_docs,
     )
+    update_fact(new_fact.id, valid_from=moment)
 
     # Mark old as superseded
-    update_fact(old_id, superseded_by=new_fact.id)
+    update_fact(old_id, superseded_by=new_fact.id, valid_until=moment)
     return new_fact
+
+
+def invalidate(fact_id: str, at: datetime | None = None) -> MemoryFact:
+    """Закрывает окно действия факта, не удаляя его.
+
+    Так исчезают противоречия: старая ставка не спорит с новой, у них просто
+    разные сроки. История остаётся, вопрос «как было тогда» отвечается.
+    """
+    moment = (at or datetime.utcnow()).isoformat()
+    return update_fact(fact_id, valid_until=moment)
+
+
+def facts_as_of(moment: datetime, limit: int = 100) -> list[MemoryFact]:
+    """Что система считала правдой в указанный момент."""
+    facts = [MemoryFact(**f) for f in _load()]
+    valid = [f for f in facts if f.is_valid_at(moment) and not f.is_expired]
+    valid.sort(key=lambda f: (-f.confidence, f.created_at))
+    return valid[:limit]
 
 
 def promote(fact_id: str, to_layer: MemoryLayer) -> MemoryFact:
@@ -180,6 +284,45 @@ def demote(fact_id: str, to_layer: MemoryLayer) -> MemoryFact:
     return update_fact(fact_id, layer=to_layer.value)
 
 
+# Русское слово меняет окончание, а основа остаётся: «автопилот» и
+# «автопилоту» — одно и то же. Сравнение слов целиком этого не видит, и
+# вопрос «что решили по автопилоту» не находил факт про автопилот вовсе.
+# Грубая обрезка до основы одинаково применяется к запросу и к факту —
+# морфологический разбор здесь избыточен, а зависимость стоила бы дороже.
+_STEM_LEN = 5
+
+# Служебные слова совпадают в любых двух фразах и весят наравне со
+# значимыми. Из-за этого вопрос «что решили по автопилоту» находил первым
+# факт про ставку — там тоже было «по». Выбрасываем их из сравнения.
+_STOP_WORDS = frozenset({
+    "и", "в", "во", "не", "что", "он", "на", "я", "с", "со", "как", "а", "то",
+    "все", "она", "так", "его", "но", "да", "ты", "к", "у", "же", "вы", "за",
+    "бы", "по", "только", "ее", "мне", "было", "вот", "от", "меня", "еще",
+    "нет", "о", "из", "ему", "теперь", "когда", "даже", "ну", "вдруг", "ли",
+    "если", "уже", "или", "ни", "быть", "был", "него", "до", "вас", "нибудь",
+    "опять", "уж", "вам", "ведь", "там", "потом", "себя", "ничего", "ей",
+    "они", "тут", "где", "есть", "надо", "ней", "для", "мы", "тебя", "их",
+    "чем", "была", "сам", "чтоб", "без", "будто", "чего", "раз", "тоже",
+    "себе", "под", "будет", "ж", "тогда", "кто", "этот", "того", "потому",
+    "этого", "какой", "совсем", "ним", "здесь", "этом", "один", "почти",
+    "мой", "тем", "чтобы", "нее", "были", "куда", "зачем", "всех", "никогда",
+    "можно", "при", "наконец", "два", "об", "другой", "хоть", "после", "над",
+    "больше", "тот", "через", "эти", "нас", "про", "всего", "них", "какая",
+    "много", "разве", "три", "эту", "моя", "впрочем", "хорошо", "свою",
+    "этой", "перед", "иногда", "лучше", "чуть", "том", "нельзя", "такой",
+    "им", "более", "всегда", "конечно", "всю", "между",
+    "the", "a", "an", "of", "to", "in", "on", "for", "and", "or", "is", "are",
+})
+
+
+def _stem(word: str) -> str:
+    return word[:_STEM_LEN] if len(word) > _STEM_LEN else word
+
+
+def _stems(text: str) -> set[str]:
+    return {_stem(w) for w in text.split() if w and w not in _STOP_WORDS}
+
+
 def recall(query: str, limit: int = 5) -> list[MemoryFact]:
     """Semantic recall — find facts matching a query.
 
@@ -197,7 +340,7 @@ def recall(query: str, limit: int = 5) -> list[MemoryFact]:
                     fact_id = r["id"].replace("memory:", "")
                     try:
                         facts.append(get_fact(fact_id))
-                    except FileNotFoundError:
+                    except NotFoundError:
                         pass
             if facts:
                 return facts
@@ -217,9 +360,9 @@ def recall(query: str, limit: int = 5) -> list[MemoryFact]:
         if query_lower in content_lower:
             score += 1.0
 
-        # Word overlap
-        query_words = set(query_lower.split())
-        content_words = set(content_lower.split())
+        # Пересечение слов — по основам, а не по словоформам
+        query_words = _stems(query_lower)
+        content_words = _stems(content_lower)
         overlap = query_words & content_words
         if overlap:
             score += len(overlap) / max(len(query_words), 1)
@@ -231,6 +374,11 @@ def recall(query: str, limit: int = 5) -> list[MemoryFact]:
 
         # Confidence boost
         score *= (0.5 + fact.confidence * 0.5)
+
+        # Слой важнее совпадения слов: выводы и канон полезнее сырого диалога.
+        # Без этого recall возвращал эхо самого вопроса — ведь каждое
+        # сообщение лежит в INBOX дословно и совпадает с запросом лучше всего.
+        score *= LAYER_WEIGHTS.get(fact.layer, 1.0)
 
         if score > 0:
             scored.append((score, fact))

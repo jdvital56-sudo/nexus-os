@@ -26,3 +26,13 @@ class SkillRunRequest(BaseModel):
 @router.post("/{skill_id}/run")
 def run_skill(skill_id: str, req: SkillRunRequest, _=Depends(auth)):
     return svc.execute_skill(skill_id, req.params)
+
+
+class SkillToggle(BaseModel):
+    enabled: bool
+
+
+@router.post("/{skill_id}/enabled")
+def set_skill_enabled(skill_id: str, req: SkillToggle, _=Depends(auth)):
+    """Включает или выключает скилл. Контракт остаётся на диске."""
+    return svc.set_enabled(skill_id, req.enabled)

@@ -1,84 +1,145 @@
-import { useEffect, useState } from 'react'
-import { getTasks, createTask } from '../lib/api'
+import { useEffect, useState } from 'react';
+import { Plus } from 'lucide-react';
+import { createTask, getTasks } from '../lib/api';
+import { BTN, BTN_GHOST, CARD, Empty, ErrorBox, INPUT, PageHeader, Pill, Skeleton, when } from '../components/ui';
 
-const STATUS_COLORS: Record<string, string> = {
-  todo: '#6d7f97',
-  in_progress: '#22d3ee',
-  done: '#2dd4bf',
-  blocked: '#ef4444',
-}
+// Задачи заводит и человек, и система: скиллы и агенты создают их сами.
+// Поэтому здесь видно, кто задачу поставил — иначе непонятно, откуда она.
 
-const PRIORITY_COLORS: Record<string, string> = {
-  low: '#6d7f97',
-  medium: '#f5b642',
-  high: '#f97316',
-  critical: '#ef4444',
-}
+const STATUS: Record<string, { label: string; tone: string; border: string }> = {
+  todo: { label: 'в очереди', tone: 'gray', border: 'border-l-gray-600' },
+  in_progress: { label: 'в работе', tone: 'blue', border: 'border-l-blue-400' },
+  done: { label: 'сделано', tone: 'green', border: 'border-l-primary' },
+  blocked: { label: 'застряла', tone: 'red', border: 'border-l-red-500' },
+};
+
+const PRIORITY: Record<string, { label: string; tone: string }> = {
+  low: { label: 'не срочно', tone: 'gray' },
+  medium: { label: 'обычная', tone: 'blue' },
+  high: { label: 'важная', tone: 'amber' },
+  critical: { label: 'горит', tone: 'red' },
+};
 
 export default function TasksScreen() {
-  const [tasks, setTasks] = useState<any[]>([])
-  const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ title: '', description: '', priority: 'medium' })
+  const [tasks, setTasks] = useState<any[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ title: '', description: '', priority: 'medium' });
 
-  useEffect(() => { getTasks().then(setTasks) }, [])
+  const load = () => {
+    getTasks()
+      .then((t) => {
+        setTasks(t);
+        setError(null);
+      })
+      .catch(() => setError('Бэкенд недоступен. Запущен ли он на :8420?'));
+  };
 
-  const handleCreate = async () => {
-    if (!form.title) return
-    const task = await createTask(form)
-    setTasks([...tasks, task])
-    setForm({ title: '', description: '', priority: 'medium' })
-    setShowCreate(false)
-  }
+  useEffect(load, []);
+
+  const create = async () => {
+    if (!form.title.trim()) return;
+    try {
+      await createTask(form);
+      setForm({ title: '', description: '', priority: 'medium' });
+      setShowCreate(false);
+      load();
+    } catch {
+      setError('Задача не создалась.');
+    }
+  };
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 style={{ fontSize: 24, fontWeight: 800, color: '#2dd4bf' }}>Tasks</h2>
-        <button onClick={() => setShowCreate(!showCreate)} style={{
-          padding: '8px 16px', background: '#2dd4bf', color: '#04121a', border: 'none',
-          borderRadius: 8, fontWeight: 700, cursor: 'pointer',
-        }}>+ New</button>
-      </div>
+    <div className="p-6 lg:p-8">
+      <PageHeader
+        title="Задачи"
+        subtitle="Свои и те, что система завела сама — из скиллов, агентов и ночных находок."
+        action={
+          <button onClick={() => setShowCreate(!showCreate)} className={BTN}>
+            <Plus className="h-4 w-4" aria-hidden />
+            Новая задача
+          </button>
+        }
+      />
 
-      {showCreate && (
-        <div style={{ background: '#0f1520', border: '1px solid #1e2a3a', borderRadius: 12, padding: 16, marginBottom: 16 }}>
-          <input value={form.title} onChange={e => setForm({...form, title: e.target.value})} placeholder="Task title"
-            style={{ width: '100%', padding: '8px 12px', background: '#0a0e14', border: '1px solid #1e2a3a', borderRadius: 6, color: '#e8eef6', marginBottom: 8, fontSize: 14 }} />
-          <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="Description..." rows={3}
-            style={{ width: '100%', padding: '8px 12px', background: '#0a0e14', border: '1px solid #1e2a3a', borderRadius: 6, color: '#e8eef6', marginBottom: 8, fontSize: 14, resize: 'vertical' }} />
-          <select value={form.priority} onChange={e => setForm({...form, priority: e.target.value})}
-            style={{ padding: '8px 12px', background: '#0a0e14', border: '1px solid #1e2a3a', borderRadius: 6, color: '#e8eef6', marginBottom: 8, fontSize: 14 }}>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-            <option value="critical">Critical</option>
-          </select>
-          <br />
-          <button onClick={handleCreate} style={{
-            padding: '8px 16px', background: '#2dd4bf', color: '#04121a', border: 'none',
-            borderRadius: 8, fontWeight: 700, cursor: 'pointer',
-          }}>Create</button>
+      {error && (
+        <div className="mb-6">
+          <ErrorBox message={error} onRetry={load} />
         </div>
       )}
 
-      <div style={{ display: 'grid', gap: 8 }}>
-        {tasks.map(t => (
-          <div key={t.id} style={{
-            background: '#0f1520', border: '1px solid #1e2a3a', borderLeft: `3px solid ${STATUS_COLORS[t.status]}`, borderRadius: 10, padding: '14px 18px',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: 700, color: '#fff' }}>{t.title}</span>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <span style={{ fontSize: 11, color: STATUS_COLORS[t.status], textTransform: 'uppercase' }}>{t.status}</span>
-                <span style={{ fontSize: 11, color: PRIORITY_COLORS[t.priority], textTransform: 'uppercase' }}>{t.priority}</span>
-              </div>
-            </div>
-            {t.description && <div style={{ fontSize: 13, color: '#95a6bd', marginTop: 4 }}>{t.description}</div>}
-            {t.assigned_agent && <div style={{ fontSize: 11, color: '#a78bfa', marginTop: 4 }}>→ {t.assigned_agent}</div>}
+      {showCreate && (
+        <div className={`${CARD} mb-6 space-y-3`}>
+          <input
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            placeholder="Что нужно сделать"
+            className={INPUT}
+            autoFocus
+          />
+          <textarea
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+            placeholder="Подробности, если нужны"
+            rows={3}
+            className={INPUT}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            {Object.entries(PRIORITY).map(([key, p]) => (
+              <button
+                key={key}
+                onClick={() => setForm({ ...form, priority: key })}
+                className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
+                  form.priority === key
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+            <button onClick={create} className={`${BTN} ml-auto`} disabled={!form.title.trim()}>
+              Создать
+            </button>
+            <button onClick={() => setShowCreate(false)} className={BTN_GHOST}>
+              Отмена
+            </button>
           </div>
-        ))}
-        {tasks.length === 0 && <div style={{ color: '#6d7f97', textAlign: 'center', padding: 40 }}>No tasks yet</div>}
+        </div>
+      )}
+
+      {tasks === null && !error && <Skeleton />}
+
+      {tasks?.length === 0 && (
+        <Empty
+          title="Задач пока нет."
+          hint="Заведи первую кнопкой выше — или попроси бота, он умеет ставить задачи сам."
+        />
+      )}
+
+      <div className="space-y-2">
+        {tasks?.map((t) => {
+          const status = STATUS[t.status] ?? STATUS.todo;
+          const priority = PRIORITY[t.priority] ?? PRIORITY.medium;
+          return (
+            <article key={t.id} className={`${CARD} border-l-4 ${status.border}`}>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <h3 className="font-semibold text-white">{t.title}</h3>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Pill text={status.label} tone={status.tone} />
+                  <Pill text={priority.label} tone={priority.tone} />
+                </div>
+              </div>
+              {t.description && <p className="mt-1 text-sm text-gray-300">{t.description}</p>}
+              <p className="mt-2 text-[11px] text-gray-500">
+                {when(t.created_at)}
+                {t.assigned_agent && ` · исполнитель: ${t.assigned_agent}`}
+                {t.source && ` · создано: ${t.source}`}
+              </p>
+            </article>
+          );
+        })}
       </div>
     </div>
-  )
+  );
 }

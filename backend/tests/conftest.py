@@ -37,6 +37,55 @@ def temp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(mem_svc, "MEMORY_FILE", tmp_path / "memory.json")
     monkeypatch.setattr(vec_svc, "VECTORS_FILE", tmp_path / "vectors.json")
 
+    # Хранилища, появившиеся позже: без них тесты писали бы в реальный ~/.nexsys
+    import backend.services.budget as budget_svc
+    import backend.services.personas as persona_svc
+
+    monkeypatch.setattr(persona_svc, "PERSONAS_FILE", tmp_path / "personas.json")
+    monkeypatch.setattr(budget_svc, "SPEND_FILE", tmp_path / "llm_spend.json")
+
+    # Векторная индексация каждого факта поднимает ChromaDB и растягивает
+    # прогон с 17 секунд до четырёх минут — в тестах она не нужна
+    monkeypatch.setattr(mem_svc, "INDEXING_ENABLED", False)
+
+    import backend.services.artifacts as art_svc
+    monkeypatch.setattr(art_svc, "REGISTRY_FILE", tmp_path / "artifacts.json")
+    monkeypatch.setattr(cfg.settings, "artifacts_path", str(tmp_path / "artifacts"))
+
+    import backend.services.wallet as wallet_svc
+    monkeypatch.setattr(wallet_svc, "SERVICES_FILE", tmp_path / "services.json")
+
+    import backend.services.dream as dream_svc
+    monkeypatch.setattr(dream_svc, "FINDINGS_FILE", tmp_path / "dream_findings.json")
+    monkeypatch.setattr(dream_svc, "BRIEF_FILE", tmp_path / "dream_brief.json")
+
+    import backend.services.sources as sources_svc
+    monkeypatch.setattr(sources_svc, "SOURCES_FILE", tmp_path / "sources.json")
+
+    import backend.services.curator as curator_svc
+    monkeypatch.setattr(curator_svc, "ARCHIVE_FILE", tmp_path / "memory_archive.json")
+
+    import backend.services.runtime_settings as rs_svc
+    monkeypatch.setattr(rs_svc, "SETTINGS_FILE", tmp_path / "runtime_settings.json")
+
+    import backend.services.dialog_history as history_svc
+    monkeypatch.setattr(history_svc, "HISTORY_FILE", tmp_path / "dialog_history.json")
+
+    import backend.core.singleton as singleton_mod
+    monkeypatch.setattr(singleton_mod, "LOCK_FILE", tmp_path / "scheduler.lock")
+
+    # Боевые ключи лежат в переменных окружения машины. Без этой заглушки
+    # тесты ходили бы в реальные API за реальные деньги.
+    for field in ("openai_api_key", "anthropic_api_key", "deepseek_api_key",
+                  "llm_api_key", "gemini_api_key"):
+        monkeypatch.setattr(cfg.settings, field, "")
+
+    # Шина событий не должна протекать между тестами
+    from backend.core import eventbus
+
+    monkeypatch.setattr(eventbus, "_subscribers", [])
+    monkeypatch.setattr(eventbus, "_loop", None)
+
     # Init files
     (tmp_path / "graph.json").write_text('{"nodes": [], "edges": []}')
     (tmp_path / "auth.json").write_text('{}')
@@ -52,7 +101,8 @@ def temp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "ensure_data_dir", patched_ensure)
 
     # Patch each service's ensure_data_dir reference
-    for svc_mod in [doc_svc, task_svc, graph_svc, agent_svc, auth_mod, skills_svc, mem_svc, vec_svc]:
+    for svc_mod in [doc_svc, task_svc, graph_svc, agent_svc, auth_mod, skills_svc,
+                    mem_svc, vec_svc, history_svc, sources_svc, curator_svc]:
         if hasattr(svc_mod, 'ensure_data_dir'):
             monkeypatch.setattr(svc_mod, "ensure_data_dir", patched_ensure)
 

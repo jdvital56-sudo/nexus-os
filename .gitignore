@@ -35,6 +35,8 @@ logs/
 .env
 .env.local
 .env.*
+# Шаблон без секретов — он обязан быть в репозитории
+!.env.example
 
 # IDE
 .vscode/
@@ -47,9 +49,6 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Alembic
-alembic/versions/*.py
-
 # Compressed files
 *.zip
 *.tar.gz
@@ -60,4 +59,7 @@ alembic/versions/*.py
 *.xz
 *.7z
 *.rar
-```frontend/node_modules/
+
+# Dependencies / envs
+frontend/node_modules/
+.venv/

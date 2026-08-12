@@ -5,13 +5,15 @@ import networkx as nx
 from ..core.config import GRAPH_FILE, ensure_data_dir
 from ..core.errors import NotFoundError
 from ..models.schemas import GraphNode, GraphEdge, GraphStats, NodeType, EdgeType
+from ..core.jsonio import read_json, write_json
+from ..core import eventbus
 
 
 def _load_graph() -> nx.DiGraph:
     ensure_data_dir()
     G = nx.DiGraph()
     if GRAPH_FILE.exists():
-        data = json.loads(GRAPH_FILE.read_text())
+        data = read_json(GRAPH_FILE, {"nodes": [], "edges": []})
         for n in data.get("nodes", []):
             G.add_node(n["id"], **n)
         for e in data.get("edges", []):
@@ -25,7 +27,7 @@ def _save_graph(G: nx.DiGraph):
         "nodes": [dict(G.nodes[n]) for n in G.nodes],
         "edges": [dict(G.edges[e]) for e in G.edges],
     }
-    GRAPH_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    write_json(GRAPH_FILE, data)
 
 
 def get_stats() -> GraphStats:
@@ -59,6 +61,36 @@ def list_nodes(node_type: str | None = None, label_contains: str | None = None, 
     return nodes
 
 
+def list_edges(limit: int = 2000) -> list[GraphEdge]:
+    """Все связи графа — для отрисовки карты второго мозга."""
+    G = _load_graph()
+    edges = []
+    for source, target, data in G.edges(data=True):
+        edges.append(GraphEdge(
+            source=source,
+            target=target,
+            edge_type=data.get("edge_type", "related"),
+            weight=float(data.get("weight", 1.0)),
+            metadata=data.get("metadata", {}),
+        ))
+        if len(edges) >= limit:
+            break
+    return edges
+
+
+def get_map(limit: int = 500) -> dict:
+    """Узлы и связи одним запросом.
+
+    Карта рисуется целиком, поэтому тянуть её двумя обращениями — значит
+    получить кадр, где связи ссылаются на ещё не приехавшие узлы. Связи
+    отдаём только между теми узлами, что попали в выборку.
+    """
+    nodes = list_nodes(limit=limit)
+    known = {n.id for n in nodes}
+    edges = [e for e in list_edges() if e.source in known and e.target in known]
+    return {"nodes": nodes, "edges": edges, "stats": get_stats()}
+
+
 def get_node(node_id: str) -> GraphNode:
     G = _load_graph()
     if node_id not in G:
@@ -79,6 +111,15 @@ def add_node(node: GraphNode) -> GraphNode:
         node.id = str(uuid.uuid4())[:8]
     G.add_node(node.id, **node.model_dump())
     _save_graph(G)
+
+    eventbus.emit(
+        eventbus.GRAPH_NODE_ADDED,
+        {
+            "node_id": node.id,
+            "kind": node.node_type.value if hasattr(node.node_type, "value") else str(node.node_type),
+            "label": node.label,
+        },
+    )
     return node
 
 
@@ -99,6 +140,15 @@ def add_edge(edge: GraphEdge) -> GraphEdge:
         raise NotFoundError("Node (target)", edge.target)
     G.add_edge(edge.source, edge.target, **edge.model_dump())
     _save_graph(G)
+
+    eventbus.emit(
+        eventbus.GRAPH_EDGE_ADDED,
+        {
+            "src": edge.source,
+            "dst": edge.target,
+            "kind": edge.edge_type.value if hasattr(edge.edge_type, "value") else str(edge.edge_type),
+        },
+    )
     return edge
 
 

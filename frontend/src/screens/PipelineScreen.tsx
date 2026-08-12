@@ -1,104 +1,157 @@
-import { useEffect, useState } from 'react'
-import { getPipelineStatus, createContent, advanceContent } from '../lib/api'
+import { useEffect, useState } from 'react';
+import { Plus } from 'lucide-react';
+import { createContent, getPipelineStatus } from '../lib/api';
+import { BTN, BTN_GHOST, CARD, ErrorBox, INPUT, NUM, PageHeader, Skeleton } from '../components/ui';
 
-const STAGE_COLORS: Record<string, string> = {
-  idea: '#6d7f97',
-  draft: '#22d3ee',
-  review: '#f5b642',
-  approve: '#a78bfa',
-  schedule: '#38bdf8',
-  publish: '#2dd4bf',
-  metrics: '#f472b6',
-}
+// Путь материала от идеи до метрик. Экран показывает, где что застряло:
+// стопка в одной колонке — это и есть узкое место.
+
+const STAGES: Record<string, { label: string; color: string }> = {
+  idea: { label: 'идея', color: 'bg-gray-500' },
+  draft: { label: 'черновик', color: 'bg-blue-400' },
+  review: { label: 'проверка', color: 'bg-amber-400' },
+  approve: { label: 'одобрено', color: 'bg-secondary' },
+  schedule: { label: 'в расписании', color: 'bg-sky-400' },
+  publish: { label: 'опубликовано', color: 'bg-primary' },
+  metrics: { label: 'метрики', color: 'bg-pink-400' },
+};
+
+const PLATFORMS = ['general', 'telegram', 'instagram', 'youtube', 'x'];
 
 export default function PipelineScreen() {
-  const [status, setStatus] = useState<any>({})
-  const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ title: '', platform: 'general', description: '' })
+  const [status, setStatus] = useState<any | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ title: '', platform: 'general', description: '' });
 
-  const load = () => { getPipelineStatus().then(setStatus).catch(() => {}) }
-  useEffect(() => { load() }, [])
+  const load = () => {
+    getPipelineStatus()
+      .then((s) => {
+        setStatus(s);
+        setError(null);
+      })
+      .catch(() => setError('Бэкенд недоступен. Запущен ли он на :8420?'));
+  };
 
-  const handleCreate = async () => {
-    if (!form.title) return
-    await createContent(form)
-    setForm({ title: '', platform: 'general', description: '' })
-    setShowCreate(false)
-    load()
-  }
+  useEffect(load, []);
+
+  const create = async () => {
+    if (!form.title.trim()) return;
+    try {
+      await createContent(form);
+      setForm({ title: '', platform: 'general', description: '' });
+      setShowCreate(false);
+      load();
+    } catch {
+      setError('Материал не создался.');
+    }
+  };
+
+  const stages: string[] = status?.stages ?? [];
+  const counts: Record<string, number> = status?.by_stage ?? {};
+  const peak = Math.max(...Object.values(counts).map(Number), 1);
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div>
-          <h2 style={{ fontSize: 24, fontWeight: 800, color: '#2dd4bf' }}>Content Pipeline</h2>
-          <p style={{ color: '#6d7f97', fontSize: 13 }}>{status.total_items || 0} items in pipeline</p>
+    <div className="p-6 lg:p-8">
+      <PageHeader
+        title="Контент"
+        subtitle={
+          status
+            ? `${status.total_items ?? 0} материалов в работе. Стопка в одной колонке — это узкое место.`
+            : 'Путь материала от идеи до метрик.'
+        }
+        action={
+          <button onClick={() => setShowCreate(!showCreate)} className={BTN}>
+            <Plus className="h-4 w-4" aria-hidden />
+            Новый материал
+          </button>
+        }
+      />
+
+      {error && (
+        <div className="mb-6">
+          <ErrorBox message={error} onRetry={load} />
         </div>
-        <button onClick={() => setShowCreate(!showCreate)} style={{
-          padding: '8px 16px', background: '#2dd4bf', color: '#04121a', border: 'none',
-          borderRadius: 8, fontWeight: 700, cursor: 'pointer',
-        }}>+ New Content</button>
-      </div>
+      )}
 
       {showCreate && (
-        <div style={{ background: '#0f1520', border: '1px solid #1e2a3a', borderRadius: 12, padding: 16, marginBottom: 16 }}>
-          <input value={form.title} onChange={e => setForm({...form, title: e.target.value})} placeholder="Content title"
-            style={{ width: '100%', padding: '8px 12px', background: '#0a0e14', border: '1px solid #1e2a3a', borderRadius: 6, color: '#e8eef6', marginBottom: 8, fontSize: 14 }} />
-          <div style={{ display: 'flex', gap: 8 }}>
-            <select value={form.platform} onChange={e => setForm({...form, platform: e.target.value})}
-              style={{ padding: '8px', background: '#0a0e14', border: '1px solid #1e2a3a', borderRadius: 6, color: '#e8eef6' }}>
-              <option value="general">General</option>
-              <option value="instagram">Instagram</option>
-              <option value="twitter">Twitter</option>
-              <option value="blog">Blog</option>
-              <option value="linkedin">LinkedIn</option>
-            </select>
-            <input value={form.description} onChange={e => setForm({...form, description: e.target.value})} placeholder="Description"
-              style={{ flex: 1, padding: '8px', background: '#0a0e14', border: '1px solid #1e2a3a', borderRadius: 6, color: '#e8eef6', fontSize: 14 }} />
-            <button onClick={handleCreate} style={{
-              padding: '8px 16px', background: '#2dd4bf', color: '#04121a', border: 'none',
-              borderRadius: 8, fontWeight: 700, cursor: 'pointer',
-            }}>Create</button>
+        <div className={`${CARD} mb-6 space-y-3`}>
+          <input
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            placeholder="О чём материал"
+            className={INPUT}
+            autoFocus
+          />
+          <input
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+            placeholder="Подробности"
+            className={INPUT}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            {PLATFORMS.map((p) => (
+              <button
+                key={p}
+                onClick={() => setForm({ ...form, platform: p })}
+                className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
+                  form.platform === p
+                    ? 'border-primary/40 bg-primary/10 text-primary'
+                    : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+                }`}
+              >
+                {p === 'general' ? 'без площадки' : p}
+              </button>
+            ))}
+            <button onClick={create} className={`${BTN} ml-auto`} disabled={!form.title.trim()}>
+              Создать
+            </button>
+            <button onClick={() => setShowCreate(false)} className={BTN_GHOST}>
+              Отмена
+            </button>
           </div>
         </div>
       )}
 
-      {/* Pipeline stages */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 8, marginBottom: 24 }}>
-        {(status.stages || []).map((stage: string) => (
-          <div key={stage} style={{
-            background: '#0f1520', border: '1px solid #1e2a3a', borderRadius: 10, padding: '12px',
-            textAlign: 'center',
-          }}>
-            <div style={{ fontSize: 11, color: STAGE_COLORS[stage] || '#6d7f97', textTransform: 'uppercase', letterSpacing: 1 }}>{stage}</div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: '#fff', marginTop: 4 }}>
-              {status.by_stage?.[stage] || 0}
-            </div>
-          </div>
-        ))}
-      </div>
+      {status === null && !error && <Skeleton rows={2} />}
 
-      {/* Funnel visualization */}
-      <div style={{ background: '#0f1520', border: '1px solid #1e2a3a', borderRadius: 12, padding: 16 }}>
-        <h3 style={{ fontSize: 14, color: '#6d7f97', marginBottom: 12 }}>Pipeline Funnel</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {(status.stages || []).map((stage: string, i: number) => {
-            const count = status.by_stage?.[stage] || 0
-            const maxCount = Math.max(...Object.values(status.by_stage || {}).map(Number), 1)
-            const width = Math.max((count / maxCount) * 100, 5)
-            return (
-              <div key={stage} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ width: 70, fontSize: 12, color: '#6d7f97', textAlign: 'right' }}>{stage}</span>
-                <div style={{
-                  height: 20, width: `${width}%`, background: STAGE_COLORS[stage] || '#6d7f97',
-                  borderRadius: 4, opacity: 0.8, transition: 'width 0.3s',
-                }} />
-                <span style={{ fontSize: 12, color: '#fff' }}>{count}</span>
+      {stages.length > 0 && (
+        <>
+          <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
+            {stages.map((stage) => (
+              <div key={stage} className={`${CARD} text-center`}>
+                <div className="text-[11px] uppercase tracking-wider text-gray-400">
+                  {STAGES[stage]?.label ?? stage}
+                </div>
+                <div className={`mt-1 text-2xl font-bold text-white ${NUM}`}>{counts[stage] ?? 0}</div>
               </div>
-            )
-          })}
-        </div>
-      </div>
+            ))}
+          </div>
+
+          <section className={CARD}>
+            <h2 className="mb-4 text-lg font-bold text-white">Где сколько лежит</h2>
+            <div className="space-y-2">
+              {stages.map((stage) => {
+                const count = counts[stage] ?? 0;
+                return (
+                  <div key={stage} className="flex items-center gap-3">
+                    <span className="w-28 shrink-0 text-right text-xs text-gray-400">
+                      {STAGES[stage]?.label ?? stage}
+                    </span>
+                    <div className="h-4 flex-1 rounded bg-gray-800">
+                      <div
+                        className={`h-4 rounded ${STAGES[stage]?.color ?? 'bg-gray-500'} transition-[width] duration-300`}
+                        style={{ width: `${Math.max((count / peak) * 100, count > 0 ? 6 : 1.5)}%` }}
+                      />
+                    </div>
+                    <span className={`w-8 text-right text-xs text-gray-200 ${NUM}`}>{count}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        </>
+      )}
     </div>
-  )
+  );
 }

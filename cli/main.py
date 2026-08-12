@@ -122,7 +122,7 @@ def doctor():
         p = DATA_DIR / f
         if p.exists():
             try:
-                data = json.loads(p.read_text())
+                data = json.loads(p.read_text(encoding="utf-8"))
                 checks.append((f"Data: {f}", True, f"{len(data)} records"))
             except Exception as e:
                 checks.append((f"Data: {f}", False, f"corrupt: {e}"))

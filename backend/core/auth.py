@@ -5,13 +5,14 @@ from pathlib import Path
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from .config import AUTH_FILE, ensure_data_dir
+from .jsonio import read_json, write_json
 
 security = HTTPBearer(auto_error=False)
 
 
 def _load_token() -> str | None:
     if AUTH_FILE.exists():
-        data = json.loads(AUTH_FILE.read_text())
+        data = read_json(AUTH_FILE, {})
         return data.get("token")
     return None
 
@@ -23,7 +24,7 @@ def init_auth() -> str:
     if existing:
         return existing
     token = secrets.token_urlsafe(32)
-    AUTH_FILE.write_text(json.dumps({"token": token}, indent=2))
+    write_json(AUTH_FILE, {"token": token})
     return token
 
 

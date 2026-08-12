@@ -7,18 +7,19 @@ from ..core.errors import NotFoundError
 from ..models.schemas import Document, DocumentCreate, DocumentUpdate, DocType
 from .tagger import generate_tags, create_document_graph_nodes, create_concept_node, find_related_documents
 from . import graph as graph_svc
+from ..core.jsonio import read_json, write_json
 
 
 def _load() -> list[dict]:
     ensure_data_dir()
     if DOCUMENTS_FILE.exists():
-        return json.loads(DOCUMENTS_FILE.read_text())
+        return read_json(DOCUMENTS_FILE, [])
     return []
 
 
 def _save(docs: list[dict]):
     ensure_data_dir()
-    DOCUMENTS_FILE.write_text(json.dumps(docs, indent=2, ensure_ascii=False))
+    write_json(DOCUMENTS_FILE, docs)
 
 
 def list_documents(tag: str | None = None, doc_type: str | None = None) -> list[Document]:
