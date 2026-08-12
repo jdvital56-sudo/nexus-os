@@ -439,6 +439,19 @@ class DreamCadence:
             replace_existing=True,
         )
 
+        # Сторож: каждый час проверяет, жива ли система. Модель он не трогает,
+        # поэтому работает и тогда, когда кончился бюджет или отвалился ключ.
+        # Сообщает только на смену состояния — иначе это спам.
+        from ..services import watchdog
+
+        self.scheduler.add_job(
+            watchdog.check_and_notify,
+            trigger=IntervalTrigger(hours=1),
+            id="watchdog",
+            name="Self Check",
+            replace_existing=True,
+        )
+
         # Автопилот: джоба ставится всегда, но каждый тик сам проверяет
         # выключатель. Так его можно включить без перезапуска приложения.
         from . import autopilot

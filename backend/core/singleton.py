@@ -14,6 +14,7 @@
 """
 import logging
 import os
+import sys
 from pathlib import Path
 
 from .config import DATA_DIR, ensure_data_dir
@@ -25,9 +26,28 @@ LOCK_FILE = DATA_DIR / "scheduler.lock"
 
 
 def _alive(pid: int) -> bool:
-    """Жив ли процесс с таким номером. Чужой процесс считаем живым."""
+    """Жив ли процесс с таким номером. Чужой процесс считаем живым.
+
+    На Windows `os.kill(pid, 0)` для проверки не годится: на одних номерах
+    он молча срабатывает, на других бросает WinError 87 и даже SystemError.
+    Сторож поймал это в первый же прогон. Поэтому под Windows спрашиваем
+    систему напрямую, а os.kill остаётся для остальных платформ.
+    """
     if pid <= 0:
         return False
+
+    if sys.platform == "win32":
+        import ctypes
+
+        SYNCHRONIZE = 0x00100000
+        handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        # Отказ в доступе означает, что процесс есть, просто он не наш
+        ERROR_ACCESS_DENIED = 5
+        return ctypes.windll.kernel32.GetLastError() == ERROR_ACCESS_DENIED
+
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

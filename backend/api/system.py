@@ -99,6 +99,15 @@ def _runtime() -> dict:
     }
 
 
+@router.get("/health-report")
+def health_report(_=Depends(auth)):
+    """Самочувствие системы. Ни одного обращения к модели — сторож обязан
+    работать и тогда, когда модель недоступна или кончился бюджет."""
+    from ..services import watchdog
+
+    return watchdog.run()
+
+
 @router.get("/status")
 def status(_=Depends(auth)):
     spend = budget.status()
