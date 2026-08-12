@@ -6,7 +6,7 @@
 """
 import pytest
 
-from backend.services import dialog_history
+from backend.services import chat_log, dialog_history
 
 
 class FakeConversation:
@@ -18,7 +18,12 @@ class FakeConversation:
 
     async def handle(self, channel: str, user_id: str, text: str, persona: str | None = None):
         self.calls.append({"channel": channel, "user_id": user_id, "text": text, "persona": persona})
+        # Настоящий контур пишет в оба места: короткий буфер для промпта и
+        # полную ленту для экрана
         dialog_history.append_turn(channel, user_id, text, self.reply, persona or "Orpheus")
+        chat_log.append_turn(
+            channel, user_id, [("user", text, ""), ("assistant", self.reply, persona or "Orpheus")]
+        )
         return self.reply
 
 
@@ -69,7 +74,7 @@ def test_history_returns_the_thread(client, fake):
 
 def test_thread_is_separate_from_telegram(client, fake):
     """Сказанное в Телеграме не должно всплывать в вебе."""
-    dialog_history.append_turn("telegram", "42", "секрет из телеграма", "ага")
+    chat_log.append_turn("telegram", "42", [("user", "секрет из телеграма", "")])
 
     messages = client.get("/api/chat/history").json()["messages"]
 
@@ -78,6 +83,7 @@ def test_thread_is_separate_from_telegram(client, fake):
 
 def test_reset_clears_only_the_web_thread(client, fake):
     dialog_history.append_turn("telegram", "42", "телеграмное", "ответ")
+    chat_log.append_turn("telegram", "42", [("user", "телеграмное", "")])
     client.post("/api/chat/message", json={"text": "веб"})
 
     removed = client.post("/api/chat/reset").json()["removed"]
@@ -85,6 +91,7 @@ def test_reset_clears_only_the_web_thread(client, fake):
     assert removed == 2
     assert client.get("/api/chat/history").json()["messages"] == []
     assert dialog_history.recent("telegram", "42") != []
+    assert chat_log.recent("telegram", "42") != []
 
 
 def test_broken_brain_reports_the_reason(client, monkeypatch):
