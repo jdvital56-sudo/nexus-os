@@ -76,6 +76,28 @@ def _dream() -> dict:
     }
 
 
+def _runtime() -> dict:
+    """Где что лежит и кто ведёт расписание.
+
+    Экран настроек показывал это зашитым в код текстом — то есть врал бы
+    при любой смене порта или папки данных.
+    """
+    from ..core import singleton
+    from ..core.config import DATA_DIR
+
+    return {
+        "version": "0.1.0",
+        "api_url": f"http://{settings.api_host}:{settings.api_port}",
+        "data_dir": str(DATA_DIR),
+        "artifacts_dir": settings.artifacts_path,
+        "auth_file": str(DATA_DIR / "auth.json"),
+        # Расписание ведёт ровно один процесс (I-3) — видно, какой именно
+        "scheduler_pid": singleton.holder_pid(),
+        "daily_budget_usd": settings.daily_llm_budget_usd,
+        "max_reply_tokens": settings.max_reply_tokens,
+    }
+
+
 @router.get("/status")
 def status(_=Depends(auth)):
     spend = budget.status()
@@ -84,6 +106,7 @@ def status(_=Depends(auth)):
         "spend": spend,
         "integrations": _integrations(),
         "dream": _dream(),
+        "runtime": _runtime(),
         # Автопилот выключен по умолчанию и это должно быть видно, а не
         # угадываться: включённый Jarvis тратит деньги сам (R-2)
         "autopilot": {

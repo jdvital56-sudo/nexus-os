@@ -44,8 +44,9 @@ interface Placed extends GalaxyNode {
   depth: number;
 }
 
-// Полный оборот. Медленнее — засыпает, быстрее — начинает раздражать.
-const TURN_SECONDS = 75;
+// Полный оборот. На большой карте быстрое вращение мешает читать подписи —
+// глаз не успевает поймать узел, как тот уже уехал.
+const TURN_SECONDS = 160;
 
 // Фокусное расстояние: чем меньше, тем сильнее перспектива
 const FOCAL = 900;
@@ -63,13 +64,18 @@ const SOLAR = '255, 196, 92';
 /** Раскладка силами в трёх измерениях. Считается один раз, не каждый кадр. */
 function layout(nodes: GalaxyNode[], links: GalaxyLink[]): Placed[] {
   const index = new Map(nodes.map((n, i) => [n.id, i]));
+  // Облако растёт вместе с числом узлов. При фиксированном радиусе полтысячи
+  // штук слипались в белое пятно: ореолы наезжали друг на друга, подписи
+  // ложились стопкой, разобрать было нечего.
+  const spread = 170 + 24 * Math.sqrt(nodes.length);
+
   // Стартуем с равномерной сферы: случайный старт даёт комки и долгую усадку
   const placed: Placed[] = nodes.map((n, i) => {
     const golden = Math.PI * (3 - Math.sqrt(5));
     const y = 1 - (i / Math.max(nodes.length - 1, 1)) * 2;
     const radius = Math.sqrt(Math.max(0, 1 - y * y));
     const theta = golden * i;
-    const scale = 200 + (i % 7) * 18;
+    const scale = spread * (0.75 + (i % 7) * 0.05);
     return {
       ...n,
       x: Math.cos(theta) * radius * scale,
@@ -99,7 +105,7 @@ function layout(nodes: GalaxyNode[], links: GalaxyLink[]): Placed[] {
         const dy = placed[j].y - placed[i].y;
         const dz = placed[j].z - placed[i].z;
         const d2 = dx * dx + dy * dy + dz * dz || 1;
-        if (d2 > 160000) continue;
+        if (d2 > spread * spread) continue;
         const f = 26000 / d2;
         const d = Math.sqrt(d2);
         vx[i] -= (dx / d) * f;
@@ -269,6 +275,16 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
       }
 
       // Дальние первыми: ближние должны лечь поверх
+      // Выбранный узел плавно подтягивается в центр — иначе после поиска
+      // приходится искать его глазами по всей карте
+      if (selectedId && !drag.current) {
+        const target = byId.get(selectedId);
+        if (target) {
+          camera.current.panX += (cx - target.sx) * 0.05;
+          camera.current.panY += (cy - target.sy) * 0.05;
+        }
+      }
+
       const order = [...placed].sort((a, b) => a.depth - b.depth);
       const ptr = pointer.current;
       const focus = hoverId.current ?? selectedId ?? null;
@@ -346,9 +362,12 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
       for (const p of order) {
         const heat = heatOf(p);
 
-        if (heat > 0.03) {
+        // Ореол — только у по-настоящему разгоревшихся. Раньше слабое
+        // свечение было у половины карты, и все ореолы складывались в
+        // сплошное белое зарево
+        if (heat > 0.25) {
           ctx.globalCompositeOperation = 'lighter';
-          const halo = p.sr * (1.6 + 6 * heat);
+          const halo = p.sr * (1.2 + 3.4 * heat);
           const g = ctx.createRadialGradient(p.sx, p.sy, 0, p.sx, p.sy, halo);
           g.addColorStop(0, p.color);
           g.addColorStop(0.16, `${p.color}bb`);
@@ -377,12 +396,21 @@ export default function MemoryGalaxy({ nodes, links, onSelect, selectedId }: Pro
           ctx.fill();
         }
 
-        if (heat > 0.6) {
-          ctx.globalAlpha = Math.min(1, heat);
-          ctx.font = '11px ui-monospace, Consolas, monospace';
-          ctx.fillStyle = '#E2E8F0';
+        // Подпись — только у ведущей звезды и у того, что под курсором.
+        // Десяток подписей одновременно ложился стопкой и читать было
+        // нечего; имя нужно ровно там, куда смотришь
+        const named = p === first || p.id === hoverId.current || p.id === selectedId;
+        if (named) {
+          ctx.globalAlpha = 0.95;
+          ctx.font = '12px ui-monospace, Consolas, monospace';
           ctx.textAlign = 'center';
-          ctx.fillText(p.label.slice(0, 30), p.sx, p.sy + p.sr + 13);
+          const text = p.label.slice(0, 34);
+          // Тёмная подложка: поверх светящегося облака белый текст пропадал
+          const w = ctx.measureText(text).width;
+          ctx.fillStyle = 'rgba(2, 6, 23, 0.75)';
+          ctx.fillRect(p.sx - w / 2 - 5, p.sy + p.sr + 4, w + 10, 16);
+          ctx.fillStyle = '#E2E8F0';
+          ctx.fillText(text, p.sx, p.sy + p.sr + 16);
         }
         ctx.globalAlpha = 1;
       }

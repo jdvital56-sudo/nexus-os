@@ -34,11 +34,17 @@ function colorOf(type: string): string {
   return TYPE_COLORS[type] ?? '#6B7280';
 }
 
+// Одиночные узлы — почти всегда шум: слово, которое встретилось в одной
+// заметке и больше нигде. На карте из полутысячи точек они и создают кашу.
+const LONER_LIMIT = 1;
+
 export default function GraphScreen() {
   const [map, setMap] = useState<GraphMap | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
+  const [hideLoners, setHideLoners] = useState(true);
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     getGraphMap(500)
@@ -55,7 +61,11 @@ export default function GraphScreen() {
       degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
     }
 
-    const visible = map.nodes.filter((n) => !hiddenTypes.has(n.node_type));
+    const visible = map.nodes.filter(
+      (n) =>
+        !hiddenTypes.has(n.node_type) &&
+        (!hideLoners || (degree.get(n.id) ?? 0) > LONER_LIMIT),
+    );
     const ids = new Set(visible.map((n) => n.id));
 
     return {
@@ -71,7 +81,17 @@ export default function GraphScreen() {
         .map((e) => ({ source: e.source, target: e.target, weight: e.weight })),
       byId: new Map(map.nodes.map((n) => [n.id, n])),
     };
-  }, [map, hiddenTypes]);
+  }, [map, hiddenTypes, hideLoners]);
+
+  // Поиск по названию: выбранный узел карта сама подтянет в центр
+  const found = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (q.length < 2) return [];
+    return galaxyNodes
+      .filter((n) => n.label.toLowerCase().includes(q))
+      .sort((a, b) => b.degree - a.degree)
+      .slice(0, 8);
+  }, [query, galaxyNodes]);
 
   const selected = selectedId ? byId.get(selectedId) : null;
   const selectedDegree = galaxyNodes.find((n) => n.id === selectedId)?.degree ?? 0;
@@ -120,11 +140,47 @@ export default function GraphScreen() {
       />
 
       {/* Легенда — она же фильтр по типам */}
-      <div className="pointer-events-auto absolute left-6 top-6 w-56 rounded-lg border border-gray-800 bg-dark/85 p-4 backdrop-blur">
+      <div className="pointer-events-auto absolute left-6 top-6 w-64 rounded-lg border border-gray-800 bg-dark/85 p-4 backdrop-blur">
         <h2 className="mb-1 text-sm font-bold tracking-wide text-white">Второй мозг</h2>
         <p className="mb-3 text-xs text-gray-400">
-          {nodesWord(map.stats.nodes)} · {linksWord(map.stats.edges)}
+          показано {galaxyNodes.length} из {map.stats.nodes} · {linksWord(map.stats.edges)}
         </p>
+
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Найти узел…"
+          className="mb-2 w-full rounded-md border border-gray-800 bg-darker px-3 py-1.5 text-xs text-gray-100 placeholder-gray-500 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+        {found.length > 0 && (
+          <ul className="mb-3 max-h-40 space-y-0.5 overflow-y-auto">
+            {found.map((n) => (
+              <li key={n.id}>
+                <button
+                  onClick={() => {
+                    setSelectedId(n.id);
+                    setQuery('');
+                  }}
+                  className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1 text-left text-xs text-gray-200 transition-colors duration-200 hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: n.color }} />
+                  <span className="truncate">{n.label}</span>
+                  <span className="ml-auto font-mono text-gray-500">{n.degree}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <label className="mb-3 flex cursor-pointer items-center gap-2 text-xs text-gray-300">
+          <input
+            type="checkbox"
+            checked={hideLoners}
+            onChange={(e) => setHideLoners(e.target.checked)}
+            className="cursor-pointer accent-primary"
+          />
+          Прятать одиночек
+        </label>
         <ul className="space-y-1">
           {types.map(([type, count]) => {
             const off = hiddenTypes.has(type);
@@ -151,8 +207,9 @@ export default function GraphScreen() {
           })}
         </ul>
         <p className="mt-3 text-[11px] leading-snug text-gray-500">
-          Карта поворачивается сама — ближний к тебе узел разгорается. Веди мышь, чтобы
-          зажечь другой, нажми — подробности.
+          Карта поворачивается сама, ближний узел разгорается. Наведи — зажжётся другой,
+          нажми — останутся только он и соседи. Колесо приближает, узел можно тянуть,
+          двойной щелчок возвращает вид.
         </p>
       </div>
 
