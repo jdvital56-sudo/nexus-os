@@ -25,3 +25,15 @@ Start-Process -FilePath "npm.cmd" -ArgumentList "run","dev" `
     -WindowStyle Hidden `
     -RedirectStandardOutput "$root\frontend_stdout.log" `
     -RedirectStandardError "$root\frontend_stderr.log"
+
+# OmniVoice: свой venv (конфликтует зависимостями с бэкендом, см. tts.py),
+# грузит модель в память при старте — минуту-другую молчит, это нормально.
+# Не критичен для остальной системы: если не поднимется, голос просто
+# останется на движке edge (NEXUS_TTS_ENGINE в .env).
+if (Test-Path "$root\voice_engine\.venv\Scripts\python.exe") {
+    Set-Location "$root\voice_engine"
+    Start-Process -FilePath "$root\voice_engine\.venv\Scripts\python.exe" -ArgumentList "server.py" `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput "$root\voice_engine_stdout.log" `
+        -RedirectStandardError "$root\voice_engine_stderr.log"
+}

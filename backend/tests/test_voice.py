@@ -64,13 +64,23 @@ async def test_long_text_is_clipped(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_engine_is_switched_by_setting(monkeypatch):
-    """Переход на другой движок — строка в .env, а не правка кода."""
+    """Переход на другой движок — строка в .env, а не правка кода.
+
+    Сервер omnivoice реальный (см. voice_engine/), поэтому здесь он
+    промокан — тест не должен зависеть от того, поднят ли он на машине,
+    где запускаются тесты."""
+    import httpx
+
+    async def fake_post(self, url, **kwargs):
+        raise httpx.ConnectError("connection refused", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
     monkeypatch.setenv("NEXUS_TTS_ENGINE", "omnivoice")
 
     with pytest.raises(tts.VoiceUnavailable) as e:
         await tts.synthesize("привет")
 
-    assert "omnivoice" in str(e.value)
+    assert "omnivoice" in str(e.value) or "8421" in str(e.value)
     assert tts.status()["engine"] == "omnivoice"
 
 
@@ -143,3 +153,96 @@ async def test_pace_reaches_the_edge_call(monkeypatch):
     await tts.synthesize("привет")
 
     assert said["rate"] == "-30%"
+
+
+# --- OmniVoice: отдельный процесс в своём venv, движок стучится к нему по HTTP ---
+
+
+def test_omnivoice_status_when_server_is_down(monkeypatch):
+    """Сервер не поднят — статус объясняет, чем его поднять, а не молчит."""
+    import httpx
+
+    def fake_get(self, url, **kwargs):
+        raise httpx.ConnectError("connection refused", request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx.Client, "get", fake_get)
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "omnivoice")
+
+    s = tts.status()
+
+    assert s["ready"] is False
+    assert "server.py" in s["detail"]
+
+
+def test_omnivoice_status_when_model_still_loading(monkeypatch):
+    import httpx
+
+    def fake_get(self, url, **kwargs):
+        return httpx.Response(200, json={"ready": False}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx.Client, "get", fake_get)
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "omnivoice")
+
+    s = tts.status()
+
+    assert s["ready"] is False
+    assert "грузится" in s["detail"]
+
+
+def test_omnivoice_status_when_ready(monkeypatch):
+    import httpx
+
+    def fake_get(self, url, **kwargs):
+        return httpx.Response(200, json={"ready": True}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx.Client, "get", fake_get)
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "omnivoice")
+
+    assert tts.status()["ready"] is True
+
+
+@pytest.mark.asyncio
+async def test_omnivoice_synthesize_saves_the_response(monkeypatch):
+    import httpx
+
+    async def fake_post(self, url, **kwargs):
+        return httpx.Response(200, content=b"RIFF....WAVEfake", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "omnivoice")
+
+    out = await tts.synthesize("привет")
+
+    assert out.read_bytes() == b"RIFF....WAVEfake"
+
+
+@pytest.mark.asyncio
+async def test_omnivoice_synthesize_when_server_is_down(monkeypatch):
+    import httpx
+
+    async def fake_post(self, url, **kwargs):
+        raise httpx.ConnectError("connection refused", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "omnivoice")
+
+    with pytest.raises(tts.VoiceUnavailable) as e:
+        await tts.synthesize("привет")
+
+    assert "start_all.ps1" in str(e.value)
+
+
+@pytest.mark.asyncio
+async def test_omnivoice_synthesize_reports_server_error(monkeypatch):
+    import httpx
+
+    async def fake_post(self, url, **kwargs):
+        return httpx.Response(500, json={"error": "модель упала"}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "omnivoice")
+
+    with pytest.raises(tts.VoiceUnavailable) as e:
+        await tts.synthesize("привет")
+
+    assert "модель упала" in str(e.value)

@@ -49,6 +49,12 @@ EDGE_VOICES = [
 
 ENGINES = ("none", "edge", "omnivoice", "eleven")
 
+# Отдельный процесс в своём venv (voice_engine/.venv) — держит модель в
+# памяти. Зависимости OmniVoice (torch, transformers, gradio) конфликтуют
+# с версиями FastAPI/Starlette бэкенда, смешивать в один venv нельзя (уже
+# один раз сломало тест). Поднимается вместе с остальным через start_all.ps1.
+OMNIVOICE_SERVER_URL = os.getenv("OMNIVOICE_SERVER_URL", "http://127.0.0.1:8421")
+
 
 def engine_name() -> str:
     name = (os.getenv("NEXUS_TTS_ENGINE", "") or "none").strip().lower()
@@ -96,8 +102,7 @@ def status() -> dict:
             ready = False
             detail = "движок edge выбран, но пакет edge-tts не установлен"
     elif name == "omnivoice":
-        ready = False
-        detail = "движок omnivoice ещё не подключён: нужны torch и веса модели"
+        ready, detail = _omnivoice_server_status()
     elif name == "eleven":
         ready = bool(os.getenv("ELEVENLABS_API_KEY", ""))
         if not ready:
@@ -145,10 +150,7 @@ async def synthesize(text: str, voice: str | None = None) -> Path:
         rate = _rate_for(get_character().get("pace", 5))
         return await _edge(text, voice or default_voice(), rate)
     if name == "omnivoice":
-        raise VoiceUnavailable(
-            "Движок omnivoice ещё не подключён: нужны torch и веса модели, "
-            "около 6 ГБ на диске"
-        )
+        return await _omnivoice(text)
     if name == "eleven":
         raise VoiceUnavailable("Движок eleven ещё не подключён")
     raise VoiceUnavailable(f"Неизвестный движок: {name}")
@@ -172,4 +174,61 @@ async def _edge(text: str, voice: str, rate: str = "+0%") -> Path:
         raise VoiceUnavailable(f"Озвучка не удалась: {e}") from e
 
     logger.info("Озвучено %d символов голосом %s", len(text), voice)
+    return out
+
+
+def _omnivoice_server_status() -> tuple[bool, str]:
+    """Жив ли сервер voice_engine/server.py и загружена ли в нём модель.
+
+    Синхронный HTTP-запрос: status() дёргают из простых, не-async мест
+    (например, /api/voice/status), заводить событийный цикл ради проверки
+    не стоит — сам запрос локальный и мгновенный.
+    """
+    import httpx
+
+    try:
+        with httpx.Client(timeout=1.0) as client:
+            r = client.get(f"{OMNIVOICE_SERVER_URL}/health")
+        r.raise_for_status()
+        if r.json().get("ready"):
+            return True, "локальная модель, ничего не уходит наружу"
+        return False, "сервер запущен, модель ещё грузится"
+    except httpx.ConnectError:
+        return False, (
+            f"сервер не отвечает на {OMNIVOICE_SERVER_URL} — "
+            "запустить: voice_engine/.venv/Scripts/python.exe voice_engine/server.py"
+        )
+    except Exception as e:
+        return False, f"сервер omnivoice не отвечает: {e}"
+
+
+async def _omnivoice(text: str) -> Path:
+    """Синтез через локальный сервер voice_engine/server.py (свой venv,
+    модель CC-BY-NC — только для личного использования, не для клиентских
+    продуктов, см. комментарий в шапке файла)."""
+    import httpx
+
+    from . import artifacts
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            r = await client.post(
+                f"{OMNIVOICE_SERVER_URL}/synthesize",
+                json={"text": text, "language": "ru"},
+            )
+    except httpx.ConnectError as e:
+        raise VoiceUnavailable(
+            f"Сервер omnivoice не запущен на {OMNIVOICE_SERVER_URL}. "
+            "Запускается вместе с остальным через start_all.ps1."
+        ) from e
+    except httpx.TimeoutException as e:
+        raise VoiceUnavailable("Синтез omnivoice не уложился в минуту") from e
+
+    if r.status_code != 200:
+        detail = r.json().get("error", r.text) if r.headers.get("content-type", "").startswith("application/json") else r.text
+        raise VoiceUnavailable(f"Синтез omnivoice не удался: {detail}")
+
+    out = artifacts.temp_dir() / f"voice_omnivoice_{abs(hash(text)) % 10**8}.wav"
+    out.write_bytes(r.content)
+    logger.info("Озвучено %d символов движком omnivoice", len(text))
     return out
