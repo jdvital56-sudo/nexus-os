@@ -145,11 +145,18 @@ class ConversationService:
         )
         reply = await self._respond(llm, selected["name"], text, context)
 
+        # elif, не if: персона получает либо критика, либо советчика, не оба
+        # разом — держит цену лишнего прохода под контролем
         if critic.needs_critic(selected["name"]):
             passed, verdict = await critic.review(llm, selected["name"], text, reply)
             if not passed:
                 logger.info("Критик %s: %s", selected["name"], verdict[:200])
                 reply = await critic.revise(llm, llm.system_prompt, text, reply, verdict)
+        elif critic.needs_advisor(selected["name"]):
+            suggestion = await critic.advise(llm, selected["name"], text, reply)
+            if suggestion:
+                logger.info("Советчик %s: %s", selected["name"], suggestion[:200])
+                reply = f"{reply}\n\n— Совет: {suggestion}"
 
         self._emit_message(channel, "assistant", selected["name"], reply)
         # Нить разговора пишется до возврата ответа: следующее сообщение может

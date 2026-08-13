@@ -765,11 +765,48 @@ async def test_critic_revision_replaces_the_final_reply():
 
 
 @pytest.mark.asyncio
-async def test_other_personas_never_call_the_critic():
+async def test_architect_gets_advisor_not_critic():
     llm = FakeLLM("обычный ответ")
     svc = make_service(llm)
 
     await svc.handle("web", "42", "напиши код", persona="Architect")
+    await svc.drain()
+
+    # Советчик всё-таки зовётся (Птах его получил), но по умолчанию PASS
+    # у FakeLLM не годится как "совет" — реальный текст задаётся отдельно
+    assert len(llm.chat_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_advisor_suggestion_is_appended_to_the_reply():
+    llm = FakeLLM("черновик Птаха")
+    llm.chat_reply = "Проще взять готовую библиотеку вместо своего парсера."
+    svc = make_service(llm)
+
+    reply = await svc.handle("web", "42", "напиши код", persona="Architect")
+    await svc.drain()
+
+    assert reply == "черновик Птаха\n\n— Совет: Проще взять готовую библиотеку вместо своего парсера."
+
+
+@pytest.mark.asyncio
+async def test_no_addition_leaves_the_reply_untouched():
+    llm = FakeLLM("черновик Птаха")
+    llm.chat_reply = "no addition"
+    svc = make_service(llm)
+
+    reply = await svc.handle("web", "42", "напиши код", persona="Architect")
+    await svc.drain()
+
+    assert reply == "черновик Птаха"
+
+
+@pytest.mark.asyncio
+async def test_other_personas_never_call_the_critic_or_advisor():
+    llm = FakeLLM("обычный ответ")
+    svc = make_service(llm)
+
+    await svc.handle("web", "42", "что угодно", persona="Bastet")
     await svc.drain()
 
     assert llm.chat_calls == []

@@ -87,3 +87,41 @@ async def test_revise_failure_falls_back_to_the_draft():
     fixed = await critic.revise(BrokenLLM(), "промпт", "вопрос", "черновик", "проблема")
 
     assert fixed == "черновик"
+
+
+# --- Советчик: только Птах (Architect) пока, см. critic.py ---
+
+
+def test_only_architect_gets_an_advisor():
+    assert critic.needs_advisor("Architect") is True
+    assert critic.needs_advisor("Orpheus") is False
+    assert critic.needs_advisor("Sekhmet") is False
+
+
+@pytest.mark.asyncio
+async def test_real_suggestion_is_returned():
+    llm = FakeLLM(["Дешевле использовать существующий кэш вместо нового запроса."])
+
+    suggestion = await critic.advise(llm, "Architect", "вопрос", "черновик")
+
+    assert suggestion == "Дешевле использовать существующий кэш вместо нового запроса."
+    system_msg = llm.calls[0][0]
+    assert "Architect" in system_msg.content
+    assert "Advisor paired with" in system_msg.content
+
+
+@pytest.mark.asyncio
+async def test_no_addition_becomes_none():
+    """«Добавить нечего» не должно пристёгиваться к ответу как совет."""
+    llm = FakeLLM(["no addition"])
+
+    suggestion = await critic.advise(llm, "Architect", "вопрос", "черновик")
+
+    assert suggestion is None
+
+
+@pytest.mark.asyncio
+async def test_advisor_failure_returns_none_not_an_error():
+    suggestion = await critic.advise(BrokenLLM(), "Architect", "вопрос", "черновик")
+
+    assert suggestion is None
