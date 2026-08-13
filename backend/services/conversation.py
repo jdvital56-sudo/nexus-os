@@ -19,7 +19,8 @@ from . import entity_extraction
 from . import memory as memory_svc
 from . import obsidian
 from . import skills as skills_svc
-from .llm import LLMService
+from ..core.config import settings
+from .llm import LLMMessage, LLMService
 from .memory import MemoryLayer
 
 logger = logging.getLogger(__name__)
@@ -141,9 +142,7 @@ class ConversationService:
         context = await asyncio.to_thread(
             self._build_context, text, selected["name"], channel, user_id
         )
-        reply = await llm.generate_response(
-            text, context=context, kind=budget.INTERACTIVE
-        )
+        reply = await self._respond(llm, selected["name"], text, context)
 
         self._emit_message(channel, "assistant", selected["name"], reply)
         # Нить разговора пишется до возврата ответа: следующее сообщение может
@@ -152,6 +151,34 @@ class ConversationService:
         self._spawn(self._remember(channel, user_id, text, reply, selected["name"]))
         self._spawn(self._extract(channel, user_id, text, reply, llm))
         return reply
+
+    async def _respond(
+        self, llm: LLMService, persona_name: str, text: str, context: str
+    ) -> str:
+        """Ответ персоны. С инструментами — если ей они положены.
+
+        Персонам, которым веб не нужен (код, глубокий разбор), инструменты не
+        предлагаем вовсе: лишний вызов стоит денег, а модель, увидев поиск,
+        тянется его позвать даже там, где ответ она знает.
+        """
+        from . import tools as tools_svc
+
+        available = tools_svc.tools_for(persona_name)
+        if not available:
+            return await llm.generate_response(text, context=context, kind=budget.INTERACTIVE)
+
+        # Собираем запрос ровно как generate_response, чтобы ответы с
+        # инструментами и без них не расходились по форме
+        full_prompt = f"Context: {context}\n\nUser: {text}\n\nAssistant:"
+        response = await tools_svc.chat_with_tools(
+            llm,
+            [LLMMessage(role="user", content=full_prompt)],
+            tools=available,
+            temperature=0.7,
+            max_tokens=settings.max_reply_tokens,
+            kind=budget.INTERACTIVE,
+        )
+        return response.content
 
     async def _log_turn(
         self, channel: str, user_id: str, text: str, reply: str, persona: str
