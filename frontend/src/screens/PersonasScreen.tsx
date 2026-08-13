@@ -4,22 +4,23 @@ import {
   getCharacter,
   getHermesPrompt,
   getPersonas,
+  getSystemStatus,
   setCharacter,
   setHermesPrompt,
   updatePersona,
 } from '../lib/api';
-import type { Character, Persona } from '../types';
+import type { Character, Persona, SystemStatusResponse } from '../types';
 import { titleOf } from '../lib/pantheon';
+import '../styles/pantheon.css';
 
-// Пантеон: кто отвечает и каким тоном. Бэкенд для этого готов с PR-8 —
-// правка влияет уже на следующее сообщение в любом канале, — но экрана не
-// было, и настроить характер можно было только через API.
+// Пантеон: кто отвечает и каким тоном. Визуал — из одобренного макета
+// (artifact 0de5f180, «Пантеон (финал)», см. nexus-os-canonical-design),
+// перенесён построчно 14.08.2026, не сочинён заново. Бейджи и статистика —
+// настоящие данные с /api/system/status, а не то, что было в самом
+// макете (там они выдуманы для показа макета фаундеру).
 //
 // Ползунки не хранятся числами «для красоты»: бэкенд разворачивает их в
-// понятные модели фразы, и эту фразу видно тут же, под ползунками. Иначе
-// непонятно, что вообще меняет «юмор 7».
-
-const CARD = 'rounded-lg border border-gray-800 bg-dark p-5';
+// понятные модели фразы, и эту фразу видно тут же, под ползунками.
 
 const DIALS: Array<{ key: keyof Character; label: string; left: string; right: string }> = [
   { key: 'humor', label: 'Юмор', left: 'сухо', right: 'с шутками' },
@@ -35,15 +36,40 @@ const LANGUAGE: Array<{ value: Character['language']; label: string }> = [
   { value: 'en', label: 'английский' },
 ];
 
+const PALETTES: Array<{ value: string; label: string }> = [
+  { value: 'gold', label: 'Золото' },
+  { value: 'calm', label: 'Спокойная' },
+  { value: 'lapis', label: 'Лазурит' },
+  { value: 'light', label: 'Светлая' },
+  { value: 'turquoise', label: 'Бирюза' },
+  { value: 'carnelian', label: 'Сердолик' },
+  { value: 'ivory', label: 'Слоновая кость' },
+];
+
+// Технические имена → файл портрета в /public/pantheon. Персоны, заведённые
+// вручную через API и не входящие в исходную семёрку, портрета не имеют —
+// вместо картинки покажем инициал.
+const PORTRAITS: Record<string, string> = {
+  orpheus: '/pantheon/orpheus.jpg',
+  architect: '/pantheon/architect.jpg',
+  mercury: '/pantheon/mercury.jpg',
+  philosopher: '/pantheon/philosopher.jpg',
+  labyrinth: '/pantheon/labyrinth.jpg',
+  sekhmet: '/pantheon/sekhmet.jpg',
+  bastet: '/pantheon/bastet.jpg',
+};
+
 export default function PersonasScreen() {
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [character, setChar] = useState<Character | null>(null);
   const [prompt, setPrompt] = useState('');
   const [promptSaved, setPromptSaved] = useState(false);
-  const [openName, setOpenName] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Partial<Persona>>>({});
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<SystemStatusResponse | null>(null);
+  const [palette, setPalette] = useState<string>(() => localStorage.getItem('pantheon-palette') || 'gold');
 
   useEffect(() => {
     Promise.all([getPersonas(), getCharacter(), getHermesPrompt()])
@@ -51,9 +77,16 @@ export default function PersonasScreen() {
         setPersonas(p);
         setChar(c);
         setPrompt(s.system_prompt);
+        setSelected((prev) => prev ?? p[0]?.name ?? null);
       })
       .catch(() => setError('Бэкенд недоступен. Запущен ли он на :8420?'));
+    getSystemStatus().then(setStatus).catch(() => {});
   }, []);
+
+  const choosePalette = (value: string) => {
+    setPalette(value);
+    localStorage.setItem('pantheon-palette', value);
+  };
 
   // Правка уходит на бэкенд сразу: ползунок без кнопки «сохранить»
   // честнее — то, что видишь, и есть то, что уйдёт в модель
@@ -102,8 +135,15 @@ export default function PersonasScreen() {
   }
 
   if (!character) {
-    return <div className={`m-8 ${CARD} h-48 animate-pulse motion-reduce:animate-none`} />;
+    return <div className="m-8 h-48 animate-pulse rounded-lg border border-gray-800 bg-dark motion-reduce:animate-none" />;
   }
+
+  const activePersona = personas.find((p) => p.name === selected) ?? null;
+  const draft = selected ? drafts[selected] ?? {} : {};
+  const changed = Object.keys(draft).length > 0;
+  const telegramOn = status?.integrations.find((i) => i.key === 'telegram')?.connected ?? false;
+  const defaultModel = status?.integrations.find((i) => i.key === 'llm')?.detail ?? '—';
+  const spentToday = status?.spend ? `$${status.spend.spent_usd}` : '—';
 
   return (
     <div className="p-6 lg:p-8">
@@ -121,192 +161,196 @@ export default function PersonasScreen() {
         </div>
       )}
 
-      <section className={`${CARD} mb-6`}>
-        <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-gray-100">
-          <Sparkles className="h-5 w-5 text-primary" aria-hidden />
-          Характер
-        </h2>
-        <p className="mb-5 text-sm text-gray-400">
-          Общий поверх любой персоны. Сохраняется сразу, кнопка не нужна.
-        </p>
-
-        <div className="grid gap-5 lg:grid-cols-4">
-          {DIALS.map((dial) => (
-            <label key={dial.key} className="block">
-              <span className="mb-1 flex items-center justify-between text-sm text-gray-200">
-                {dial.label}
-                <span className="font-mono tabular-nums text-gray-400">
-                  {character[dial.key] as number}
-                </span>
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={10}
-                value={character[dial.key] as number}
-                onChange={(e) => changeDial({ [dial.key]: Number(e.target.value) } as Partial<Character>)}
-                className="w-full cursor-pointer accent-primary"
-              />
-              <span className="flex justify-between text-[11px] text-gray-500">
-                <span>{dial.left}</span>
-                <span>{dial.right}</span>
-              </span>
-              {dial.key === 'pace' && (
-                <span className="mt-1 block text-[11px] text-gray-600">
-                  Только озвучка — на текст ответа не влияет
-                </span>
-              )}
-            </label>
+      <div className="pantheon-theme" data-palette={palette === 'gold' ? undefined : palette}>
+        <div className="p-palette-toggle">
+          {PALETTES.map((p) => (
+            <button
+              key={p.value}
+              className={palette === p.value ? 'active' : ''}
+              onClick={() => choosePalette(p.value)}
+            >
+              {p.label}
+            </button>
           ))}
         </div>
 
-        <div className="mt-5 grid gap-5 sm:grid-cols-2">
-          <div>
-            <span className="mb-2 block text-sm text-gray-200">Обращение</span>
-            <div className="flex gap-2">
-              {ADDRESS.map((value) => (
-                <button
-                  key={value}
-                  onClick={() => changeDial({ address: value })}
-                  className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
-                    character.address === value
-                      ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
-                  }`}
-                >
-                  {value}
-                </button>
-              ))}
-            </div>
+        <div className="p-banner">
+          <img src="/pantheon/jarvis-banner.jpg" alt="" />
+          <div className="p-fade" />
+          <div className={`p-live ${telegramOn ? 'on' : 'off'}`}>
+            <span className="p-dot" />
+            {telegramOn ? 'На связи' : 'Бот не отвечает'}
           </div>
-
-          <div>
-            <span className="mb-2 block text-sm text-gray-200">Язык ответа</span>
-            <div className="flex flex-wrap gap-2">
-              {LANGUAGE.map((item) => (
-                <button
-                  key={item.value}
-                  onClick={() => changeDial({ language: item.value })}
-                  className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
-                    character.language === item.value
-                      ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          <div className="p-word">ДЖАРВИС</div>
         </div>
 
-        {/* То, что реально уйдёт в модель — без этого ползунки гадание */}
-        {character.prompt && (
-          <div className="mt-5 rounded-md bg-darker p-3">
-            <h3 className="mb-1 text-xs uppercase tracking-wider text-gray-500">
-              Что уйдёт в модель
-            </h3>
-            <p className="text-xs leading-relaxed text-gray-300">{character.prompt}</p>
+        <div className="p-badges">
+          {(status?.integrations ?? []).map((i) => (
+            <span key={i.key} className={`p-badge ${i.connected ? 'on' : 'off'}`} title={i.detail}>
+              <span className="p-ic" />
+              {i.label}
+            </span>
+          ))}
+        </div>
+
+        <div className="p-stats">
+          <div className="p-stat"><div className="p-k">Персон</div><div className="p-v">{personas.length}</div></div>
+          <div className="p-stat"><div className="p-k">Модель по умолчанию</div><div className="p-v">{defaultModel}</div></div>
+          <div className="p-stat"><div className="p-k">Потрачено сегодня</div><div className="p-v">{spentToday}</div></div>
+        </div>
+
+        <div className="p-panel">
+          <h2><Sparkles className="h-4 w-4" aria-hidden />Характер</h2>
+          <p className="p-sub">Общий поверх любой персоны. Сохраняется сразу, кнопка не нужна.</p>
+
+          <div className="p-dials">
+            {DIALS.map((dial) => (
+              <div key={dial.key} className="p-dial">
+                <label>
+                  {dial.label}
+                  <span className="p-num">{character[dial.key] as number}</span>
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={10}
+                  value={character[dial.key] as number}
+                  onChange={(e) => changeDial({ [dial.key]: Number(e.target.value) } as Partial<Character>)}
+                />
+                <div className="p-ends">
+                  <span>{dial.left}</span>
+                  <span>{dial.right}</span>
+                </div>
+                {dial.key === 'pace' && <span className="p-hint">Только озвучка — на текст ответа не влияет</span>}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-5 grid gap-5 sm:grid-cols-2">
+            <div>
+              <span className="mb-2 block text-sm" style={{ color: 'var(--ink)' }}>Обращение</span>
+              <div className="p-choice-row">
+                {ADDRESS.map((value) => (
+                  <button
+                    key={value}
+                    className={`p-choice ${character.address === value ? 'active' : ''}`}
+                    onClick={() => changeDial({ address: value })}
+                  >
+                    {value}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <span className="mb-2 block text-sm" style={{ color: 'var(--ink)' }}>Язык ответа</span>
+              <div className="p-choice-row">
+                {LANGUAGE.map((item) => (
+                  <button
+                    key={item.value}
+                    className={`p-choice ${character.language === item.value ? 'active' : ''}`}
+                    onClick={() => changeDial({ language: item.value })}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {character.prompt && <p className="p-note"><b style={{ color: 'var(--ink)' }}>Что уйдёт в модель:</b> {character.prompt}</p>}
+        </div>
+
+        <div className="p-panel">
+          <h2>Общие правила</h2>
+          <p className="p-sub">
+            Идут перед характером и перед персоной. Здесь живут запреты — например, не выдумывать
+            факты и не делать необратимое без спроса.
+          </p>
+          <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={5}
+            style={{ width: '100%', background: 'var(--panel-2)', border: '1px solid var(--line)', borderRadius: 6, color: 'var(--ink)', padding: '10px 12px', fontSize: '0.86rem', lineHeight: 1.6 }} />
+          <button className="p-promptbox p-save" style={{ marginTop: 10 }} onClick={savePrompt}>
+            {promptSaved ? <Check className="h-4 w-4" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
+            {promptSaved ? 'Сохранено' : 'Сохранить'}
+          </button>
+        </div>
+
+        <div className="p-head">
+          <h2>Пантеон</h2>
+          <span>{personas.length} персон · нажми карточку — снизу откроется её промпт</span>
+        </div>
+
+        <div className="p-gallery">
+          {personas.map((persona) => {
+            const key = persona.name.toLowerCase();
+            const portrait = PORTRAITS[key];
+            return (
+              <button
+                key={persona.name}
+                className={`p-card ${selected === persona.name ? 'selected' : ''}`}
+                onClick={() => setSelected(persona.name)}
+              >
+                <div className="p-art">
+                  <span className="p-chip">{persona.provider}</span>
+                  {portrait ? (
+                    <img src={portrait} alt={titleOf(persona.name)} />
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontFamily: 'var(--display)', fontSize: '2rem', color: 'var(--ink-dimmer)' }}>
+                      {titleOf(persona.name)[0]}
+                    </div>
+                  )}
+                </div>
+                <div className="p-meta">
+                  <h3>{titleOf(persona.name)}</h3>
+                  <div className="p-tech">{persona.name}</div>
+                  <p>{persona.description}</p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {activePersona && (
+          <div className="p-promptbox">
+            <div className="p-phead">
+              <b>{titleOf(activePersona.name)}</b>
+              <span>что реально уйдёт модели</span>
+            </div>
+            <div className="p-body">
+              <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--ink-dimmer)', marginBottom: 4 }}>
+                Модель
+                <input
+                  value={draft.model ?? activePersona.model}
+                  onChange={(e) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [activePersona.name]: { ...prev[activePersona.name], model: e.target.value },
+                    }))
+                  }
+                  style={{ marginTop: 4, marginBottom: 10 }}
+                />
+              </label>
+              <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--ink-dimmer)' }}>
+                Промпт персоны
+                <textarea
+                  value={draft.system_prompt ?? activePersona.system_prompt}
+                  onChange={(e) =>
+                    setDrafts((prev) => ({
+                      ...prev,
+                      [activePersona.name]: { ...prev[activePersona.name], system_prompt: e.target.value },
+                    }))
+                  }
+                  rows={5}
+                  style={{ marginTop: 4 }}
+                />
+              </label>
+              <button className="p-save" disabled={!changed} onClick={() => savePersona(activePersona)}>
+                {saved === activePersona.name ? <Check className="h-4 w-4" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
+                {saved === activePersona.name ? 'Сохранено' : 'Сохранить'}
+              </button>
+            </div>
           </div>
         )}
-      </section>
-
-      <section className={`${CARD} mb-6`}>
-        <h2 className="mb-1 text-lg font-bold text-gray-100">Общие правила</h2>
-        <p className="mb-3 text-sm text-gray-400">
-          Идут перед характером и перед персоной. Здесь живут запреты — например, не выдумывать
-          факты и не делать необратимое без спроса.
-        </p>
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          rows={6}
-          className="w-full rounded-md border border-gray-800 bg-darker p-3 text-sm leading-relaxed text-gray-100 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-        <button
-          onClick={savePrompt}
-          className="mt-3 flex cursor-pointer items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-darker transition-colors duration-200 hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary"
-        >
-          {promptSaved ? <Check className="h-4 w-4" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
-          {promptSaved ? 'Сохранено' : 'Сохранить'}
-        </button>
-      </section>
-
-      <h2 className="mb-3 text-lg font-bold text-gray-100">Персоны</h2>
-      <div className="space-y-3">
-        {personas.map((persona) => {
-          const open = openName === persona.name;
-          const draft = drafts[persona.name] ?? {};
-          const changed = Object.keys(draft).length > 0;
-          return (
-            <article key={persona.name} className={CARD}>
-              <button
-                onClick={() => setOpenName(open ? null : persona.name)}
-                className="flex w-full cursor-pointer items-start justify-between gap-3 text-left focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                <span className="min-w-0">
-                  {/* Египетское имя крупно, техническое — рядом мелко.
-                      Прятать латинское нельзя: оно же уходит в API и в
-                      логи, и без него не связать экран с бэкендом. */}
-                  <span className="font-display text-lg text-primary-bright">
-                    {titleOf(persona.name)}
-                  </span>
-                  <span className="ml-2 font-mono text-xs text-gray-600">{persona.name}</span>
-                  <span className="mt-0.5 block text-sm text-gray-400">{persona.description}</span>
-                </span>
-                <span className="shrink-0 font-mono text-xs text-gray-500">
-                  {persona.provider}/{persona.model}
-                </span>
-              </button>
-
-              {open && (
-                <div className="mt-4 space-y-3 border-t border-gray-800 pt-4">
-                  <label className="block text-xs text-gray-400">
-                    Модель
-                    <input
-                      value={draft.model ?? persona.model}
-                      onChange={(e) =>
-                        setDrafts((prev) => ({
-                          ...prev,
-                          [persona.name]: { ...prev[persona.name], model: e.target.value },
-                        }))
-                      }
-                      className="mt-1 w-full rounded-md border border-gray-800 bg-darker px-3 py-1.5 font-mono text-sm text-gray-100 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </label>
-
-                  <label className="block text-xs text-gray-400">
-                    Характер персоны (промпт)
-                    <textarea
-                      value={draft.system_prompt ?? persona.system_prompt}
-                      onChange={(e) =>
-                        setDrafts((prev) => ({
-                          ...prev,
-                          [persona.name]: { ...prev[persona.name], system_prompt: e.target.value },
-                        }))
-                      }
-                      rows={4}
-                      className="mt-1 w-full rounded-md border border-gray-800 bg-darker p-3 text-sm leading-relaxed text-gray-100 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                  </label>
-
-                  <button
-                    onClick={() => savePersona(persona)}
-                    disabled={!changed}
-                    className="flex cursor-pointer items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-darker transition-colors duration-200 hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-40"
-                  >
-                    {saved === persona.name ? (
-                      <Check className="h-4 w-4" aria-hidden />
-                    ) : (
-                      <Save className="h-4 w-4" aria-hidden />
-                    )}
-                    {saved === persona.name ? 'Сохранено' : 'Сохранить'}
-                  </button>
-                </div>
-              )}
-            </article>
-          );
-        })}
       </div>
     </div>
   );
