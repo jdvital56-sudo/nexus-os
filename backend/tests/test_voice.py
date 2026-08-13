@@ -48,9 +48,10 @@ async def test_long_text_is_clipped(monkeypatch):
     monkeypatch.setenv("NEXUS_TTS_MAX_CHARS", "50")
     said: dict = {}
 
-    async def fake_edge(text, voice):
+    async def fake_edge(text, voice, rate="+0%"):
         said["text"] = text
         said["voice"] = voice
+        said["rate"] = rate
         return "файл.mp3"
 
     monkeypatch.setattr(tts, "_edge", fake_edge)
@@ -110,3 +111,35 @@ def test_api_say_returns_503_when_off(client, monkeypatch):
 
     assert r.status_code == 503
     assert "NEXUS_TTS_ENGINE" in r.json()["detail"]
+
+
+# --- Темп речи: ползунок «pace» из характера, но только для звука (2026-08-12) ---
+
+
+def test_rate_defaults_to_no_change():
+    assert tts._rate_for(5) == "+0%"
+
+
+def test_rate_is_clamped_within_thirty_percent():
+    assert tts._rate_for(0) == "-30%"
+    assert tts._rate_for(10) == "+30%"
+
+
+@pytest.mark.asyncio
+async def test_pace_reaches_the_edge_call(monkeypatch):
+    """Ползунок «Темп речи» в Пантеоне должен реально влиять на озвучку."""
+    from backend.services import personas as personas_svc
+
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "edge")
+    personas_svc.set_character({"pace": 0})
+    said: dict = {}
+
+    async def fake_edge(text, voice, rate="+0%"):
+        said["rate"] = rate
+        return "файл.mp3"
+
+    monkeypatch.setattr(tts, "_edge", fake_edge)
+
+    await tts.synthesize("привет")
+
+    assert said["rate"] == "-30%"

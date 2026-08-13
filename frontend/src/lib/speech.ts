@@ -15,6 +15,9 @@ export function speechSupported(): boolean {
 
 export interface Listener {
   stop: () => void;
+  /** Заглушить распознавание, не останавливая поток — например, пока играет TTS. */
+  mute?: () => void;
+  unmute?: () => void;
 }
 
 /**
@@ -44,6 +47,11 @@ export function listenForWakeWord(
   }
 
   let stopped = false;
+  // Пока Джарвис говорит сам, микрофон физически продолжает слушать браузерное
+  // распознавание — иначе поток приходится пересоздавать. Но результат, пока
+  // muted, просто выбрасывается: иначе колонки эхом уходят обратно в диалог,
+  // и Джарвис отвечает сам себе.
+  let muted = false;
   const rec: Recognition = new Ctor();
   rec.lang = lang;
   rec.continuous = true;
@@ -53,6 +61,7 @@ export function listenForWakeWord(
   const WAKE = /дж[аяе]рв[иеё]с\w*/i;
 
   rec.onresult = (event: any) => {
+    if (muted) return;
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i];
       const said = String(result[0].transcript).trim();
@@ -106,6 +115,12 @@ export function listenForWakeWord(
     stop: () => {
       stopped = true;
       rec.stop();
+    },
+    mute: () => {
+      muted = true;
+    },
+    unmute: () => {
+      muted = false;
     },
   };
 }

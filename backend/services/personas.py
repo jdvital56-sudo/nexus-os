@@ -36,6 +36,7 @@ DEFAULT_CHARACTER = {
     "humor": 3,        # сухо ← → с шутками
     "warmth": 5,       # по-деловому ← → по-дружески
     "verbosity": 4,    # односложно ← → подробно
+    "pace": 5,         # медленнее ← → живее (только озвучка, на текст не влияет)
     "address": "ты",   # ты | вы | сэр
     "language": "auto",  # auto | ru | en
 }
@@ -95,6 +96,8 @@ def describe_character(character: dict[str, Any] | None = None) -> str:
 
     parts.append(_ADDRESS.get(str(c.get("address")), _ADDRESS["ты"]))
     parts.append(_LANGUAGE.get(str(c.get("language")), _LANGUAGE["auto"]))
+    # pace сюда не попадает: это скорость озвучки, модель текста о ней не знает
+    # (см. tts.py — читает тот же character напрямую)
     return " ".join(parts)
 
 
@@ -106,7 +109,7 @@ def get_character() -> dict[str, Any]:
 def set_character(payload: dict[str, Any]) -> dict[str, Any]:
     """Сохраняет характер. Правка влияет уже на следующее сообщение."""
     current = get_character()
-    for dial in ("humor", "warmth", "verbosity"):
+    for dial in ("humor", "warmth", "verbosity", "pace"):
         if payload.get(dial) is not None:
             current[dial] = _level(payload[dial], DEFAULT_CHARACTER[dial])
     if payload.get("address") in _ADDRESS:
@@ -134,6 +137,23 @@ def _load() -> dict[str, Any]:
     if not isinstance(data, dict) or "personas" not in data:
         data = {"personas": _defaults(), "system_prompt": DEFAULT_SYSTEM_PROMPT}
         write_json(PERSONAS_FILE, data)
+        return data
+
+    # Заводские персоны, которых ещё нет в файле, доезжают сюда сами.
+    # Без этого новая персона в коде никогда не появлялась бы у того, у кого
+    # personas.json уже создан: defaults читались только при первом запуске.
+    # Правки существующих персон не трогаем — человек мог их менять руками.
+    #
+    # `removed` — метки об удалении. Без них удалённая заводская персона
+    # возвращалась бы при следующем чтении файла, и удалить её насовсем
+    # было бы нельзя.
+    known = {p.get("name", "").lower() for p in data["personas"] if isinstance(p, dict)}
+    known |= {str(n).lower() for n in data.get("removed", [])}
+    added = [p for p in _defaults() if p["name"].lower() not in known]
+    if added:
+        data["personas"].extend(added)
+        write_json(PERSONAS_FILE, data)
+        logger.info("Добавлены новые заводские персоны: %s", ", ".join(p["name"] for p in added))
     return data
 
 
@@ -191,6 +211,11 @@ def delete_persona(name: str) -> bool:
     if not remaining:
         raise ValueError("Нельзя удалить последнюю персону")
     data["personas"] = remaining
+    # Метка об удалении: иначе заводская персона вернётся при следующем
+    # чтении файла — тем же механизмом, что подвозит новые (см. _load)
+    removed = {str(n).lower() for n in data.get("removed", [])}
+    removed.add(name.lower())
+    data["removed"] = sorted(removed)
     _save(data)
     return True
 
@@ -210,7 +235,15 @@ def set_system_prompt(prompt: str) -> str:
 
 
 def reset_to_defaults() -> dict[str, Any]:
-    """Возврат к заводскому Пантеону — на случай, если правки завели в тупик."""
-    data = {"personas": _defaults(), "system_prompt": DEFAULT_SYSTEM_PROMPT}
+    """Возврат к заводскому Пантеону — на случай, если правки завели в тупик.
+
+    Характер сохраняем: он настраивается ползунками на отдельном экране и к
+    Пантеону отношения не имеет. Раньше сброс молча стирал его до заводского,
+    и человек терял настройки, которых не собирался касаться.
+    """
+    character = _load().get("character")
+    data: dict[str, Any] = {"personas": _defaults(), "system_prompt": DEFAULT_SYSTEM_PROMPT}
+    if character:
+        data["character"] = character
     _save(data)
     return data

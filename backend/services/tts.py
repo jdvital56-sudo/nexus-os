@@ -63,6 +63,15 @@ def is_enabled() -> bool:
     return engine_name() != "none"
 
 
+def _rate_for(pace: int) -> str:
+    """Ползунок «темп» (0..10, 5 — обычная скорость edge-tts) в проценты edge-tts.
+
+    Диапазон -30%..+30% — за его пределами голос уже разваливается на слух.
+    """
+    percent = max(-30, min(30, (int(pace) - 5) * 6))
+    return f"{percent:+d}%"
+
+
 def list_voices() -> list[dict]:
     if engine_name() == "edge":
         return [v.__dict__ for v in EDGE_VOICES]
@@ -131,7 +140,10 @@ async def synthesize(text: str, voice: str | None = None) -> Path:
         text = text[:limit].rsplit(" ", 1)[0] + "…"
 
     if name == "edge":
-        return await _edge(text, voice or default_voice())
+        from .personas import get_character
+
+        rate = _rate_for(get_character().get("pace", 5))
+        return await _edge(text, voice or default_voice(), rate)
     if name == "omnivoice":
         raise VoiceUnavailable(
             "Движок omnivoice ещё не подключён: нужны torch и веса модели, "
@@ -142,7 +154,7 @@ async def synthesize(text: str, voice: str | None = None) -> Path:
     raise VoiceUnavailable(f"Неизвестный движок: {name}")
 
 
-async def _edge(text: str, voice: str) -> Path:
+async def _edge(text: str, voice: str, rate: str = "+0%") -> Path:
     try:
         import edge_tts
     except ImportError as e:
@@ -150,11 +162,11 @@ async def _edge(text: str, voice: str) -> Path:
 
     from . import artifacts
 
-    # Голос входит в имя файла: один и тот же текст разными голосами — это
-    # разные записи, иначе вторая молча затирает первую
-    out = artifacts.temp_dir() / f"voice_{voice}_{abs(hash(text)) % 10**8}.mp3"
+    # Голос и темп входят в имя файла: тот же текст другой скоростью — это
+    # другая запись, иначе она молча затирает предыдущую
+    out = artifacts.temp_dir() / f"voice_{voice}_{rate}_{abs(hash(text)) % 10**8}.mp3"
     try:
-        await edge_tts.Communicate(text, voice).save(str(out))
+        await edge_tts.Communicate(text, voice, rate=rate).save(str(out))
     except Exception as e:
         # Движок ходит в сеть — обрыв связи не должен выглядеть как поломка
         raise VoiceUnavailable(f"Озвучка не удалась: {e}") from e

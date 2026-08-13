@@ -55,6 +55,7 @@ export interface Character {
   humor: number;
   warmth: number;
   verbosity: number;
+  pace: number;
   address: 'ты' | 'вы' | 'сэр';
   language: 'auto' | 'ru' | 'en';
   prompt?: string;

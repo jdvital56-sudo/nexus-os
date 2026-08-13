@@ -50,6 +50,7 @@ class CharacterUpdate(BaseModel):
     humor: int | None = None
     warmth: int | None = None
     verbosity: int | None = None
+    pace: int | None = None
     address: str | None = None
     language: str | None = None
 

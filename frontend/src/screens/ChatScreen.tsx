@@ -58,17 +58,26 @@ export default function ChatScreen() {
       .catch(() => setVoiceReady(false));
   }, []);
 
-  // Произносит ответ вслух. Молча ничего не включаем: голос стоит трафика
+  // Произносит ответ вслух. Молча ничего не включаем: голос стоит трафика.
+  // Пока играет TTS, глушим распознавание «по имени» — иначе колонки эхом
+  // уходят обратно в микрофон, и Джарвис отвечает сам себе по кругу.
   const say = async (text: string) => {
+    const resume = () => {
+      wakeListener.current?.unmute?.();
+      setState('ONLINE');
+    };
     try {
       const blob = await speak(text);
       player.current?.pause();
       const audio = new Audio(URL.createObjectURL(blob));
       player.current = audio;
       setState('SPEAKING');
-      audio.onended = () => setState('ONLINE');
+      wakeListener.current?.mute?.();
+      audio.onended = resume;
+      audio.onerror = resume;
       await audio.play();
     } catch {
+      wakeListener.current?.unmute?.();
       setState('ONLINE');
       setError('Не удалось озвучить ответ.');
     }
@@ -230,7 +239,7 @@ export default function ChatScreen() {
       <div className="flex min-w-0 flex-1 flex-col p-6 lg:p-8">
         <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-white lg:text-3xl">{t('Разговор')}</h1>
+            <h1 className="text-2xl font-bold text-gray-100 lg:text-3xl">{t('Разговор')}</h1>
             <p className="mt-1 text-sm text-gray-400">
               {t('Тот же Джарвис, что в Телеграме: общая память, общий характер. Нить разговора здесь своя.')}
             </p>

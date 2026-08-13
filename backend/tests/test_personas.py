@@ -242,6 +242,21 @@ def test_character_survives_restart(client):
     assert client.get("/api/personas/character").json()["humor"] == 8
 
 
+def test_pace_dial_has_a_default_and_is_clamped(client):
+    c = client.get("/api/personas/character").json()
+    assert c["pace"] == 5
+
+    after = client.put("/api/personas/character", json={"pace": 99}).json()
+    assert after["pace"] == 10
+
+
+def test_pace_does_not_leak_into_the_text_prompt():
+    """Темп — это только звук; модель текста про него ничего не знает."""
+    prompt = svc.describe_character({"pace": 0})
+    assert "pace" not in prompt.lower()
+    assert "темп" not in prompt.lower()
+
+
 def test_character_reaches_the_dialog():
     """Главное: ползунок влияет на следующий ответ, а не только на экран."""
     from backend.services import personas as store
