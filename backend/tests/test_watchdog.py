@@ -121,11 +121,78 @@ async def test_send_failure_does_not_break_the_check(monkeypatch):
     assert watchdog._load_state()["checks"]["проба"] is False
 
 
-def test_api_report(client):
+def test_api_report(client, monkeypatch):
+    """heal=True на этом эндпоинте не должен поднимать настоящий APScheduler
+    в тестовом процессе — он один на весь прогон pytest и пережил бы этот тест."""
+    from backend.agents.dream_cadence import dream_cadence
+
+    monkeypatch.setattr(dream_cadence, "start", lambda: None)
+
     r = client.get("/api/system/health-report")
 
     assert r.status_code == 200
     assert "checks" in r.json()
+
+
+def test_heal_recovers_a_dead_scheduler_lock(monkeypatch):
+    """Мёртвый замок — сторож перехватывает расписание сам, не дожидаясь
+    перезапуска бэкенда (раньше только находил, теперь и чинит)."""
+    from backend.agents.dream_cadence import dream_cadence
+
+    healed = {"done": False}
+
+    def fake_start():
+        healed["done"] = True
+
+    monkeypatch.setattr(dream_cadence, "start", fake_start)
+    monkeypatch.setattr(
+        watchdog,
+        "_check_scheduler",
+        lambda: watchdog.Check("scheduler", "Расписание", healed["done"], "проба", critical=True),
+    )
+    monkeypatch.setattr(watchdog, "CHECKS", (watchdog._check_scheduler,))
+
+    report = watchdog.run(heal=True)
+
+    assert healed["done"] is True
+    assert report["healthy"] is True
+
+
+def test_heal_is_off_by_default(monkeypatch):
+    """Без heal=True сторож только докладывает — ничего не трогает."""
+    from backend.agents.dream_cadence import dream_cadence
+
+    called = []
+    monkeypatch.setattr(dream_cadence, "start", lambda: called.append(1))
+    monkeypatch.setattr(
+        watchdog,
+        "CHECKS",
+        (lambda: watchdog.Check("scheduler", "Расписание", False, "мёртв", critical=True),),
+    )
+
+    report = watchdog.run()
+
+    assert called == []
+    assert report["healthy"] is False
+
+
+def test_heal_failure_does_not_crash_the_check(monkeypatch):
+    """Если сама попытка починить упала — отчёт остаётся тем, что было."""
+    from backend.agents.dream_cadence import dream_cadence
+
+    def boom():
+        raise RuntimeError("не вышло")
+
+    monkeypatch.setattr(dream_cadence, "start", boom)
+    monkeypatch.setattr(
+        watchdog,
+        "CHECKS",
+        (lambda: watchdog.Check("scheduler", "Расписание", False, "мёртв", critical=True),),
+    )
+
+    report = watchdog.run(heal=True)
+
+    assert report["healthy"] is False
 
 
 async def _collect(bucket: list, text: str) -> None:

@@ -100,12 +100,19 @@ def _runtime() -> dict:
 
 
 @router.get("/health-report")
-def health_report(_=Depends(auth)):
+async def health_report(_=Depends(auth)):
     """Самочувствие системы. Ни одного обращения к модели — сторож обязан
-    работать и тогда, когда модель недоступна или кончился бюджет."""
+    работать и тогда, когда модель недоступна или кончился бюджет.
+
+    `heal=True`: заодно перехватывает мёртвый замок расписания, если он
+    найден — без этого чинится только следующим перезапуском бэкенда.
+    Эндпоинт обязан быть async — AsyncIOScheduler цепляется к циклу событий
+    именно того потока, откуда его подняли, а sync-эндпоинты FastAPI уводит
+    в отдельный поток без цикла.
+    """
     from ..services import watchdog
 
-    return watchdog.run()
+    return watchdog.run(heal=True)
 
 
 @router.get("/status")

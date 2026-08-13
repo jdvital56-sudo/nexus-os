@@ -96,11 +96,14 @@ async def startup():
     eventbus.bind_loop(_asyncio.get_running_loop())
     events.install()
 
-    # Create default skills
+    # Заводские скиллы — только при первом запуске на чистых данных. Если
+    # человек уже завёл свои (или намеренно удалил образцы), досев дефолтов
+    # при каждом рестарте тихо воскрешал бы удалённое рядом с настоящими.
     try:
-        from .services.skills import create_default_skills
-        create_default_skills()
-        logger.info("Default skills created successfully")
+        from .services import skills as skills_svc
+        if not skills_svc.list_skills():
+            skills_svc.create_default_skills()
+            logger.info("Default skills created successfully")
     except Exception as e:
         logger.warning(f"Failed to create default skills: {e}")
 

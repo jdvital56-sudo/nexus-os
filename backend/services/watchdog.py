@@ -208,17 +208,58 @@ CHECKS = (
     _check_obsidian,
 )
 
+# Проверки, которые сторож умеет не только находить, но и чинить сам —
+# и функция, которой это делать. Пока одна: мёртвый замок расписания.
+_HEALERS = {}
 
-def run() -> dict:
-    """Прогоняет все проверки. Ни одного обращения к модели."""
+
+def _heal_scheduler() -> Check | None:
+    """Перехватывает расписание, если его держит мёртвый процесс (или никто).
+
+    Safe to call always: `dream_cadence.start()` сам ничего не делает, если
+    расписание в этом процессе уже идёт (см. core/singleton.py — acquire()
+    и так забирает замок у мёртвого pid, тут просто дёргаем это заново,
+    не дожидаясь перезапуска бэкенда).
+    """
+    try:
+        from ..agents.dream_cadence import dream_cadence
+
+        dream_cadence.start()
+    except Exception:
+        logger.exception("Сторож не смог перехватить расписание")
+        return None
+    return _check_scheduler()
+
+
+_HEALERS["scheduler"] = _heal_scheduler
+
+
+def run(heal: bool = False) -> dict:
+    """Прогоняет все проверки. Ни одного обращения к модели.
+
+    `heal=True` — вдобавок пытается починить то, что умеет (сейчас только
+    мёртвый замок расписания), и перепроверяет результат. По умолчанию
+    выключено: `heal` трогает настоящий APScheduler, а не только файлы, —
+    в тестах и в фоновой джобе сторожа (там своя причина, см. check_and_notify)
+    он не нужен.
+    """
     checks = []
     for check in CHECKS:
         try:
-            checks.append(check())
+            result = check()
         except Exception as e:
             # Сама проверка не имеет права уронить сторожа
             logger.exception("Проверка %s упала", check.__name__)
-            checks.append(Check(check.__name__, check.__name__, False, f"проверка сломалась: {e}"))
+            result = Check(check.__name__, check.__name__, False, f"проверка сломалась: {e}")
+
+        if heal and not result.ok:
+            healer = _HEALERS.get(result.id)
+            if healer:
+                healed = healer()
+                if healed is not None:
+                    result = healed
+
+        checks.append(result)
 
     broken = [c for c in checks if not c.ok]
     critical = [c for c in broken if c.critical]
