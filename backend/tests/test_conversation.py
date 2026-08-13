@@ -15,12 +15,23 @@ class FakeLLM:
     def __init__(self, reply: str = "ответ модели"):
         self.reply = reply
         self.calls: list[tuple[str, str]] = []
+        self.system_prompt = ""
+        # Критик (Сехмет/Philosopher) зовёт chat() напрямую — по умолчанию
+        # всегда PASS, чтобы остальные тесты его не замечали
+        self.chat_calls: list[list] = []
+        self.chat_reply = "PASS"
 
     async def generate_response(
         self, user_message: str, context: str = "", kind: str = "interactive"
     ) -> str:
         self.calls.append((user_message, context))
         return self.reply
+
+    async def chat(self, messages, temperature=0.7, max_tokens=1024, stream=False, kind="interactive", json_mode=False):
+        from backend.services.llm import LLMResponse
+
+        self.chat_calls.append(messages)
+        return LLMResponse(content=self.chat_reply, model="fake")
 
 
 def make_service(llm: FakeLLM | None = None, extract_entities: bool = False) -> ConversationService:
@@ -714,3 +725,51 @@ async def test_skill_run_stays_in_the_thread(default_skills):
     thread = dialog_history.render("telegram", "42")
     assert "collect-metrics" in thread
     assert "Skill" in thread
+
+
+# --- Критик: только для Сехмет и Philosopher (Имхотепа), см. critic.py ---
+
+
+@pytest.mark.asyncio
+async def test_critic_leaves_a_passing_reply_untouched():
+    llm = FakeLLM("черновик Сехмет")
+    llm.chat_reply = "PASS. Находка обоснована."
+    svc = make_service(llm)
+
+    reply = await svc.handle("web", "42", "что случилось", persona="Sekhmet")
+    await svc.drain()
+
+    assert reply == "черновик Сехмет"
+    assert len(llm.chat_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_critic_revision_replaces_the_final_reply():
+    llm = FakeLLM("черновик Имхотепа")
+    svc = make_service(llm)
+
+    # Первый chat() — вердикт критика, второй — правка самой персоны
+    calls = iter(["NEEDS REVISION: не назвал цену отката.", "поправленный ответ Имхотепа"])
+
+    async def fake_chat(messages, **kwargs):
+        from backend.services.llm import LLMResponse
+
+        return LLMResponse(content=next(calls), model="fake")
+
+    llm.chat = fake_chat
+
+    reply = await svc.handle("web", "42", "стоит ли переезжать на новую БД", persona="Philosopher")
+    await svc.drain()
+
+    assert reply == "поправленный ответ Имхотепа"
+
+
+@pytest.mark.asyncio
+async def test_other_personas_never_call_the_critic():
+    llm = FakeLLM("обычный ответ")
+    svc = make_service(llm)
+
+    await svc.handle("web", "42", "напиши код", persona="Architect")
+    await svc.drain()
+
+    assert llm.chat_calls == []

@@ -14,6 +14,7 @@ from ..agents.persona_manager import PersonaManager
 from ..core import eventbus
 from . import budget
 from . import chat_log
+from . import critic
 from . import dialog_history
 from . import entity_extraction
 from . import memory as memory_svc
@@ -143,6 +144,12 @@ class ConversationService:
             self._build_context, text, selected["name"], channel, user_id
         )
         reply = await self._respond(llm, selected["name"], text, context)
+
+        if critic.needs_critic(selected["name"]):
+            passed, verdict = await critic.review(llm, selected["name"], text, reply)
+            if not passed:
+                logger.info("Критик %s: %s", selected["name"], verdict[:200])
+                reply = await critic.revise(llm, llm.system_prompt, text, reply, verdict)
 
         self._emit_message(channel, "assistant", selected["name"], reply)
         # Нить разговора пишется до возврата ответа: следующее сообщение может
