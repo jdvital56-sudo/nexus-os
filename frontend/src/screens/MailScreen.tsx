@@ -152,7 +152,7 @@ export default function MailScreen() {
               <div className="space-y-2">
                 {found.map((m) => (
                   <article key={m.id} className={CARD}>
-                    <h3 className="text-sm font-semibold text-white">{m.subject || 'без темы'}</h3>
+                    <h3 className="text-sm font-semibold text-gray-100">{m.subject || 'без темы'}</h3>
                     <p className="mt-0.5 text-xs text-gray-500">{m.from || m.sender}</p>
                     {m.snippet && <p className="mt-1 text-sm text-gray-300">{m.snippet}</p>}
                   </article>
@@ -172,7 +172,7 @@ export default function MailScreen() {
           <div className="space-y-2">
             {drafts?.map((d) => (
               <article key={d.id} className={CARD}>
-                <h3 className="text-sm font-semibold text-white">{d.subject || 'без темы'}</h3>
+                <h3 className="text-sm font-semibold text-gray-100">{d.subject || 'без темы'}</h3>
                 <p className="mt-0.5 text-xs text-gray-500">кому: {d.to || '—'}</p>
                 {d.snippet && <p className="mt-1 text-sm text-gray-300">{d.snippet}</p>}
               </article>

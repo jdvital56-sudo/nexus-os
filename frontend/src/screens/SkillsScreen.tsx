@@ -134,7 +134,7 @@ export default function SkillsScreen() {
   if (error && skills.length === 0) {
     return (
       <div className="p-6 lg:p-8">
-        <h1 className="mb-4 text-2xl font-bold text-white">Скиллы</h1>
+        <h1 className="mb-4 text-2xl font-bold text-gray-100">Скиллы</h1>
         <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-5 text-sm text-red-100">{error}</div>
       </div>
     );
@@ -143,7 +143,7 @@ export default function SkillsScreen() {
   return (
     <div className="p-6 lg:p-8">
       <header className="mb-6">
-        <h1 className="text-2xl font-bold text-white lg:text-3xl">Скиллы</h1>
+        <h1 className="text-2xl font-bold text-gray-100 lg:text-3xl">Скиллы</h1>
         <p className="mt-1 text-sm text-gray-400">
           Записанный порядок действий. Система выполнит его точно так, как здесь написано —
           без модели и без импровизации.
@@ -174,7 +174,7 @@ export default function SkillsScreen() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
-                    <span className="font-semibold text-white">{skill.name}</span>
+                    <span className="font-semibold text-gray-100">{skill.name}</span>
                     {skill.category && (
                       <span className="rounded-full bg-gray-800 px-2 py-0.5 text-[10px] uppercase tracking-wider text-gray-400">
                         {skill.category}
@@ -250,7 +250,7 @@ export default function SkillsScreen() {
                       onClick={() => toggleEnabled(skill)}
                       disabled={toggling === skill.id}
                       aria-pressed={skill.enabled !== false}
-                      className="cursor-pointer rounded-md border border-gray-700 px-3 py-2 text-sm text-gray-300 transition-colors duration-200 hover:border-gray-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-wait disabled:opacity-60"
+                      className="cursor-pointer rounded-md border border-gray-700 px-3 py-2 text-sm text-gray-300 transition-colors duration-200 hover:border-gray-600 hover:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-wait disabled:opacity-60"
                     >
                       {toggling === skill.id
                         ? 'Переключаю…'

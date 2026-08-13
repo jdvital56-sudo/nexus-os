@@ -9,6 +9,7 @@ import {
   updatePersona,
 } from '../lib/api';
 import type { Character, Persona } from '../types';
+import { titleOf } from '../lib/pantheon';
 
 // Пантеон: кто отвечает и каким тоном. Бэкенд для этого готов с PR-8 —
 // правка влияет уже на следующее сообщение в любом канале, — но экрана не
@@ -24,6 +25,7 @@ const DIALS: Array<{ key: keyof Character; label: string; left: string; right: s
   { key: 'humor', label: 'Юмор', left: 'сухо', right: 'с шутками' },
   { key: 'warmth', label: 'Тон', left: 'по-деловому', right: 'по-дружески' },
   { key: 'verbosity', label: 'Подробность', left: 'односложно', right: 'разворачивает' },
+  { key: 'pace', label: 'Темп речи', left: 'медленнее', right: 'живее' },
 ];
 
 const ADDRESS: Array<Character['address']> = ['ты', 'вы', 'сэр'];
@@ -93,7 +95,7 @@ export default function PersonasScreen() {
   if (error && !character) {
     return (
       <div className="p-6 lg:p-8">
-        <h1 className="mb-4 text-2xl font-bold text-white">Пантеон</h1>
+        <h1 className="mb-4 text-2xl font-bold text-gray-100">Пантеон</h1>
         <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-5 text-sm text-red-100">{error}</div>
       </div>
     );
@@ -106,7 +108,7 @@ export default function PersonasScreen() {
   return (
     <div className="p-6 lg:p-8">
       <header className="mb-6">
-        <h1 className="text-2xl font-bold text-white lg:text-3xl">Пантеон</h1>
+        <h1 className="text-2xl font-bold text-gray-100 lg:text-3xl">Пантеон</h1>
         <p className="mt-1 text-sm text-gray-400">
           Кто отвечает и каким тоном. Любая правка здесь влияет уже на следующее сообщение —
           и в Телеграме, и везде, где система заговорит.
@@ -120,7 +122,7 @@ export default function PersonasScreen() {
       )}
 
       <section className={`${CARD} mb-6`}>
-        <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-white">
+        <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-gray-100">
           <Sparkles className="h-5 w-5 text-primary" aria-hidden />
           Характер
         </h2>
@@ -128,7 +130,7 @@ export default function PersonasScreen() {
           Общий поверх любой персоны. Сохраняется сразу, кнопка не нужна.
         </p>
 
-        <div className="grid gap-5 lg:grid-cols-3">
+        <div className="grid gap-5 lg:grid-cols-4">
           {DIALS.map((dial) => (
             <label key={dial.key} className="block">
               <span className="mb-1 flex items-center justify-between text-sm text-gray-200">
@@ -149,6 +151,11 @@ export default function PersonasScreen() {
                 <span>{dial.left}</span>
                 <span>{dial.right}</span>
               </span>
+              {dial.key === 'pace' && (
+                <span className="mt-1 block text-[11px] text-gray-600">
+                  Только озвучка — на текст ответа не влияет
+                </span>
+              )}
             </label>
           ))}
         </div>
@@ -164,7 +171,7 @@ export default function PersonasScreen() {
                   className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
                     character.address === value
                       ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+                      : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
                   }`}
                 >
                   {value}
@@ -183,7 +190,7 @@ export default function PersonasScreen() {
                   className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
                     character.language === item.value
                       ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+                      : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
                   }`}
                 >
                   {item.label}
@@ -205,7 +212,7 @@ export default function PersonasScreen() {
       </section>
 
       <section className={`${CARD} mb-6`}>
-        <h2 className="mb-1 text-lg font-bold text-white">Общие правила</h2>
+        <h2 className="mb-1 text-lg font-bold text-gray-100">Общие правила</h2>
         <p className="mb-3 text-sm text-gray-400">
           Идут перед характером и перед персоной. Здесь живут запреты — например, не выдумывать
           факты и не делать необратимое без спроса.
@@ -225,7 +232,7 @@ export default function PersonasScreen() {
         </button>
       </section>
 
-      <h2 className="mb-3 text-lg font-bold text-white">Персоны</h2>
+      <h2 className="mb-3 text-lg font-bold text-gray-100">Персоны</h2>
       <div className="space-y-3">
         {personas.map((persona) => {
           const open = openName === persona.name;
@@ -238,7 +245,13 @@ export default function PersonasScreen() {
                 className="flex w-full cursor-pointer items-start justify-between gap-3 text-left focus:outline-none focus:ring-1 focus:ring-primary"
               >
                 <span className="min-w-0">
-                  <span className="font-semibold text-white">{persona.name}</span>
+                  {/* Египетское имя крупно, техническое — рядом мелко.
+                      Прятать латинское нельзя: оно же уходит в API и в
+                      логи, и без него не связать экран с бэкендом. */}
+                  <span className="font-display text-lg text-primary-bright">
+                    {titleOf(persona.name)}
+                  </span>
+                  <span className="ml-2 font-mono text-xs text-gray-600">{persona.name}</span>
                   <span className="mt-0.5 block text-sm text-gray-400">{persona.description}</span>
                 </span>
                 <span className="shrink-0 font-mono text-xs text-gray-500">

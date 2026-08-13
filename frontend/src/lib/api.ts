@@ -89,6 +89,15 @@ export const getCalendarStatus = () =>
 export const getCalendarEvents = (days = 7) =>
   data<{ count: number; events: any[] }>(api.get('/calendar/events', { params: { days } }));
 
+// --- Голос ---
+export const getVoiceStatus = () =>
+  data<{ engine: string; enabled: boolean; ready: boolean; detail: string; voice: string; voices: Array<{ id: string; label: string; gender: string }> }>(
+    api.get('/voice/status'),
+  );
+/** Озвучка приходит файлом — браузер играет его сам, без потоков. */
+export const speak = (text: string, voice?: string) =>
+  api.post('/voice/say', { text, voice }, { responseType: 'blob' }).then((r) => r.data as Blob);
+
 // --- Веб-чат ---
 // Тот же контур мышления, что у Телеграма, только другой канал
 export const getChatHistory = () =>

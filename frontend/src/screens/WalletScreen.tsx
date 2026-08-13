@@ -162,7 +162,7 @@ export default function WalletScreen() {
                 className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
                   form.period === key
                     ? 'border-primary/40 bg-primary/10 text-primary'
-                    : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+                    : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
                 }`}
               >
                 {label}
@@ -182,7 +182,7 @@ export default function WalletScreen() {
         <div className="mb-6 grid gap-4 sm:grid-cols-3">
           <div className={CARD}>
             <h3 className="text-sm text-gray-400">Уходит в месяц</h3>
-            <p className={`mt-2 text-2xl font-bold text-white ${NUM}`}>
+            <p className={`mt-2 text-2xl font-bold text-gray-100 ${NUM}`}>
               {money(summary.monthly_total_usd)}
             </p>
             <p className="mt-1 text-xs text-gray-500">
@@ -191,7 +191,7 @@ export default function WalletScreen() {
           </div>
           <div className={CARD}>
             <h3 className="text-sm text-gray-400">Скоро спишут</h3>
-            <p className={`mt-2 text-2xl font-bold ${dueSoon.length ? 'text-amber-300' : 'text-white'} ${NUM}`}>
+            <p className={`mt-2 text-2xl font-bold ${dueSoon.length ? 'text-amber-300' : 'text-gray-100'} ${NUM}`}>
               {dueSoon.length}
             </p>
             <p className="mt-1 text-xs text-gray-500">
@@ -200,7 +200,7 @@ export default function WalletScreen() {
           </div>
           <div className={CARD}>
             <h3 className="text-sm text-gray-400">Баланс на исходе</h3>
-            <p className={`mt-2 text-2xl font-bold ${lowBalance.length ? 'text-red-300' : 'text-white'} ${NUM}`}>
+            <p className={`mt-2 text-2xl font-bold ${lowBalance.length ? 'text-red-300' : 'text-gray-100'} ${NUM}`}>
               {lowBalance.length}
             </p>
             <p className="mt-1 text-xs text-gray-500">
@@ -227,7 +227,7 @@ export default function WalletScreen() {
             <article key={s.id} className={CARD}>
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h3 className="font-semibold text-white">{s.name}</h3>
+                  <h3 className="font-semibold text-gray-100">{s.name}</h3>
                   <p className="mt-0.5 text-sm text-gray-400">
                     {s.cost ? `${money(s.cost)} ${PERIODS[s.period] ?? s.period}` : PERIODS[s.period] ?? s.period}
                     {s.balance != null && (

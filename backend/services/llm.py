@@ -23,6 +23,12 @@ from . import budget
 
 logger = logging.getLogger(__name__)
 
+# Плавающий алиас, не датированная версия: Google отзывает конкретные версии
+# (2.0-flash, затем и 2.5-flash — обе отвалились для этого ключа в августе
+# 2026), а алиас сам переезжает на актуальную модель. Одно место вместо трёх —
+# чтобы обновление не рассинхронизировалось между чатом и распознаванием речи.
+GEMINI_MODEL = "gemini-flash-latest"
+
 
 class LLMMessage:
     """Standard message format."""
@@ -148,7 +154,7 @@ class LLMService:
         return response
     
     async def generate_plan(self, audio_path: str, prompt: str) -> str:
-        """Generate plan from audio using Gemini 2.0 Flash."""
+        """Generate plan from audio using Gemini (see GEMINI_MODEL)."""
         return await self._gemini_audio(audio_path, prompt, max_tokens=2048)
 
     async def transcribe_audio(self, audio_path: str) -> str:
@@ -173,7 +179,7 @@ class LLMService:
         if not self.gemini_api_key:
             raise ValueError("GEMINI_API_KEY not set for audio processing")
 
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 
         # Read audio file and encode as base64
         import base64
@@ -290,7 +296,7 @@ class LLMService:
         if not self.gemini_api_key:
             raise ValueError("GEMINI_API_KEY not set")
         
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
         
         # Convert messages to Gemini format
         gemini_parts = []
@@ -325,7 +331,7 @@ class LLMService:
                 content = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
                 usage = {}  # Gemini doesn't provide token counts in simple API
                 
-                return LLMResponse(content=content, model="gemini-2.0-flash", usage=usage)
+                return LLMResponse(content=content, model=GEMINI_MODEL, usage=usage)
             except Exception as e:
                 logger.error(f"Gemini chat failed: {e}")
                 raise

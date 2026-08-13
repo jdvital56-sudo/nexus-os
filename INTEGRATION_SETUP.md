@@ -113,7 +113,7 @@ Add to your `.env` file:
 ```bash
 NEXSYS_GEMINI_API_KEY=your_gemini_api_key_here
 NEXSYS_LLM_PROVIDER=gemini
-NEXSYS_LLM_MODEL=gemini-2.0-flash
+NEXSYS_LLM_MODEL=gemini-flash-latest
 ```
 
 ### Test
@@ -143,9 +143,10 @@ print(plan)
 ```
 
 ### Supported Models
-- `gemini-2.0-flash` - Fast, multimodal (text + audio)
-- `gemini-1.5-pro` - Advanced reasoning
-- `gemini-1.5-flash` - Balanced performance
+- `gemini-flash-latest` - rolling alias, fast and multimodal (text + audio). Use this, not a dated
+  version — Google retired `gemini-2.0-flash` in August 2026 and `gemini-2.5-flash` was already
+  restricted for this key by then too. A pinned version will eventually 404 again; the alias won't.
+- `gemini-pro-latest` - rolling alias, advanced reasoning
 
 ---
 

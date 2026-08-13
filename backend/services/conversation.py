@@ -13,12 +13,14 @@ from typing import Any
 from ..agents.persona_manager import PersonaManager
 from ..core import eventbus
 from . import budget
+from . import chat_log
 from . import dialog_history
 from . import entity_extraction
 from . import memory as memory_svc
 from . import obsidian
 from . import skills as skills_svc
-from .llm import LLMService
+from ..core.config import settings
+from .llm import LLMMessage, LLMService
 from .memory import MemoryLayer
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,15 @@ _SKILL_ARG = re.compile(r"(?P<key>\w+)=(?P<value>.*?)(?=\s+\w+=|$)", re.DOTALL)
 # «/note Заголовок | текст» — записать в базу знаний Obsidian
 _NOTE_WRITE = re.compile(
     r"^\s*(?:/note|заметка)\s+(?P<title>[^|\n]+?)\s*(?:\||\n)\s*(?P<body>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# «поставь встречу в четверг в 15:00», «запиши в календарь созвон завтра»
+# Триггер разбирается без модели: постановка встречи должна быть
+# предсказуемой и мгновенной, а не зависеть от настроения LLM
+_CALENDAR_TRIGGER = re.compile(
+    r"^\s*(?:/встреча|(?:по)?ставь?\s+(?:встречу|созвон|напоминание)|назначь\s+встречу|"
+    r"запиши\s+в\s+календарь|добавь\s+в\s+календарь|создай\s+встречу)\s*(?P<rest>.*)$",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -102,6 +113,13 @@ class ConversationService:
         if not text or not text.strip():
             raise ValueError("Пустое сообщение")
 
+        calendar_reply = await self._try_calendar(text)
+        if calendar_reply is not None:
+            self._emit_message(channel, "user", "Календарь", text)
+            self._emit_message(channel, "assistant", "Календарь", calendar_reply)
+            await self._log_turn(channel, user_id, text, calendar_reply, "Календарь")
+            return calendar_reply
+
         note_reply = await self._try_note(text)
         if note_reply is not None:
             self._emit_message(channel, "user", "Obsidian", text)
@@ -124,9 +142,7 @@ class ConversationService:
         context = await asyncio.to_thread(
             self._build_context, text, selected["name"], channel, user_id
         )
-        reply = await llm.generate_response(
-            text, context=context, kind=budget.INTERACTIVE
-        )
+        reply = await self._respond(llm, selected["name"], text, context)
 
         self._emit_message(channel, "assistant", selected["name"], reply)
         # Нить разговора пишется до возврата ответа: следующее сообщение может
@@ -135,6 +151,38 @@ class ConversationService:
         self._spawn(self._remember(channel, user_id, text, reply, selected["name"]))
         self._spawn(self._extract(channel, user_id, text, reply, llm))
         return reply
+
+    async def _respond(
+        self, llm: LLMService, persona_name: str, text: str, context: str
+    ) -> str:
+        """Ответ персоны. С инструментами — если ей они положены.
+
+        Персонам, которым веб не нужен (код, глубокий разбор), инструменты не
+        предлагаем вовсе: лишний вызов стоит денег, а модель, увидев поиск,
+        тянется его позвать даже там, где ответ она знает.
+        """
+        from . import tools as tools_svc
+
+        # Проверяем ЗДЕСЬ, не только внутри chat_with_tools: её запасной путь
+        # дёргает llm.chat() — метод, которого нет ни у Anthropic/Gemini
+        # веток, ни у тестовых дублёров LLM, только generate_response().
+        # Дойти до неё с такой моделью — значит упасть чуть позже и непонятнее.
+        available = tools_svc.tools_for(persona_name)
+        if not available or not tools_svc.supports_tools(llm):
+            return await llm.generate_response(text, context=context, kind=budget.INTERACTIVE)
+
+        # Собираем запрос ровно как generate_response, чтобы ответы с
+        # инструментами и без них не расходились по форме
+        full_prompt = f"Context: {context}\n\nUser: {text}\n\nAssistant:"
+        response = await tools_svc.chat_with_tools(
+            llm,
+            [LLMMessage(role="user", content=full_prompt)],
+            tools=available,
+            temperature=0.7,
+            max_tokens=settings.max_reply_tokens,
+            kind=budget.INTERACTIVE,
+        )
+        return response.content
 
     async def _log_turn(
         self, channel: str, user_id: str, text: str, reply: str, persona: str
@@ -145,6 +193,15 @@ class ConversationService:
         try:
             await asyncio.to_thread(
                 dialog_history.append_turn, channel, user_id, text, reply, persona
+            )
+            # Полная лента — то, что человек читает на экране. Буфер выше
+            # режется до 600 символов ради промпта, и длинные ответы в чате
+            # обрывались на полуслове
+            await asyncio.to_thread(
+                chat_log.append_turn,
+                channel,
+                user_id,
+                [("user", text, ""), ("assistant", reply, persona)],
             )
         except Exception:
             logger.exception("Не удалось записать историю диалога %s:%s", channel, user_id)
@@ -241,6 +298,45 @@ class ConversationService:
             logger.warning("Извлечение сущностей отложено: %s", e)
         except Exception:
             logger.exception("Извлечение сущностей из %s не удалось", channel)
+
+    async def _try_calendar(self, text: str) -> str | None:
+        """Ставит встречу по фразе. Не команда — возвращает None.
+
+        Время разбирается кодом, а не моделью: «в четверг в 15:00» должно
+        попадать в четверг в 15:00 всегда, а не с вероятностью. И отвечаем
+        человеческой датой, чтобы ошибку было видно сразу, а не на встрече.
+        """
+        match = _CALENDAR_TRIGGER.match(text)
+        if not match:
+            return None
+
+        rest = (match.group("rest") or "").strip()
+        if not rest:
+            return "Скажи, что и когда поставить: «поставь встречу с Ольгой завтра в 15:00»."
+
+        from . import calendar as calendar_svc
+        from . import when_ru
+
+        moment = when_ru.parse(rest)
+        if moment is None:
+            return (
+                f"Не понял, когда именно. Скажи со временем: «{rest} завтра в 15:00»."
+            )
+
+        title = moment.text or "Встреча"
+        try:
+            event = await asyncio.to_thread(
+                calendar_svc.create_event, title, moment.start, moment.duration_minutes
+            )
+        except calendar_svc.CalendarNotConnected as e:
+            return f"📅 {e}"
+        except Exception as e:
+            logger.exception("Не удалось создать событие")
+            return f"Не удалось поставить встречу: {e}"
+
+        when = when_ru.human(moment.start)
+        tail = "" if moment.explicit_time else " (время не назвал — поставил на 10:00)"
+        return f"📅 Поставил: «{title}» {when}{tail}."
 
     async def _try_note(self, text: str) -> str | None:
         """Работа с базой знаний из диалога. Не команда — возвращает None.

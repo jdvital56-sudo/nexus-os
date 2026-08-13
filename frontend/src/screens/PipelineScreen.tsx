@@ -97,7 +97,7 @@ export default function PipelineScreen() {
                 className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
                   form.platform === p
                     ? 'border-primary/40 bg-primary/10 text-primary'
-                    : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+                    : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
                 }`}
               >
                 {p === 'general' ? 'без площадки' : p}
@@ -123,13 +123,13 @@ export default function PipelineScreen() {
                 <div className="text-[11px] uppercase tracking-wider text-gray-400">
                   {STAGES[stage]?.label ?? stage}
                 </div>
-                <div className={`mt-1 text-2xl font-bold text-white ${NUM}`}>{counts[stage] ?? 0}</div>
+                <div className={`mt-1 text-2xl font-bold text-gray-100 ${NUM}`}>{counts[stage] ?? 0}</div>
               </div>
             ))}
           </div>
 
           <section className={CARD}>
-            <h2 className="mb-4 text-lg font-bold text-white">Где сколько лежит</h2>
+            <h2 className="mb-4 text-lg font-bold text-gray-100">Где сколько лежит</h2>
             <div className="space-y-2">
               {stages.map((stage) => {
                 const count = counts[stage] ?? 0;

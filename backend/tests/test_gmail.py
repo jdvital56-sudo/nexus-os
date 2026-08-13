@@ -3,7 +3,23 @@ import inspect
 
 import pytest
 
-from backend.services import gmail
+from backend.services import gmail, google_auth
+
+
+@pytest.fixture(autouse=True)
+def google_disconnected(tmp_path, monkeypatch):
+    """Почта не подключена — что бы ни лежало на машине.
+
+    Вход в Google общий с календарём и живёт в google_auth: пути к файлу
+    доступа и токену там же. Подменять os.path.exists внутри gmail
+    бесполезно — он их не проверяет. На машине с подключённым Google тест
+    без этой изоляции уходил в браузерную авторизацию и вис.
+    """
+    monkeypatch.setattr(
+        google_auth, "CREDENTIALS_PATHS", (tmp_path / "google_credentials.json",)
+    )
+    monkeypatch.setattr(google_auth, "TOKEN_FILE", tmp_path / "google_token.json")
+    return tmp_path
 
 
 def test_no_send_method_exists():
@@ -30,8 +46,7 @@ def test_only_two_scopes_requested():
     ]
 
 
-def test_missing_credentials_are_reported_honestly(monkeypatch):
-    monkeypatch.setattr(gmail.os.path, "exists", lambda p: False)
+def test_missing_credentials_are_reported_honestly():
     client = gmail.GmailClient()
 
     with pytest.raises(gmail.GmailNotConfigured) as e:

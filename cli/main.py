@@ -155,5 +155,35 @@ def doctor():
         typer.echo("[NEXSYS] Some checks failed. Run `nexsys init` or install missing deps.")
 
 
+@app.command(name="google-auth")
+def google_auth():
+    """Вход в Google: один раз для почты и календаря.
+
+    Откроет браузер — подтвердить доступ должен человек. Система только
+    сохранит результат: свои пароли она не видит и не хранит.
+    """
+    from backend.services import google_auth as auth
+
+    state = auth.status()
+    if state["ready"]:
+        typer.echo("Google уже подключён. Повторный вход не нужен.")
+        return
+
+    if not auth.has_credentials():
+        typer.echo("Нет файла доступа.")
+        typer.echo(state["detail"])
+        typer.echo("")
+        typer.echo("Где взять: console.cloud.google.com, раздел APIs & Services, Credentials")
+        typer.echo("  1. Включить Google Calendar API и Gmail API")
+        typer.echo("  2. Create credentials, OAuth client ID, тип Desktop app")
+        typer.echo("  3. Скачать файл и положить по пути выше")
+        raise typer.Exit(code=1)
+
+    typer.echo("Открываю браузер для входа в Google...")
+    result = auth.authorize()
+    typer.echo(f"Готово. Токен сохранён: {result['token']}")
+    typer.echo("Почта и календарь теперь работают.")
+
+
 if __name__ == "__main__":
     app()

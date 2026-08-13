@@ -83,7 +83,7 @@ export default function DreamReviewScreen() {
     <div className="p-6 lg:p-8">
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white lg:text-3xl">Ночной прогон</h1>
+          <h1 className="text-2xl font-bold text-gray-100 lg:text-3xl">Ночной прогон</h1>
           <p className="mt-1 text-sm text-gray-400">
             Система разбирает прошедший день, пока ты спишь. Меняет что-либо — только с твоего согласия.
           </p>
@@ -99,7 +99,7 @@ export default function DreamReviewScreen() {
       {brief ? (
         <section className={`${CARD} mb-6`}>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="flex items-center gap-2 text-lg font-bold text-white">
+            <h2 className="flex items-center gap-2 text-lg font-bold text-gray-100">
               <Moon className="h-5 w-5 text-secondary" aria-hidden />
               Утренний бриф
             </h2>
@@ -128,7 +128,7 @@ export default function DreamReviewScreen() {
             className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
               tab === t.key
                 ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+                : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
             }`}
           >
             {t.label}
@@ -175,7 +175,7 @@ export default function DreamReviewScreen() {
                 )}
               </div>
 
-              <h3 className="text-base font-semibold text-white">{f.title}</h3>
+              <h3 className="text-base font-semibold text-gray-100">{f.title}</h3>
               {f.detail && <p className="mt-1 whitespace-pre-wrap text-sm text-gray-300">{f.detail}</p>}
 
               {f.action ? (
@@ -201,7 +201,7 @@ export default function DreamReviewScreen() {
                   <button
                     onClick={() => decide(f.finding_id, 'skip')}
                     disabled={busy === f.finding_id}
-                    className="flex cursor-pointer items-center gap-2 rounded-md border border-gray-700 px-4 py-2 text-sm text-gray-300 transition-colors duration-200 hover:border-gray-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-gray-500 disabled:opacity-50"
+                    className="flex cursor-pointer items-center gap-2 rounded-md border border-gray-700 px-4 py-2 text-sm text-gray-300 transition-colors duration-200 hover:border-gray-600 hover:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-500 disabled:opacity-50"
                   >
                     <SkipForward className="h-4 w-4" aria-hidden />
                     Пропустить

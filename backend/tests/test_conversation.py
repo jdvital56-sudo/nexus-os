@@ -196,14 +196,22 @@ async def test_personas_resolve_to_different_models(monkeypatch):
     with_provider_keys(monkeypatch)
     svc = make_service()
 
-    architect = svc._llm_for(svc.persona_manager.get_persona("Architect"))
-    philosopher = svc._llm_for(svc.persona_manager.get_persona("Philosopher"))
-    labyrinth = svc._llm_for(svc.persona_manager.get_persona("Labyrinth"))
+    # Сверяемся с настройками персоны, а не с зашитой строкой: раньше здесь
+    # стояли конкретные model-id, и тест пережил их отключение провайдером —
+    # `claude-3-opus-20240229` Anthropic отключила, а `claude-3.5-sonnet`
+    # вообще не был правильным идентификатором. Проверять надо проводку
+    # «настройка персоны → клиент», а не помнить имя модели наизусть.
+    for name in ("Architect", "Philosopher", "Labyrinth"):
+        persona = svc.persona_manager.get_persona(name)
+        client = svc._llm_for(persona)
+        assert client.model == persona["model"]
+        assert client.provider == persona["provider"]
 
-    assert architect.model == "claude-3.5-sonnet"
-    assert philosopher.model == "claude-3-opus-20240229"
-    assert labyrinth.model == "gpt-4-turbo"
-    assert architect.model != philosopher.model
+    philosopher = svc.persona_manager.get_persona("Philosopher")
+    architect = svc.persona_manager.get_persona("Architect")
+    assert philosopher["model"] != architect["model"], (
+        "Философа держим на отдельной модели: он вызывается редко и по дорогим решениям"
+    )
 
 
 @pytest.mark.asyncio
@@ -211,8 +219,11 @@ async def test_persona_system_prompt_reaches_client(monkeypatch):
     with_provider_keys(monkeypatch)
     svc = make_service()
 
-    client = svc._llm_for(svc.persona_manager.get_persona("Architect"))
-    assert "Architect" in client.system_prompt
+    persona = svc.persona_manager.get_persona("Architect")
+    client = svc._llm_for(persona)
+    # Сверяем с промптом самой персоны, а не ищем в нём её имя: развёрнутые
+    # промпты описывают работу, а не представляются («Ты Architect...»)
+    assert persona["system_prompt"] in client.system_prompt
 
 
 @pytest.mark.asyncio
@@ -461,12 +472,13 @@ async def test_persona_model_change_affects_next_message(monkeypatch):
     svc = ConversationService(semantic_dedup=False, extract_entities=False)
 
     before = svc._llm_for(svc.persona_manager.get_persona("Architect"))
-    assert before.model == "claude-3.5-sonnet"
+    assert before.model == svc.persona_manager.get_persona("Architect")["model"]
 
-    persona_store.update_persona("Architect", {"model": "claude-4-opus"})
+    persona_store.update_persona("Architect", {"model": "модель-из-теста"})
 
     after = svc._llm_for(svc.persona_manager.get_persona("Architect"))
-    assert after.model == "claude-4-opus"
+    assert after.model == "модель-из-теста"
+    assert after.model != before.model
 
 
 @pytest.mark.asyncio
@@ -495,9 +507,12 @@ async def test_system_prompt_precedes_persona_prompt(monkeypatch):
     svc = ConversationService(semantic_dedup=False, extract_entities=False)
     persona_store.set_system_prompt("ОБЩЕЕ ПРАВИЛО")
 
-    prompt = svc._llm_for(svc.persona_manager.get_persona("Architect")).system_prompt
+    persona = svc.persona_manager.get_persona("Architect")
+    prompt = svc._llm_for(persona).system_prompt
 
-    assert prompt.index("ОБЩЕЕ ПРАВИЛО") < prompt.index("Architect")
+    # Ищем сам промпт персоны, а не её имя: развёрнутые промпты описывают
+    # работу и слова «Architect» в себе не содержат
+    assert prompt.index("ОБЩЕЕ ПРАВИЛО") < prompt.index(persona["system_prompt"])
 
 
 @pytest.mark.asyncio

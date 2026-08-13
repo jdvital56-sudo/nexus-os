@@ -11,7 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from ..core.auth import get_token_dep
-from ..services import dialog_history
+from ..services import chat_log, dialog_history
+from ..services.textclean import strip_markdown
 from ..services.conversation import get_conversation_service
 
 logger = logging.getLogger(__name__)
@@ -32,9 +33,17 @@ class Message(BaseModel):
 
 
 @router.get("/history")
-def history(_=Depends(auth)):
-    """Нить разговора этого канала. Телеграмная сюда не подмешивается."""
-    return {"messages": dialog_history.recent(CHANNEL, USER_ID)}
+def history(limit: int = 100, _=Depends(auth)):
+    """Переписка этого канала целиком. Телеграмная сюда не подмешивается.
+
+    Читаем полную ленту, а не буфер для промпта: тот обрезан до 600 символов
+    на реплику, и длинные ответы обрывались на полуслове.
+    """
+    messages = [
+        {**m, "text": strip_markdown(m["text"]) if m.get("role") == "assistant" else m["text"]}
+        for m in chat_log.recent(CHANNEL, USER_ID, limit=limit)
+    ]
+    return {"messages": messages}
 
 
 @router.post("/message")
@@ -59,10 +68,14 @@ async def send(req: Message, _=Depends(auth)):
         (m.get("persona") for m in reversed(thread) if m.get("role") == "assistant"),
         "",
     )
-    return {"reply": reply, "persona": persona}
+    # Разметку не показываем: в чате она видна как мусор, а голосом
+    # читается вслух названиями символов
+    return {"reply": strip_markdown(reply), "persona": persona}
 
 
 @router.post("/reset")
 def reset(_=Depends(auth)):
     """Забыть нить разговора. Память фактов и заметки не трогаются."""
-    return {"removed": dialog_history.clear(CHANNEL, USER_ID)}
+    removed = dialog_history.clear(CHANNEL, USER_ID)
+    chat_log.clear(CHANNEL, USER_ID)
+    return {"removed": removed}

@@ -10,7 +10,7 @@ interface JarvisHudWidgetProps {
 }
 
 // Кольцо собрано слоями, как приборная шкала: неподвижная дорожка, четыре
-// бирюзовых сегмента, янтарная дуга, которая бежит по кругу всегда, и
+// стальных сегмента, светлая дуга, которая бежит по кругу всегда, и
 // внутренние риски, ползущие в обратную сторону. Когда Джарвис говорит,
 // дуга ускоряется, а кольцо и ядро мелко дрожат.
 //
@@ -18,14 +18,19 @@ interface JarvisHudWidgetProps {
 // setInterval(50ms) и перерисовывала React двадцать раз в секунду просто
 // потому, что дашборд открыт.
 
-const CYAN = '#22D3EE';
-const AMBER = '#F5B642';
+// Джарвис намеренно выпадает из египетского стиля всей системы: он не бог
+// из этой мифологии, и графит вместо бронзы показывает это глазом, без
+// подписи. Решение фаундера 13.08.2026 — не рассогласование, а замысел.
+const STEEL = '#8e979d';   // основной металл кольца
+const SPARK = '#c6ced3';   // бегущая дуга — светлее фона, но не белая
 
+// Состояние — единственное место, где допущен цвет. Он несёт смысл
+// (жив / слушает / говорит), поэтому не подчиняется графиту.
 const STATE_COLOR: Record<JarvisState, string> = {
-  ONLINE: '#34D399',
-  LISTENING: '#F472B6',
-  SPEAKING: CYAN,
-  PROCESSING: AMBER,
+  ONLINE: '#6fb38c',
+  LISTENING: '#c98fa8',
+  SPEAKING: '#7fa8c4',
+  PROCESSING: '#c2a06a',
 };
 
 const CAPTION: Record<JarvisState, [string, string]> = {
@@ -48,9 +53,10 @@ export const JarvisHudWidget: React.FC<JarvisHudWidgetProps> = ({
 }) => {
   const accent = STATE_COLOR[state];
   const lively = state !== 'ONLINE';
-  // Секунд на оборот. Быстрая дуга читается как тревога — здесь она идёт
-  // спокойно и ускоряется только когда Джарвис действительно занят
-  const orbit = state === 'SPEAKING' ? 3.4 : state === 'PROCESSING' ? 5 : lively ? 7 : 12;
+  // Секунд на оборот. Втрое медленнее прежнего: фаундер сказал, что
+  // движение «чересчур быстрое». Ускорение оставлено только там, где оно
+  // что-то значит — когда Джарвис действительно занят.
+  const orbit = state === 'SPEAKING' ? 9 : state === 'PROCESSING' ? 14 : lively ? 18 : 30;
   const arc = CIRC * (state === 'SPEAKING' ? 0.26 : 0.18);
   const [caption, subtitle] = CAPTION[state];
 
@@ -69,7 +75,7 @@ export const JarvisHudWidget: React.FC<JarvisHudWidgetProps> = ({
       >
         <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full">
           {/* Внешний тонкий обод */}
-          <circle cx="50" cy="50" r="48" fill="none" stroke={CYAN} strokeWidth="0.5" opacity="0.25" />
+          <circle cx="50" cy="50" r="48" fill="none" stroke={STEEL} strokeWidth="0.5" opacity="0.25" />
 
           {/* Сегменты шкалы — медленно против часовой */}
           <g
@@ -81,7 +87,7 @@ export const JarvisHudWidget: React.FC<JarvisHudWidgetProps> = ({
               cy="50"
               r={R}
               fill="none"
-              stroke={CYAN}
+              stroke={STEEL}
               strokeWidth="2"
               strokeDasharray={SEGMENTS}
               opacity="0.75"
@@ -94,7 +100,7 @@ export const JarvisHudWidget: React.FC<JarvisHudWidgetProps> = ({
             style={{
               transformOrigin: 'center',
               animation: `jarvis-orbit ${orbit}s linear infinite`,
-              filter: `drop-shadow(0 0 3px ${AMBER})`,
+              filter: `drop-shadow(0 0 3px ${SPARK})`,
             }}
           >
             <circle
@@ -102,7 +108,7 @@ export const JarvisHudWidget: React.FC<JarvisHudWidgetProps> = ({
               cy="50"
               r={R}
               fill="none"
-              stroke={AMBER}
+              stroke={SPARK}
               strokeWidth="2.4"
               strokeLinecap="round"
               strokeDasharray={`${arc} ${CIRC - arc}`}
@@ -114,15 +120,15 @@ export const JarvisHudWidget: React.FC<JarvisHudWidgetProps> = ({
             className="jarvis-animated"
             style={{ transformOrigin: 'center', animation: `jarvis-orbit-reverse ${orbit * 3}s linear infinite` }}
           >
-            <circle cx="50" cy="50" r="37" fill="none" stroke={CYAN} strokeWidth="0.8" strokeDasharray="1 5" opacity="0.5" />
+            <circle cx="50" cy="50" r="37" fill="none" stroke={STEEL} strokeWidth="0.8" strokeDasharray="1 5" opacity="0.5" />
           </g>
 
           {/* Скобки сверху и снизу — рамка прицела, стоит на месте */}
-          <path d="M 34 17 A 34 34 0 0 1 66 17" fill="none" stroke={CYAN} strokeWidth="1.2" opacity="0.55" />
-          <path d="M 34 83 A 34 34 0 0 0 66 83" fill="none" stroke={CYAN} strokeWidth="1.2" opacity="0.55" />
+          <path d="M 34 17 A 34 34 0 0 1 66 17" fill="none" stroke={STEEL} strokeWidth="1.2" opacity="0.55" />
+          <path d="M 34 83 A 34 34 0 0 0 66 83" fill="none" stroke={STEEL} strokeWidth="1.2" opacity="0.55" />
 
           {/* Кольцо ядра */}
-          <circle cx="50" cy="50" r="29" fill="rgba(34, 211, 238, 0.05)" stroke={CYAN} strokeWidth="0.8" opacity="0.7" />
+          <circle cx="50" cy="50" r="29" fill="rgba(142, 151, 157, 0.06)" stroke={STEEL} strokeWidth="0.8" opacity="0.7" />
         </svg>
 
         <div
@@ -130,15 +136,15 @@ export const JarvisHudWidget: React.FC<JarvisHudWidgetProps> = ({
           style={{
             width: '52%',
             height: '52%',
-            boxShadow: `0 0 ${lively ? 26 : 14}px rgba(34, 211, 238, 0.35), inset 0 0 22px rgba(34, 211, 238, 0.15)`,
+            boxShadow: `0 0 ${lively ? 26 : 14}px rgba(142, 151, 157, 0.30), inset 0 0 22px rgba(142, 151, 157, 0.14)`,
             borderRadius: '50%',
             animation: lively ? 'jarvis-breathe 2.4s ease-in-out infinite' : undefined,
             transition: 'box-shadow 300ms ease',
           }}
         >
           <span
-            className="font-mono text-[0.6rem] font-bold tracking-[0.28em] text-white"
-            style={{ textShadow: `0 0 10px ${CYAN}`, paddingLeft: '0.28em' }}
+            className="font-mono text-[0.6rem] font-bold tracking-[0.28em]"
+            style={{ color: SPARK, textShadow: `0 0 10px ${STEEL}`, paddingLeft: '0.28em' }}
           >
             J.A.R.V.I.S.
           </span>
@@ -155,7 +161,7 @@ export const JarvisHudWidget: React.FC<JarvisHudWidgetProps> = ({
       {activeModel && (
         <div
           className="mt-2 rounded-full border px-3 py-1 font-mono text-[0.6rem] tracking-wide"
-          style={{ borderColor: 'rgba(34, 211, 238, 0.3)', color: '#67E8F9', backgroundColor: 'rgba(2, 6, 23, 0.9)' }}
+          style={{ borderColor: 'rgba(142, 151, 157, 0.32)', color: '#a3abb0', backgroundColor: 'rgba(20, 23, 26, 0.9)' }}
         >
           ◈ {activeModel}
         </div>

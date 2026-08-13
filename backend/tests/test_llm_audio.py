@@ -53,3 +53,36 @@ async def test_transcription_with_key_asks_gemini(monkeypatch):
     assert result == "расшифрованный текст"
     assert seen["path"] == "/tmp/voice.ogg"
     assert "дословно" in seen["prompt"]
+
+
+# --- Ключ Gemini не подхватывался из .env (найдено 2026-08-12) ---
+
+
+def test_short_env_name_wins(monkeypatch):
+    """В .env ключ называется GEMINI_API_KEY, а код читал только
+    NEXSYS_GEMINI_API_KEY — вписанный ключ молча не работал."""
+    from backend.core.config import env_any
+
+    monkeypatch.setenv("GEMINI_API_KEY", "короткое")
+    monkeypatch.setenv("NEXSYS_GEMINI_API_KEY", "длинное")
+
+    assert env_any("GEMINI_API_KEY", "NEXSYS_GEMINI_API_KEY") == "короткое"
+
+
+def test_long_env_name_still_works(monkeypatch):
+    """Старое имя не ломаем: у кого прописано NEXSYS_GEMINI_API_KEY."""
+    from backend.core.config import env_any
+
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setenv("NEXSYS_GEMINI_API_KEY", "длинное")
+
+    assert env_any("GEMINI_API_KEY", "NEXSYS_GEMINI_API_KEY") == "длинное"
+
+
+def test_no_key_gives_empty(monkeypatch):
+    from backend.core.config import env_any
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("NEXSYS_GEMINI_API_KEY", raising=False)
+
+    assert env_any("GEMINI_API_KEY", "NEXSYS_GEMINI_API_KEY") == ""

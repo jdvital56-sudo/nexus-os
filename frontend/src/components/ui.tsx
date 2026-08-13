@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { AlertCircle } from 'lucide-react';
+import { useLang } from '../lib/i18n';
 
 // Общие блоки экранов. Раньше каждый экран нёс свои инлайн-стили, из-за
 // чего одна и та же карточка выглядела в трёх местах по-разному, а любая
@@ -12,7 +13,7 @@ export const INPUT =
 export const BTN =
   'flex cursor-pointer items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-darker transition-colors duration-200 hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-40';
 export const BTN_GHOST =
-  'flex cursor-pointer items-center gap-2 rounded-md border border-gray-800 px-3 py-2 text-sm text-gray-300 transition-colors duration-200 hover:border-gray-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-primary';
+  'flex cursor-pointer items-center gap-2 rounded-md border border-gray-800 px-3 py-2 text-sm text-gray-300 transition-colors duration-200 hover:border-gray-700 hover:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary';
 
 export function PageHeader({
   title,
@@ -26,7 +27,7 @@ export function PageHeader({
   return (
     <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
       <div>
-        <h1 className="text-2xl font-bold text-white lg:text-3xl">{title}</h1>
+        <h1 className="text-2xl font-bold text-gray-100 lg:text-3xl">{title}</h1>
         {subtitle && <p className="mt-1 max-w-2xl text-sm text-gray-400">{subtitle}</p>}
       </div>
       {action}
@@ -45,6 +46,7 @@ export function Empty({ title, hint }: { title: string; hint?: string }) {
 }
 
 export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  const { t } = useLang();
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-red-500/40 bg-red-500/10 p-4">
       <AlertCircle className="h-5 w-5 shrink-0 text-red-400" aria-hidden />
@@ -54,7 +56,7 @@ export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () =
           onClick={onRetry}
           className="ml-auto cursor-pointer text-sm text-red-100 underline focus:outline-none focus:ring-2 focus:ring-red-400"
         >
-          Повторить
+          {t('Повторить')}
         </button>
       )}
     </div>

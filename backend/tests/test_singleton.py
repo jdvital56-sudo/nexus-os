@@ -73,3 +73,27 @@ async def test_second_backend_does_not_schedule_jobs(monkeypatch):
 
     assert cadence.scheduler.running is False
     assert cadence.scheduler.get_jobs() == []
+
+
+# --- Проверка живости на Windows (найдено сторожем 2026-08-12) ---
+
+
+def test_own_process_is_alive():
+    """os.kill(pid, 0) на Windows врал: на одних номерах срабатывал, на
+    других бросал WinError 87. Из-за этого замок мог зависнуть."""
+    assert singleton._alive(os.getpid()) is True
+
+
+def test_absurd_pid_is_dead():
+    assert singleton._alive(999999) is False
+
+
+def test_nonpositive_pid_is_dead():
+    assert singleton._alive(0) is False
+    assert singleton._alive(-5) is False
+
+
+def test_liveness_never_raises():
+    """Сторож зовёт эту проверку в цикле — она не имеет права падать."""
+    for pid in (1, 4, 12345, os.getpid(), 999999):
+        assert singleton._alive(pid) in (True, False)

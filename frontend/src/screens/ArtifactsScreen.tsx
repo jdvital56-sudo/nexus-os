@@ -118,7 +118,7 @@ export default function ArtifactsScreen() {
                   onClick={() => open(a.id)}
                   className="min-w-0 cursor-pointer text-left focus:outline-none focus:ring-1 focus:ring-primary"
                 >
-                  <h3 className="font-semibold text-white">{a.description || a.filename}</h3>
+                  <h3 className="font-semibold text-gray-100">{a.description || a.filename}</h3>
                   <p className={`mt-0.5 text-xs text-gray-500 ${NUM}`}>
                     {a.filename} · {when(a.created_at)}
                     {a.source && ` · ${a.source}`}

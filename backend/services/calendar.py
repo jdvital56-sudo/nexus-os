@@ -4,6 +4,7 @@ Uses Google Calendar API v3. Requires OAuth2 credentials.
 Falls back to mock mode if credentials not configured.
 """
 import json
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -13,10 +14,14 @@ from ..core.jsonio import read_json, write_json
 CREDENTIALS_FILE = DATA_DIR / "google_credentials.json"
 TOKEN_FILE = DATA_DIR / "google_token.json"
 
+logger = logging.getLogger(__name__)
+
 
 def is_configured() -> bool:
-    """Check if Google Calendar credentials exist."""
-    return CREDENTIALS_FILE.exists() or TOKEN_FILE.exists()
+    """Готов ли календарь: вход в Google общий для почты и календаря."""
+    from . import google_auth
+
+    return google_auth.has_credentials() or google_auth.has_token()
 
 
 def get_upcoming_events(days: int = 7, max_results: int = 20) -> list[dict]:
@@ -86,26 +91,13 @@ def _format_event(event: dict) -> dict:
 
 
 def _get_credentials():
-    """Load or refresh Google OAuth2 credentials."""
+    """Учётные данные из общего входа. None — если вход не пройден."""
+    from . import google_auth
+
     try:
-        from google.oauth2.credentials import Credentials
-        from google.auth.transport.requests import Request
-    except ImportError:
+        return google_auth.load_credentials()
+    except google_auth.GoogleNotConnected:
         return None
-
-    if not TOKEN_FILE.exists():
-        return None
-
-    creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), [
-        "https://www.googleapis.com/auth/calendar.readonly",
-        "https://www.googleapis.com/auth/calendar.events",
-    ])
-
-    if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        TOKEN_FILE.write_text(creds.to_json(), encoding="utf-8")
-
-    return creds if creds.valid else None
 
 
 def _read_cached_events() -> list[dict]:
@@ -158,6 +150,61 @@ def create_event_from_task(task: dict, duration_minutes: int = 60) -> dict | Non
     }
 
     created = service.events().insert(calendarId="primary", body=event_body).execute()
+    return _format_event(created)
+
+
+class CalendarNotConnected(RuntimeError):
+    """Календарь не подключён. Причина — в тексте, а не «что-то пошло не так»."""
+
+
+def create_event(
+    summary: str,
+    start: datetime,
+    duration_minutes: int = 60,
+    description: str = "",
+) -> dict:
+    """Ставит событие на заданное время.
+
+    До этого система умела только `create_event_from_task`, а тот всегда
+    ставил встречу «сейчас» — то есть сказать «поставь на четверг в 15:00»
+    было невозможно в принципе.
+
+    Время приходит местное: человек говорит «в 15:00», имея в виду свои
+    часы, а не UTC. Отдаём Google местную зону явно.
+    """
+    if not summary or not summary.strip():
+        raise ValueError("У события должно быть название")
+    if not is_configured():
+        raise CalendarNotConnected(
+            "Google Calendar не подключён: нет файла доступа. "
+            "Нужен google_credentials.json в папке данных."
+        )
+
+    try:
+        from googleapiclient.discovery import build
+    except ImportError as e:
+        raise CalendarNotConnected("Не установлен google-api-python-client") from e
+
+    creds = _get_credentials()
+    if not creds:
+        raise CalendarNotConnected(
+            "Файл доступа есть, но авторизация не пройдена: нужен вход в Google"
+        )
+
+    local_zone = datetime.now().astimezone().tzname() or "UTC"
+    body = {
+        "summary": summary.strip(),
+        "description": description,
+        "start": {"dateTime": start.isoformat(), "timeZone": local_zone},
+        "end": {
+            "dateTime": (start + timedelta(minutes=duration_minutes)).isoformat(),
+            "timeZone": local_zone,
+        },
+    }
+
+    service = build("calendar", "v3", credentials=creds)
+    created = service.events().insert(calendarId="primary", body=body).execute()
+    logger.info("Событие создано: %s на %s", summary, start.isoformat())
     return _format_event(created)
 
 
