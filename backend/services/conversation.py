@@ -163,8 +163,12 @@ class ConversationService:
         """
         from . import tools as tools_svc
 
+        # Проверяем ЗДЕСЬ, не только внутри chat_with_tools: её запасной путь
+        # дёргает llm.chat() — метод, которого нет ни у Anthropic/Gemini
+        # веток, ни у тестовых дублёров LLM, только generate_response().
+        # Дойти до неё с такой моделью — значит упасть чуть позже и непонятнее.
         available = tools_svc.tools_for(persona_name)
-        if not available:
+        if not available or not tools_svc.supports_tools(llm):
             return await llm.generate_response(text, context=context, kind=budget.INTERACTIVE)
 
         # Собираем запрос ровно как generate_response, чтобы ответы с

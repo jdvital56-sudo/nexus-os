@@ -47,11 +47,21 @@ def tools_for(persona_name: str) -> list[dict[str, Any]]:
     return []
 
 
-def _supports_tools(llm: LLMService) -> bool:
+def supports_tools(llm: LLMService) -> bool:
+    """Публичная — вызывающая сторона (`conversation.py`) должна проверить
+    ДО того, как решать, идти ли через `chat_with_tools` вообще: запасной
+    путь внутри неё дёргает `llm.chat()`, а не `llm.generate_response()`,
+    который только и знают тестовые дублёры LLM. Если сюда дойти с
+    дублёром, всё равно упадёт — просто на шаг позже и с менее понятной
+    ошибкой."""
     # Anthropic говорит на своём формате инструментов, Gemini и Ollama — на
     # третьем. Пока поддерживаем только OpenAI-совместимых, чтобы не делать
     # три ветки ради функции, которой ещё никто не пользовался.
-    return llm.provider in ("openai", "deepseek")
+    #
+    # getattr, а не llm.provider: у тестовых дублёров LLM этого поля нет
+    # вовсе, и у них нет своего tool-calling — тот же случай, что и
+    # Anthropic/Gemini, а не повод падать.
+    return getattr(llm, "provider", None) in ("openai", "deepseek")
 
 
 async def _execute(name: str, raw_arguments: str) -> str:
@@ -82,7 +92,7 @@ async def chat_with_tools(
     Без инструментов или на провайдере без их поддержки просто уходит в
     обычный `chat()` — вызывающему не нужно об этом думать.
     """
-    if not tools or not _supports_tools(llm):
+    if not tools or not supports_tools(llm):
         return await llm.chat(messages, temperature=temperature, max_tokens=max_tokens, kind=kind)
 
     within_budget = budget.check(kind)
