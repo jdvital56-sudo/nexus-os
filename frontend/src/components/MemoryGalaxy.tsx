@@ -343,11 +343,15 @@ export default function MemoryGalaxy({ nodes, links, onSelect, onOpen, selectedI
 
         // Одна точка на нить: две читались как поток данных, а тут
         // спокойный обмен. Идёт всегда — она и показывает, что связь живая
-        const speed = 0.03 + Math.min(l.weight, 4) * 0.012;
+        // Вдвое медленнее прежнего: фаундер сказал, что точки бегали
+        // «чересчур» быстро. Нить проходится примерно за минуту — связь
+        // видно как живую, но глаз за ней не гоняется.
+        const speed = 0.015 + Math.min(l.weight, 4) * 0.006;
         const bright = focusSet ? (lit ? 1 : 0.06) : 0.3 + 0.7 * Math.pow((a.depth + b.depth) / 2, 3);
         const prog = (t * speed + (li % 11) / 11) % 1;
         ctx.globalAlpha = Math.min(0.95, 0.2 + bright * 0.75);
-        ctx.fillStyle = lit ? `rgb(${SOLAR})` : '#ffffff';
+        // Тёплый песок вместо чистого белого — белый выбивался из палитры
+        ctx.fillStyle = lit ? `rgb(${SOLAR})` : '#cbbfa0';
         ctx.beginPath();
         ctx.arc(
           a.sx + (b.sx - a.sx) * prog,
@@ -392,7 +396,7 @@ export default function MemoryGalaxy({ nodes, links, onSelect, onOpen, selectedI
 
         if (heat > 0.45) {
           ctx.globalAlpha = 0.9 * heat;
-          ctx.fillStyle = '#ffffff';
+          ctx.fillStyle = '#e0d6bb';
           ctx.beginPath();
           ctx.arc(p.sx, p.sy, p.sr * 0.4, 0, 7);
           ctx.fill();
@@ -409,9 +413,9 @@ export default function MemoryGalaxy({ nodes, links, onSelect, onOpen, selectedI
           const text = p.label.slice(0, 34);
           // Тёмная подложка: поверх светящегося облака белый текст пропадал
           const w = ctx.measureText(text).width;
-          ctx.fillStyle = 'rgba(2, 6, 23, 0.75)';
+          ctx.fillStyle = 'rgba(27, 25, 21, 0.78)';
           ctx.fillRect(p.sx - w / 2 - 5, p.sy + p.sr + 4, w + 10, 16);
-          ctx.fillStyle = '#E2E8F0';
+          ctx.fillStyle = '#cbbfa0';
           ctx.fillText(text, p.sx, p.sy + p.sr + 16);
         }
         ctx.globalAlpha = 1;

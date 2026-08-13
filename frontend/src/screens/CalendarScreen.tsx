@@ -77,7 +77,7 @@ export default function CalendarScreen() {
                   className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
                     days === r.days
                       ? 'border-primary/40 bg-primary/10 text-primary'
-                      : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+                      : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
                   }`}
                 >
                   {r.label}
@@ -130,7 +130,7 @@ export default function CalendarScreen() {
                 <article key={ev.id ?? i} className={`${CARD} flex flex-wrap items-start gap-3`}>
                   <span className={`w-14 shrink-0 text-sm text-gray-300 ${NUM}`}>{timeLabel(ev)}</span>
                   <div className="min-w-0 flex-1">
-                    <h3 className="font-semibold text-white">{ev.summary ?? ev.title ?? 'Без названия'}</h3>
+                    <h3 className="font-semibold text-gray-100">{ev.summary ?? ev.title ?? 'Без названия'}</h3>
                     {ev.location && <p className="mt-0.5 text-xs text-gray-500">{ev.location}</p>}
                     {ev.description && (
                       <p className="mt-1 line-clamp-2 text-sm text-gray-400">{ev.description}</p>

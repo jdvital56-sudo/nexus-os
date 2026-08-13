@@ -35,7 +35,7 @@ export default function SettingsScreen() {
   if (error) {
     return (
       <div className="p-6 lg:p-8">
-        <h1 className="mb-4 text-2xl font-bold text-white">{t('Настройки')}</h1>
+        <h1 className="mb-4 text-2xl font-bold text-gray-100">{t('Настройки')}</h1>
         <div className="flex items-center gap-3 rounded-lg border border-red-500/40 bg-red-500/10 p-5 text-sm text-red-100">
           <AlertCircle className="h-5 w-5 shrink-0 text-red-400" aria-hidden />
           {error}
@@ -53,7 +53,7 @@ export default function SettingsScreen() {
   return (
     <div className="p-6 lg:p-8">
       <header className="mb-6">
-        <h1 className="text-2xl font-bold text-white lg:text-3xl">{t('Настройки')}</h1>
+        <h1 className="text-2xl font-bold text-gray-100 lg:text-3xl">{t('Настройки')}</h1>
         <p className="mt-1 text-sm text-gray-400">
           {t('Что система читает при запуске. Меняется в файле .env — отсюда не редактируется намеренно: ключи не должны проходить через браузер.')}
         </p>
@@ -61,7 +61,7 @@ export default function SettingsScreen() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className={CARD}>
-          <h2 className="mb-3 text-lg font-bold text-white">{t('Где что лежит')}</h2>
+          <h2 className="mb-3 text-lg font-bold text-gray-100">{t('Где что лежит')}</h2>
           <Row label={t('Версия')} value={runtime.version} />
           <Row label={t('Адрес API')} value={runtime.api_url} />
           <Row label={t('Папка данных')} value={runtime.data_dir} />
@@ -79,7 +79,7 @@ export default function SettingsScreen() {
         </section>
 
         <section className={CARD}>
-          <h2 className="mb-3 text-lg font-bold text-white">{t('Пределы и расписание')}</h2>
+          <h2 className="mb-3 text-lg font-bold text-gray-100">{t('Пределы и расписание')}</h2>
           <Row label={t('Дневной бюджет на модели')} value={money(runtime.daily_budget_usd)} />
           <Row label={t('Потолок ответа')} value={`${runtime.max_reply_tokens} ${t('токенов')}`} />
           <Row label="Ночной прогон" value={dream.cron} hint="Формат cron, читается из NIGHT_ANALYSIS_CRON" />
@@ -100,7 +100,7 @@ export default function SettingsScreen() {
         </section>
 
         <section className={`${CARD} lg:col-span-2`}>
-          <h2 className="mb-3 text-lg font-bold text-white">{t('Что подключено')}</h2>
+          <h2 className="mb-3 text-lg font-bold text-gray-100">{t('Что подключено')}</h2>
           <div className="grid gap-2 sm:grid-cols-2">
             {status.integrations.map((item) => (
               <div key={item.key} className="flex items-start gap-3 rounded-md bg-darker p-3">

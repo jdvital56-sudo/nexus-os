@@ -141,13 +141,13 @@ export default function HomeScreen() {
   if (error) {
     return (
       <div className="p-8">
-        <h1 className="mb-2 text-3xl font-bold text-white">Дашборд</h1>
+        <h1 className="mb-2 text-3xl font-bold text-gray-100">Дашборд</h1>
         <div className="mt-6 flex items-center gap-3 rounded-lg border border-red-500/40 bg-red-500/10 p-5">
           <AlertCircle className="h-5 w-5 shrink-0 text-red-400" />
           <span className="text-red-100">{error}</span>
           <button
             onClick={load}
-            className="ml-auto cursor-pointer rounded px-3 py-1 text-sm text-red-100 underline transition-colors duration-200 hover:text-white focus:outline-none focus:ring-2 focus:ring-red-400"
+            className="ml-auto cursor-pointer rounded px-3 py-1 text-sm text-red-100 underline transition-colors duration-200 hover:text-gray-100 focus:outline-none focus:ring-2 focus:ring-red-400"
           >
             Повторить
           </button>
@@ -209,7 +209,7 @@ export default function HomeScreen() {
             className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-wait disabled:opacity-60 ${
               autopilot.enabled
                 ? 'border-amber-500/40 text-amber-200 hover:border-amber-400'
-                : 'border-gray-700 text-gray-300 hover:border-gray-600 hover:text-white'
+                : 'border-gray-700 text-gray-300 hover:border-gray-600 hover:text-gray-100'
             }`}
           >
             {switching ? 'Переключаю…' : autopilot.enabled ? 'Выключить' : 'Включить'}
@@ -228,7 +228,7 @@ export default function HomeScreen() {
     <div className="p-6 lg:p-8">
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white lg:text-3xl">Дашборд</h1>
+          <h1 className="text-2xl font-bold text-gray-100 lg:text-3xl">Дашборд</h1>
           <p className="mt-1 text-sm text-gray-400">Что система знает о себе прямо сейчас</p>
         </div>
         <div className="flex items-center gap-4">
@@ -238,7 +238,7 @@ export default function HomeScreen() {
           <button
             onClick={load}
             title="Перезапросить данные с бэкенда. Автопилот это не запускает."
-            className="flex cursor-pointer items-center gap-2 rounded-md border border-gray-800 px-3 py-2 text-sm text-gray-300 transition-colors duration-200 hover:border-gray-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+            className="flex cursor-pointer items-center gap-2 rounded-md border border-gray-800 px-3 py-2 text-sm text-gray-300 transition-colors duration-200 hover:border-gray-700 hover:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary"
           >
             <RefreshCw
               className={`h-4 w-4 ${loading ? 'animate-spin motion-reduce:animate-none' : ''}`}
@@ -274,7 +274,7 @@ export default function HomeScreen() {
                 </span>
                 <h3 className="text-sm text-gray-400">{card.title}</h3>
               </div>
-              <p className={`mt-3 text-2xl font-bold text-white ${NUM}`}>{card.value}</p>
+              <p className={`mt-3 text-2xl font-bold text-gray-100 ${NUM}`}>{card.value}</p>
               <p className="mt-1 text-xs text-gray-400">{card.hint}</p>
               {'action' in card && card.action}
             </article>
@@ -284,7 +284,7 @@ export default function HomeScreen() {
 
       <section className={`${CARD} mb-6`}>
         <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-lg font-bold text-white">Траты на модели, 14 дней</h2>
+          <h2 className="text-lg font-bold text-gray-100">Траты на модели, 14 дней</h2>
           <span className="text-sm text-gray-400">
             сегодня <span className={`${NUM} text-gray-100`}>{money(spend.spent_usd)}</span> из{' '}
             <span className={NUM}>{money(spend.budget_usd)}</span>
@@ -312,7 +312,7 @@ export default function HomeScreen() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <section className={CARD}>
-          <h2 className="mb-4 text-lg font-bold text-white">Что подключено</h2>
+          <h2 className="mb-4 text-lg font-bold text-gray-100">Что подключено</h2>
           <ul className="space-y-2">
             {integrations.map((item) => (
               <li key={item.key} className="flex items-start gap-3 rounded-md bg-darker p-3">
@@ -342,7 +342,7 @@ export default function HomeScreen() {
 
         <div className="space-y-6">
           <section className={CARD}>
-            <h2 className="mb-3 text-lg font-bold text-white">Ночной прогон</h2>
+            <h2 className="mb-3 text-lg font-bold text-gray-100">Ночной прогон</h2>
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between gap-4">
                 <dt className="text-gray-400">Расписание</dt>
@@ -368,7 +368,7 @@ export default function HomeScreen() {
           </section>
 
           <section className={CARD}>
-            <h2 className="mb-3 text-lg font-bold text-white">Ближайшие списания</h2>
+            <h2 className="mb-3 text-lg font-bold text-gray-100">Ближайшие списания</h2>
             {wallet.due_soon.length === 0 ? (
               <p className="text-sm text-gray-400">В ближайшие дни ничего не списывается.</p>
             ) : (

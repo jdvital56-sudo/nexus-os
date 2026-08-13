@@ -117,7 +117,7 @@ export default function MemoryScreen() {
                 className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
                   form.layer === key
                     ? 'border-primary/40 bg-primary/10 text-primary'
-                    : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+                    : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
                 }`}
                 title={l.hint}
               >
@@ -140,7 +140,7 @@ export default function MemoryScreen() {
           className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
             layer === ''
               ? 'border-primary/40 bg-primary/10 text-primary'
-              : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+              : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
           }`}
         >
           Все слои
@@ -153,7 +153,7 @@ export default function MemoryScreen() {
             className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
               layer === key
                 ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+                : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
             }`}
           >
             {l.label}

@@ -81,7 +81,7 @@ export default function AgentsScreen() {
           return (
             <article key={a.id} className={CARD}>
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="font-semibold text-white">{a.name}</h3>
+                <h3 className="font-semibold text-gray-100">{a.name}</h3>
                 <div className="flex items-center gap-2">
                   <Pill text={role.label} tone={role.tone} />
                   <Pill text={status.label} tone={status.tone} />

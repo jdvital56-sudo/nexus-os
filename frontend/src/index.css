@@ -2,15 +2,38 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Египетская тема «Спокойная». Значения дублируют tailwind.config.js —
+   там их берёт разметка, здесь ими пользуется всё, что мимо Tailwind:
+   холст графа, кольцо Джарвиса, скроллбар. */
+:root {
+  --basalt: #1b1915;
+  --panel: #232019;
+  --panel-2: #2a271e;
+  --line: #3c372c;
+  --bronze: #a8925f;
+  --bronze-bright: #c2ac7c;
+  --lapis: #4d729f;
+  --torch: #d98c52;
+  --teal: #5eb8ac;
+  --ink: #cbbfa0;
+  --ink-dim: #948a72;
+  --ink-faint: #6e6553;
+
+  /* Джарвис — не из этой мифологии, поэтому свои цвета */
+  --jarvis-bg: #14171a;
+  --jarvis-line: #43494d;
+  --jarvis-dim: #7c8287;
+  --jarvis-bright: #a3abb0;
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: 'Avenir Next', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Roboto', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #020617;
-  color: #ffffff;
+  background-color: var(--basalt);
+  color: var(--ink);
 }
 
 code {
@@ -60,14 +83,14 @@ code {
 }
 
 ::-webkit-scrollbar-track {
-  background: #0F172A;
+  background: var(--panel);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: var(--line);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: var(--ink-faint);
 }

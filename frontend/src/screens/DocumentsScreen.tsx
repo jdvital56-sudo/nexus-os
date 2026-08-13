@@ -125,7 +125,7 @@ export default function DocumentsScreen() {
                 className="w-full cursor-pointer text-left focus:outline-none focus:ring-1 focus:ring-primary"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <h3 className="font-semibold text-white">{d.title}</h3>
+                  <h3 className="font-semibold text-gray-100">{d.title}</h3>
                   <div className="flex shrink-0 items-center gap-2">
                     {d.source?.startsWith('obsidian:') && <Pill text="из Obsidian" tone="violet" />}
                     <Pill text={d.doc_type ?? 'текст'} />

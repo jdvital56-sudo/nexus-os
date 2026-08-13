@@ -63,3 +63,9 @@ Thumbs.db
 # Dependencies / envs
 frontend/node_modules/
 .venv/
+
+# Секреты Google — НИКОГДА не коммитить
+credentials.json
+client_secret_*.json
+gmail_token.json
+google_token.json

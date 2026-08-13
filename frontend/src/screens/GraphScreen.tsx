@@ -133,7 +133,7 @@ export default function GraphScreen() {
   if (map.nodes.length === 0) {
     return (
       <div>
-        <h1 className="text-2xl font-bold text-white">Второй мозг</h1>
+        <h1 className="text-2xl font-bold text-gray-100">Второй мозг</h1>
         <div className="mt-6 rounded-lg border border-gray-800 bg-dark p-10 text-center">
           <p className="text-gray-300">Граф пока пуст.</p>
           <p className="mt-2 text-sm text-gray-400">
@@ -163,7 +163,7 @@ export default function GraphScreen() {
 
       {/* Легенда — она же фильтр по типам */}
       <div className="pointer-events-auto absolute left-6 top-6 w-64 rounded-lg border border-gray-800 bg-dark/85 p-4 backdrop-blur">
-        <h2 className="mb-1 text-sm font-bold tracking-wide text-white">Второй мозг</h2>
+        <h2 className="mb-1 text-sm font-bold tracking-wide text-gray-100">Второй мозг</h2>
         <p className="mb-3 text-xs text-gray-400">
           показано {galaxyNodes.length} из {map.stats.nodes} · {linksWord(map.stats.edges)}
         </p>
@@ -254,11 +254,11 @@ export default function GraphScreen() {
               >
                 {TYPE_LABELS[selected.node_type] ?? selected.node_type}
               </span>
-              <h3 className="break-words text-lg font-bold text-white">{selected.label}</h3>
+              <h3 className="break-words text-lg font-bold text-gray-100">{selected.label}</h3>
             </div>
             <button
               onClick={() => setSelectedId(null)}
-              className="cursor-pointer rounded px-2 text-gray-400 transition-colors duration-200 hover:text-white focus:outline-none focus:ring-1 focus:ring-primary"
+              className="cursor-pointer rounded px-2 text-gray-400 transition-colors duration-200 hover:text-gray-100 focus:outline-none focus:ring-1 focus:ring-primary"
               aria-label="Закрыть"
             >
               ✕

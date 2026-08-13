@@ -92,7 +92,7 @@ export default function TasksScreen() {
                 className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
                   form.priority === key
                     ? 'border-primary/40 bg-primary/10 text-primary'
-                    : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-white'
+                    : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
                 }`}
               >
                 {p.label}
@@ -124,7 +124,7 @@ export default function TasksScreen() {
           return (
             <article key={t.id} className={`${CARD} border-l-4 ${status.border}`}>
               <div className="flex flex-wrap items-start justify-between gap-2">
-                <h3 className="font-semibold text-white">{t.title}</h3>
+                <h3 className="font-semibold text-gray-100">{t.title}</h3>
                 <div className="flex shrink-0 items-center gap-2">
                   <Pill text={status.label} tone={status.tone} />
                   <Pill text={priority.label} tone={priority.tone} />

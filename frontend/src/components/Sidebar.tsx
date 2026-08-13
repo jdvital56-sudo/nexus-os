@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useLang } from '../lib/i18n';
+import { TABS } from '../lib/pantheon';
 import { 
   LayoutDashboard, 
   Brain, 
@@ -41,18 +42,66 @@ const menuItems = [
   { path: '/settings', label: 'Настройки', icon: Settings },
 ];
 
+// Египетские иероглифы для двух богов и латинская J для Джарвиса —
+// разница видна ещё до того, как прочитаешь подпись.
+const TAB_GLYPH: Record<string, string> = {
+  thoth: '𓅝',   // ибис — Тот
+  anubis: '𓃣',  // шакал — Анубис
+  jarvis: 'J',
+};
+
 export default function Sidebar() {
   const location = useLocation();
   const { lang, setLang, t } = useLang();
 
   return (
-    <aside className="w-64 bg-darker border-r border-gray-800 h-screen fixed left-0 top-0 overflow-y-auto">
+    // Колонка, а не absolute-подвал: вкладки агентов удлинили меню, и
+    // прижатый к низу блок языка начинал наезжать на последние пункты.
+    <aside className="fixed left-0 top-0 flex h-screen w-64 flex-col overflow-y-auto border-r border-gray-800 bg-darker">
       <div className="p-6">
-        <h1 className="text-2xl font-bold text-primary">Nexus OS</h1>
-        <p className="text-xs text-gray-500 mt-1">{t('Личная операционная система')}</p>
+        <h1 className="font-display text-2xl text-primary-bright">Nexus OS</h1>
+        <p className="mt-1 text-xs uppercase tracking-[0.1em] text-gray-600">
+          {t('Личная операционная система')}
+        </p>
       </div>
-      
-      <nav className="mt-6">
+
+      {/* Три вкладки агентов — три разные вещи в системе, не синонимы.
+          Джарвис оформлен графитом: он единственный не из египетской
+          мифологии, и это видно глазом, а не только по подписи. */}
+      <div className="px-3">
+        <p className="mb-2 px-2 text-[0.62rem] uppercase tracking-[0.14em] text-gray-600">
+          {t('Агенты')}
+        </p>
+        {TABS.map((tab) => (
+          <div
+            key={tab.key}
+            className={`mb-1.5 flex items-start gap-2 rounded-md border px-2 py-1.5 ${
+              tab.egyptian
+                ? 'border-gray-800 text-primary-bright'
+                : 'border-jarvis-line bg-jarvis-panel/40 text-jarvis-bright'
+            }`}
+          >
+            <span
+              className={`grid h-6 w-6 shrink-0 place-items-center rounded border font-display text-xs ${
+                tab.egyptian
+                  ? 'border-gray-800 bg-primary/10'
+                  : 'border-jarvis-line bg-jarvis-line/25'
+              }`}
+              aria-hidden
+            >
+              {TAB_GLYPH[tab.key] ?? tab.title[0]}
+            </span>
+            <span className="min-w-0">
+              <span className="block text-sm leading-tight">{t(tab.title)}</span>
+              <span className="mt-0.5 block text-[0.68rem] leading-snug text-gray-600">
+                {t(tab.duty)}
+              </span>
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <nav className="mt-4">
         {menuItems.map((item) => {
           const Icon = item.icon;
           const isActive = location.pathname === item.path;
@@ -64,7 +113,7 @@ export default function Sidebar() {
               className={`flex items-center px-6 py-3 text-sm transition-colors ${
                 isActive
                   ? 'bg-primary/10 text-primary border-r-2 border-primary'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                  : 'text-gray-400 hover:text-gray-100 hover:bg-gray-800'
               }`}
             >
               <Icon className="w-5 h-5 mr-3" />
@@ -74,14 +123,14 @@ export default function Sidebar() {
         })}
       </nav>
       
-      <div className="absolute bottom-0 left-0 right-0 border-t border-gray-800 p-6">
+      <div className="mt-auto border-t border-gray-800 p-6">
         <div className="mb-3 flex gap-1" title={t('Язык интерфейса')}>
           {(['ru', 'en'] as const).map((code) => (
             <button
               key={code}
               onClick={() => setLang(code)}
               className={`cursor-pointer rounded px-2 py-1 text-xs uppercase transition-colors duration-200 focus:outline-none focus:ring-1 focus:ring-primary ${
-                lang === code ? 'bg-primary/10 text-primary' : 'text-gray-500 hover:text-white'
+                lang === code ? 'bg-primary/10 text-primary' : 'text-gray-500 hover:text-gray-100'
               }`}
             >
               {code}
