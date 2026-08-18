@@ -325,8 +325,18 @@ class HermesAgent:
             logger.error("Telegram bot token not configured. Set TELEGRAM_BOT_TOKEN in .env")
             return
 
+        # Второй экземпляр молча выходит, а не дерётся с первым за
+        # getUpdates — Telegram разрешает только один активный опрос на
+        # токен, и без этой проверки оба падали с Conflict (18.08.2026:
+        # так столкнулись наблюдатель в start_all.ps1 и ручной запуск).
+        from backend.core import singleton
+
+        if not singleton.acquire_bot_lock():
+            logger.warning("Другой экземпляр Гермеса уже слушает Telegram — этот выходит.")
+            return
+
         self.application = Application.builder().token(self.bot_token).build()
-        
+
         # Add handlers
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
@@ -337,9 +347,12 @@ class HermesAgent:
         self.application.add_handler(CommandHandler("reset", self.reset_command))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         self.application.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
-        
+
         logger.info("Hermes Agent started. Listening for messages...")
-        self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        try:
+            self.application.run_polling(allowed_updates=Update.ALL_TYPES)
+        finally:
+            singleton.release_bot_lock()
 
 
 def main():

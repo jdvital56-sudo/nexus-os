@@ -79,6 +79,7 @@ def temp_data_dir(tmp_path, monkeypatch):
 
     import backend.core.singleton as singleton_mod
     monkeypatch.setattr(singleton_mod, "LOCK_FILE", tmp_path / "scheduler.lock")
+    monkeypatch.setattr(singleton_mod, "BOT_LOCK_FILE", tmp_path / "hermes_bot.lock")
 
     # Боевые ключи лежат в переменных окружения машины. Без этой заглушки
     # тесты ходили бы в реальные API за реальные деньги.

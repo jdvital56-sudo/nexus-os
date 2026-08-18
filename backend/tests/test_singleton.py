@@ -97,3 +97,46 @@ def test_liveness_never_raises():
     """Сторож зовёт эту проверку в цикле — она не имеет права падать."""
     for pid in (1, 4, 12345, os.getpid(), 999999):
         assert singleton._alive(pid) in (True, False)
+
+
+# --- Замок бота: свой файл, не тот же, что у расписания (найдено 18.08.2026) ---
+
+
+def test_bot_lock_is_a_different_file_from_scheduler_lock():
+    """Гермес и расписание — разные процессы, им нельзя делить один замок."""
+    assert singleton.BOT_LOCK_FILE != singleton.LOCK_FILE
+
+
+def test_bot_lock_does_not_touch_the_scheduler_lock():
+    assert singleton.acquire("dream_cadence") is True
+    assert singleton.acquire_bot_lock() is True
+
+    assert singleton.holder_pid() == os.getpid()
+    assert singleton.bot_holder_pid() == os.getpid()
+
+
+def test_second_bot_instance_is_refused(monkeypatch):
+    """Второй Гермес выходит молча, а не дерётся с первым за getUpdates."""
+    from backend.core.jsonio import write_json
+
+    write_json(singleton.BOT_LOCK_FILE, {"pid": 999999, "name": "hermes_bot"})
+    monkeypatch.setattr(singleton, "_alive", lambda pid: True)
+
+    assert singleton.acquire_bot_lock() is False
+
+
+def test_dead_bot_lock_is_taken_over(monkeypatch):
+    from backend.core.jsonio import write_json
+
+    write_json(singleton.BOT_LOCK_FILE, {"pid": 999999, "name": "hermes_bot"})
+    monkeypatch.setattr(singleton, "_alive", lambda pid: False)
+
+    assert singleton.acquire_bot_lock() is True
+    assert singleton.bot_holder_pid() == os.getpid()
+
+
+def test_bot_lock_release_frees_it():
+    singleton.acquire_bot_lock()
+    singleton.release_bot_lock()
+
+    assert singleton.bot_holder_pid() is None
