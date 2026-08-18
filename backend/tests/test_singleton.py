@@ -140,3 +140,39 @@ def test_bot_lock_release_frees_it():
     singleton.release_bot_lock()
 
     assert singleton.bot_holder_pid() is None
+
+
+def test_truly_simultaneous_acquires_only_let_one_through(monkeypatch):
+    """18.08.2026: read-then-write давал гонку — два процесса, стартовавшие
+    в одну секунду, оба читали пустой файл до того, как другой успевал его
+    записать, и оба решали, что они первые. Гоняем по-настоящему параллельно
+    (не по очереди), чтобы доказать, что атомарное создание файла это
+    закрывает, а не полагаться на то, что тест угадал тайминг.
+
+    Потоки внутри одного теста делят один os.getpid() — значит без подмены
+    каждый второй счёл бы себя «уже держащим свой же замок». Даём каждому
+    потоку свой фальшивый pid, как будто это разные процессы."""
+    import threading
+
+    def fake_getpid():
+        # id() потока как фальшивый номер процесса — разный на каждый поток,
+        # реальный os.getpid() не участвует, поэтому конфликт не с самим собой
+        return threading.get_ident() % 100000 + 1
+
+    monkeypatch.setattr(singleton.os, "getpid", fake_getpid)
+    monkeypatch.setattr(singleton, "_alive", lambda pid: True)
+
+    results = []
+    barrier = threading.Barrier(8)
+
+    def attempt():
+        barrier.wait()  # все восемь стартуют в один момент, не по очереди
+        results.append(singleton._acquire_at(singleton.LOCK_FILE, "race"))
+
+    threads = [threading.Thread(target=attempt) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert results.count(True) == 1
