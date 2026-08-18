@@ -7,6 +7,7 @@ Supports:
 - Google Gemini
 - Any OpenAI-compatible API
 """
+import asyncio
 import json
 import httpx
 import logging
@@ -208,21 +209,42 @@ class LLMService:
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            try:
-                response = await client.post(
-                    f"{url}?key={self.gemini_api_key}",
-                    headers=headers,
-                    json=payload
-                )
-                response.raise_for_status()
-                data = response.json()
+        # Найдено 18.08.2026: голосовые в Telegram падали на честном 503 от
+        # Gemini — сервер Google временно перегружен, не наша конфигурация,
+        # не ключ. Без повтора один такой сбой выглядел для фаундера как
+        # «бот больше не слышит голосовые». 5xx — временная перегрузка,
+        # повторяем с паузой; 4xx (плохой ключ, неверный запрос) повтор не
+        # починит — падаем сразу, не тратим секунды впустую.
+        last_error: Exception | None = None
+        for attempt in range(3):
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                try:
+                    response = await client.post(
+                        f"{url}?key={self.gemini_api_key}",
+                        headers=headers,
+                        json=payload
+                    )
+                    response.raise_for_status()
+                    data = response.json()
 
-                content = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                return content
-            except Exception as e:
-                logger.error(f"Gemini audio processing failed: {e}")
-                raise
+                    content = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                    return content
+                except httpx.HTTPStatusError as e:
+                    last_error = e
+                    if e.response.status_code < 500 or attempt == 2:
+                        logger.error(f"Gemini audio processing failed: {e}")
+                        raise
+                    wait = 2 ** attempt  # 1с, потом 2с
+                    logger.warning(
+                        "Gemini audio: %s, повтор через %dс (попытка %d/3)",
+                        e, wait, attempt + 2,
+                    )
+                    await asyncio.sleep(wait)
+                except Exception as e:
+                    logger.error(f"Gemini audio processing failed: {e}")
+                    raise
+
+        raise last_error  # недостижимо практически, но не оставляем None
     
     async def generate_response(
         self,
