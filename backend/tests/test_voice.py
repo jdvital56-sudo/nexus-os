@@ -8,6 +8,23 @@ import pytest
 from backend.services import tts
 
 
+class _FakeCommunicate:
+    """Подменяет edge_tts.Communicate — тесты не должны реально стучаться
+    в сервис Microsoft за звуком."""
+
+    def __init__(self, text, voice, rate="+0%"):
+        self.text = text
+        self.voice = voice
+        self.rate = rate
+
+    async def stream(self):
+        # WordBoundary вперемешку с audio — как реально отдаёт edge-tts,
+        # stream_chunks() обязан пропускать всё, что не "audio"
+        yield {"type": "WordBoundary", "text": "привет", "offset": 0, "duration": 0.1}
+        yield {"type": "audio", "data": b"chunk1"}
+        yield {"type": "audio", "data": b"chunk2"}
+
+
 def test_voice_is_off_by_default(monkeypatch):
     """Голос стоит денег или трафика — включает его человек, не система."""
     monkeypatch.delenv("NEXUS_TTS_ENGINE", raising=False)
@@ -230,6 +247,133 @@ async def test_omnivoice_synthesize_when_server_is_down(monkeypatch):
         await tts.synthesize("привет")
 
     assert "start_all.ps1" in str(e.value)
+
+
+# --- Потоковая озвучка /say-stream (19.08.2026, найдено фаундером вживую:
+# пауза перед голосовым ответом доходила до нескольких секунд, потому что
+# /say ждала синтеза всего файла целиком) ---
+
+
+def test_prepare_edge_stream_rejects_empty_text(monkeypatch):
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "edge")
+
+    with pytest.raises(ValueError):
+        tts.prepare_edge_stream("   ")
+
+
+def test_prepare_edge_stream_requires_edge_engine(monkeypatch):
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "omnivoice")
+
+    with pytest.raises(tts.VoiceUnavailable):
+        tts.prepare_edge_stream("привет")
+
+
+def test_prepare_edge_stream_off_by_default(monkeypatch):
+    monkeypatch.delenv("NEXUS_TTS_ENGINE", raising=False)
+
+    with pytest.raises(tts.VoiceUnavailable):
+        tts.prepare_edge_stream("привет")
+
+
+def test_prepare_edge_stream_clips_long_text(monkeypatch):
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "edge")
+    monkeypatch.setenv("NEXUS_TTS_MAX_CHARS", "20")
+    import edge_tts
+
+    monkeypatch.setattr(edge_tts, "Communicate", _FakeCommunicate)
+
+    communicate = tts.prepare_edge_stream("слово " * 20)
+
+    assert len(communicate.text) <= 21
+    assert communicate.text.endswith("…")
+
+
+@pytest.mark.asyncio
+async def test_stream_chunks_yields_only_audio_bytes():
+    """WordBoundary и подобные служебные куски — не звук, их нельзя
+    отправлять браузеру как есть, он попытается их проиграть."""
+    communicate = _FakeCommunicate("текст", "voice")
+
+    pieces = [c async for c in tts.stream_chunks(communicate)]
+
+    assert pieces == [b"chunk1", b"chunk2"]
+
+
+def test_say_stream_returns_400_for_empty_text(client, monkeypatch):
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "edge")
+
+    r = client.get("/api/voice/say-stream", params={"text": "   "})
+
+    assert r.status_code == 400
+
+
+def test_say_stream_returns_503_when_voice_off(client, monkeypatch):
+    monkeypatch.delenv("NEXUS_TTS_ENGINE", raising=False)
+
+    r = client.get("/api/voice/say-stream", params={"text": "привет"})
+
+    assert r.status_code == 503
+
+
+def test_say_stream_returns_audio_bytes(client, monkeypatch):
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "edge")
+    import edge_tts
+
+    monkeypatch.setattr(edge_tts, "Communicate", _FakeCommunicate)
+
+    r = client.get("/api/voice/say-stream", params={"text": "привет"})
+
+    assert r.status_code == 200
+    assert r.content == b"chunk1chunk2"
+    assert r.headers["content-type"] == "audio/mpeg"
+
+
+def test_say_stream_rejects_wrong_query_token(client, monkeypatch, temp_data_dir):
+    from backend.core.jsonio import write_json
+
+    write_json(temp_data_dir / "auth.json", {"token": "local-secret"})
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "edge")
+
+    r = client.get("/api/voice/say-stream", params={"text": "привет", "token": "wrong"})
+
+    assert r.status_code == 401
+
+
+def test_say_stream_falls_back_to_whole_file_for_omnivoice(client, monkeypatch, tmp_path):
+    """OmniVoice генерирует звук одним проходом — дробить на куски нечего,
+    но тот же URL обязан всё равно отдать звук, не 503."""
+    import httpx
+
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "omnivoice")
+    out = tmp_path / "voice_omnivoice_test.wav"
+    out.write_bytes(b"RIFF....WAVEfake")
+
+    async def fake_post(self, url, **kwargs):
+        return httpx.Response(200, content=b"RIFF....WAVEfake", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    r = client.get("/api/voice/say-stream", params={"text": "привет"})
+
+    assert r.status_code == 200
+    assert r.content == b"RIFF....WAVEfake"
+    assert r.headers["content-type"] == "audio/wav"
+
+
+def test_say_stream_accepts_correct_query_token(client, monkeypatch, temp_data_dir):
+    from backend.core.jsonio import write_json
+
+    write_json(temp_data_dir / "auth.json", {"token": "local-secret"})
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "edge")
+    import edge_tts
+
+    monkeypatch.setattr(edge_tts, "Communicate", _FakeCommunicate)
+
+    r = client.get(
+        "/api/voice/say-stream", params={"text": "привет", "token": "local-secret"}
+    )
+
+    assert r.status_code == 200
 
 
 @pytest.mark.asyncio

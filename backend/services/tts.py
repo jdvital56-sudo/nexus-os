@@ -21,6 +21,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import AsyncGenerator
 
 from ..core.config import settings
 
@@ -175,6 +176,57 @@ async def _edge(text: str, voice: str, rate: str = "+0%") -> Path:
 
     logger.info("Озвучено %d символов голосом %s", len(text), voice)
     return out
+
+
+def prepare_edge_stream(text: str, voice: str | None = None):
+    """Готовит потоковый синтез edge-tts — всё, что может сломаться СРАЗУ
+    (пустой текст, движок не edge, пакет не установлен), проверяется здесь,
+    синхронно с точки зрения вызывающего, чтобы HTTP-ручка успела ответить
+    нормальным кодом ошибки до того, как уйдёт первый байт потока.
+
+    19.08.2026, найдено фаундером вживую: пауза до нескольких секунд между
+    вопросом и голосовым ответом — `synthesize()` ждёт, пока edge-tts
+    синтезирует и сохранит ВЕСЬ файл на диск, и только потом отдаёт его
+    браузеру целиком. `Communicate.stream()` в самой библиотеке отдаёт
+    куски по мере готовности — этот путь просто раньше не использовался.
+    Пока только для edge: у omnivoice/eleven стриминг не подключён.
+    """
+    from .textclean import for_speech
+
+    text = for_speech(text or "")
+    if not text:
+        raise ValueError("Нечего озвучивать")
+
+    if engine_name() != "edge":
+        raise VoiceUnavailable("Потоковая озвучка пока умеет только движок edge")
+
+    try:
+        import edge_tts
+    except ImportError as e:
+        raise VoiceUnavailable("Пакет edge-tts не установлен: pip install edge-tts") from e
+
+    from .personas import get_character
+
+    rate = _rate_for(get_character().get("pace", 5))
+    limit = int(os.getenv("NEXUS_TTS_MAX_CHARS", "1200"))
+    if len(text) > limit:
+        text = text[:limit].rsplit(" ", 1)[0] + "…"
+
+    logger.info("Потоковая озвучка %d символов голосом %s", len(text), voice or default_voice())
+    return edge_tts.Communicate(text, voice or default_voice(), rate=rate)
+
+
+async def stream_chunks(communicate) -> AsyncGenerator[bytes, None]:
+    """Байты аудио по мере готовности — то, ради чего весь этот путь.
+
+    Сеть может оборваться на середине потока — здесь это не ловится
+    намеренно: к этому моменту HTTP-ручка уже отправила заголовки со
+    статусом 200, изменить код ответа больше нельзя, ловит и логирует
+    вызывающая сторона (см. backend/api/voice.py).
+    """
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            yield chunk["data"]
 
 
 def _omnivoice_server_status() -> tuple[bool, str]:

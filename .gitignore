@@ -62,7 +62,20 @@ Thumbs.db
 
 # Dependencies / envs
 frontend/node_modules/
+desktop-widget/node_modules/
 .venv/
+
+# Логи виджета — локальный мусор, не для git
+desktop-widget/*.log
+
+# Рантайм-папка артефактов (HERMES_ARTIFACTS_PATH, backend/services/artifacts.py) —
+# генерируется при работе, не исходники
+/artifacts/
+
+# Модель Vosk для слова-будильника — 45 МБ, скачивается один раз
+# (wakeword/server.py читает её из wakeword/model/), не для git
+wakeword/model/
+wakeword/*.log
 
 # Секреты Google — НИКОГДА не коммитить
 credentials.json
