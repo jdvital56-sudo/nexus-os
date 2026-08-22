@@ -30,4 +30,17 @@ if (-not (Test-Port 5173)) {
 # клике по иконке. Наблюдатель в start_all.ps1 и так следит за ним.
 
 Start-Sleep -Seconds 3
-Start-Process "http://localhost:5173/personas"
+
+# Найдено 19.08.2026: у протокола http:// в реестре нет UserChoice (только
+# у https), а Start-Process на голый URL идёт через DelegateExecute —
+# фаундер жаловался, что клик по ярлыку «ничего не открывает». На деле
+# либо открывалась фоновая вкладка без переключения фокуса (незаметно),
+# либо резолвинг URL из скрытого процесса вёл себя не так, как из
+# интерактивного. Зовём Chrome напрямую, отдельным окном — так результат
+# виден сразу, без гадания про ассоциации протоколов и фокус окна.
+$chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+if (Test-Path $chrome) {
+    Start-Process -FilePath $chrome -ArgumentList "--new-window", "http://localhost:5173/personas"
+} else {
+    Start-Process "http://localhost:5173/personas"
+}
