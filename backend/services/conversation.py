@@ -66,6 +66,32 @@ _NOTE_SEARCH = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# «Джарвис, открой ютуб» / «запусти калькулятор» / «включи гугл» — шаг 2
+# из плана 19.08.2026, безопасные обратимые действия по голосу. «запусти
+# скилл X» уже разбирается _SKILL_TRIGGER выше и проверяется первым в
+# handle(), поэтому конфликта с «запусти <программа>» не возникает.
+_OPEN_TRIGGER = re.compile(
+    r"^\s*(?:открой|запусти|включи)\s+(?P<target>.+?)[\s.!?]*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# «Джарвис, создай задачу купить корм» / «поставь задачу ...» / «добавь
+# задачу ...» — та же дисциплина: разбирается без модели, предсказуемо
+_TASK_TRIGGER = re.compile(
+    r"^\s*(?:создай|поставь|добавь)\s+задачу\s+(?P<title>.+?)[\s.!?]*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# «Подтверждаю» — исполняет заблокированный computer_use.py клик/ввод
+# по-настоящему (см. pending_action.py). Ищем подстрокой, не полным
+# совпадением фразы: фаундер может сказать «да, подтверждаю» или «ладно,
+# подтверждаю» — важно только само слово, не обрамление вокруг него.
+_CONFIRM_TRIGGER = re.compile(r"подтвержда", re.IGNORECASE)
+
+# Отмена проверяется ДО подтверждения в _try_confirm: «не подтверждаю»
+# содержит стем «подтвержда» и без этого порядка попал бы не в ту ветку.
+_CANCEL_TRIGGER = re.compile(r"отмен|не\s+надо|не\s+подтвержда", re.IGNORECASE)
+
 
 def _normalize(text: str) -> str:
     """Схлопывает регистр и пробелы — чтобы «Привет!» и «привет !» дали один хэш."""
@@ -136,6 +162,27 @@ class ConversationService:
             self._spawn(self._remember(channel, user_id, text, skill_reply, "Skill"))
             return skill_reply
 
+        open_reply = await self._try_open(text)
+        if open_reply is not None:
+            self._emit_message(channel, "user", "Открыть", text)
+            self._emit_message(channel, "assistant", "Открыть", open_reply)
+            await self._log_turn(channel, user_id, text, open_reply, "Открыть")
+            return open_reply
+
+        task_reply = await self._try_task(text)
+        if task_reply is not None:
+            self._emit_message(channel, "user", "Задача", text)
+            self._emit_message(channel, "assistant", "Задача", task_reply)
+            await self._log_turn(channel, user_id, text, task_reply, "Задача")
+            return task_reply
+
+        confirm_reply = await self._try_confirm(text, channel, user_id)
+        if confirm_reply is not None:
+            self._emit_message(channel, "user", "Подтверждение", text)
+            self._emit_message(channel, "assistant", "Подтверждение", confirm_reply)
+            await self._log_turn(channel, user_id, text, confirm_reply, "Подтверждение")
+            return confirm_reply
+
         selected = self._select_persona(text, persona)
         self._emit_message(channel, "user", selected["name"], text)
 
@@ -143,7 +190,9 @@ class ConversationService:
         context = await asyncio.to_thread(
             self._build_context, text, selected["name"], channel, user_id
         )
-        reply = await self._respond(llm, selected["name"], text, context)
+        reply = await self._respond(
+            llm, selected["name"], text, context, action_key=f"{channel}:{user_id}"
+        )
 
         # elif, не if: персона получает либо критика, либо советчика, не оба
         # разом — держит цену лишнего прохода под контролем
@@ -167,7 +216,12 @@ class ConversationService:
         return reply
 
     async def _respond(
-        self, llm: LLMService, persona_name: str, text: str, context: str
+        self,
+        llm: LLMService,
+        persona_name: str,
+        text: str,
+        context: str,
+        action_key: str = "",
     ) -> str:
         """Ответ персоны. С инструментами — если ей они положены.
 
@@ -195,6 +249,7 @@ class ConversationService:
             temperature=0.7,
             max_tokens=settings.max_reply_tokens,
             kind=budget.INTERACTIVE,
+            action_key=action_key,
         )
         return response.content
 
@@ -420,6 +475,101 @@ class ConversationService:
             return f"Скилл «{skill_id}» завершился с ошибкой: {e}"
 
         return self._format_skill_result(result)
+
+    async def _try_open(self, text: str) -> str | None:
+        """Открывает сайт/программу по прямой команде. Не команда — None.
+
+        Разбирается без модели — то же соображение, что и у календаря:
+        предсказуемость важнее гибкости, ослышавшийся голос не должен
+        случайно запустить что-то не то.
+
+        «Открой/запусти/включи» — обычные русские глаголы, они легко
+        встречаются в разговоре не про открытие чего-либо («включи мозги»,
+        «запусти скрипт, о котором говорили»). Перехватываем только когда
+        реально узнали цель (известный сайт/программа/адрес) — иначе тихо
+        отдаём None и фраза идёт в обычный разговор с моделью, а не
+        натыкается на канцелярское «не понял, что открывать».
+        """
+        match = _OPEN_TRIGGER.match(text)
+        if not match:
+            return None
+
+        from . import system_open
+
+        target = match.group("target").strip()
+        if system_open.resolve(target) is None:
+            return None
+        return await asyncio.to_thread(system_open.open_target, target)
+
+    async def _try_task(self, text: str) -> str | None:
+        """Создаёт задачу по прямой команде. Не команда — возвращает None."""
+        match = _TASK_TRIGGER.match(text)
+        if not match:
+            return None
+
+        title = match.group("title").strip()
+        if not title:
+            return "Скажи, что за задача: «создай задачу купить корм»."
+
+        from . import tasks as tasks_svc
+        from ..models.schemas import TaskCreate
+
+        try:
+            task = await asyncio.to_thread(tasks_svc.create_task, TaskCreate(title=title))
+        except Exception as e:
+            logger.exception("Не удалось создать задачу")
+            return f"Не удалось создать задачу: {e}"
+        return f"✅ Задача создана: «{task.title}»."
+
+    async def _try_confirm(self, text: str, channel: str, user_id: str) -> str | None:
+        """«Подтверждаю» → на самом деле выполняет заблокированный клик/ввод.
+
+        Второй, обещанный фаундеру шаг защиты computer_use.py (см. его
+        шапку): модель сама не жмёт рискованные кнопки, код независимо
+        проверяет подпись и отказывает — а дальше человек либо подтверждает
+        словами, либо отменяет. Разбирается без модели, тем же приёмом, что
+        _try_open/_try_task: подтверждение необратимого действия должно
+        сработать предсказуемо, а не зависеть от того, как модель поймёт
+        фразу. Не команда (ни «подтверждаю», ни отмена не сказаны) —
+        возвращает None, и сообщение идёт в обычный разговор.
+        """
+        from . import computer_use, pending_action
+
+        key = f"{channel}:{user_id}"
+
+        if _CANCEL_TRIGGER.search(text):
+            if pending_action.get(key) is None:
+                return None
+            pending_action.clear(key)
+            return "Отменил, не делаю."
+
+        if not _CONFIRM_TRIGGER.search(text):
+            return None
+
+        pending = pending_action.get(key)
+        if pending is None:
+            return "Подтверждать нечего — не было заблокированного действия (или оно протухло)."
+
+        pending_action.clear(key)
+        try:
+            if pending.kind == "click":
+                result = await asyncio.to_thread(
+                    computer_use.click_confirmed,
+                    pending.payload["x"],
+                    pending.payload["y"],
+                    pending.payload["label"],
+                )
+            else:
+                result = await asyncio.to_thread(
+                    computer_use.type_text_confirmed,
+                    pending.payload["text"],
+                    pending.payload["label"],
+                )
+        except Exception as e:
+            logger.exception("Подтверждённое действие не выполнилось")
+            return f"Подтвердил, но действие не выполнилось: {e}"
+
+        return f"✅ Подтверждено. {result}"
 
     @staticmethod
     def _format_skill_result(result: dict[str, Any]) -> str:

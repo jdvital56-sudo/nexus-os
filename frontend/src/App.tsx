@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Sidebar from './components/Sidebar';
+import WidgetScreen from './screens/WidgetScreen';
 import HomeScreen from './screens/HomeScreen';
 import GraphScreen from './screens/GraphScreen';
 import MemoryScreen from './screens/MemoryScreen';
@@ -21,30 +22,41 @@ import CalendarScreen from './screens/CalendarScreen';
 export default function App() {
   return (
     <Router>
-      <div className="flex min-h-screen bg-darker">
-        <Sidebar />
-        <main className="ml-64 flex-1 p-8">
-          <Routes>
-            <Route path="/" element={<HomeScreen />} />
-            <Route path="/chat" element={<ChatScreen />} />
-            <Route path="/memory" element={<MemoryScreen />} />
-            <Route path="/skills" element={<SkillsScreen />} />
-            <Route path="/agents" element={<AgentsScreen />} />
-            <Route path="/personas" element={<PersonasScreen />} />
-            <Route path="/wallet" element={<WalletScreen />} />
-            <Route path="/artifacts" element={<ArtifactsScreen />} />
-            <Route path="/mail" element={<MailScreen />} />
-            <Route path="/calendar" element={<CalendarScreen />} />
-            <Route path="/dream-review" element={<DreamReviewScreen />} />
-            <Route path="/graph" element={<GraphScreen />} />
-            <Route path="/documents" element={<DocumentsScreen />} />
-            <Route path="/tasks" element={<TasksScreen />} />
-            <Route path="/pipeline" element={<PipelineScreen />} />
-            <Route path="/activity" element={<ActivityScreen />} />
-            <Route path="/settings" element={<SettingsScreen />} />
-          </Routes>
-        </main>
-      </div>
+      <Routes>
+        {/* Виджет — своя ветка без сайдбара: это либо крошечное окно
+            Electron поверх рабочего стола, либо маленькая страница сама
+            по себе, сайдбар шириной 256px там просто не поместится. */}
+        <Route path="/widget" element={<WidgetScreen />} />
+        <Route
+          path="*"
+          element={
+            <div className="flex min-h-screen bg-darker">
+              <Sidebar />
+              <main className="ml-64 flex-1 p-8">
+                <Routes>
+                  <Route path="/" element={<HomeScreen />} />
+                  <Route path="/chat" element={<ChatScreen />} />
+                  <Route path="/memory" element={<MemoryScreen />} />
+                  <Route path="/skills" element={<SkillsScreen />} />
+                  <Route path="/agents" element={<AgentsScreen />} />
+                  <Route path="/personas" element={<PersonasScreen />} />
+                  <Route path="/wallet" element={<WalletScreen />} />
+                  <Route path="/artifacts" element={<ArtifactsScreen />} />
+                  <Route path="/mail" element={<MailScreen />} />
+                  <Route path="/calendar" element={<CalendarScreen />} />
+                  <Route path="/dream-review" element={<DreamReviewScreen />} />
+                  <Route path="/graph" element={<GraphScreen />} />
+                  <Route path="/documents" element={<DocumentsScreen />} />
+                  <Route path="/tasks" element={<TasksScreen />} />
+                  <Route path="/pipeline" element={<PipelineScreen />} />
+                  <Route path="/activity" element={<ActivityScreen />} />
+                  <Route path="/settings" element={<SettingsScreen />} />
+                </Routes>
+              </main>
+            </div>
+          }
+        />
+      </Routes>
     </Router>
   );
 }

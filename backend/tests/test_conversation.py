@@ -371,6 +371,205 @@ async def test_normal_message_is_not_treated_as_skill(default_skills):
     assert len(llm.calls) == 1
 
 
+# --- «Открой сайт/программу» и «создай задачу» — шаг 2, 19.08.2026 ---
+
+
+@pytest.fixture
+def fake_opener(monkeypatch):
+    """Подменяет реальное открытие браузера/программы — тесты не должны
+    и правда распахивать вкладки и запускать calc.exe на машине, где
+    крутятся."""
+    from backend.services import system_open
+
+    calls: dict[str, list] = {"sites": [], "apps": []}
+    monkeypatch.setattr(system_open.webbrowser, "open", lambda url: calls["sites"].append(url))
+    monkeypatch.setattr(system_open.subprocess, "Popen", lambda args: calls["apps"].append(args))
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_open_known_site_by_alias(fake_opener):
+    llm = FakeLLM("модель не должна отвечать")
+    svc = make_service(llm)
+
+    reply = await svc.handle("telegram", "42", "открой ютуб")
+    await svc.drain()
+
+    assert "youtube.com" in reply
+    assert fake_opener["sites"] == ["https://youtube.com"]
+    assert llm.calls == []  # деньги на модель не потрачены
+
+
+@pytest.mark.asyncio
+async def test_open_url_like_target(fake_opener):
+    svc = make_service()
+
+    reply = await svc.handle("telegram", "42", "запусти github.com")
+    await svc.drain()
+
+    assert "github.com" in reply
+    assert fake_opener["sites"] == ["https://github.com"]
+
+
+@pytest.mark.asyncio
+async def test_open_known_app(fake_opener):
+    svc = make_service()
+
+    reply = await svc.handle("telegram", "42", "включи калькулятор")
+    await svc.drain()
+
+    assert "калькулятор" in reply
+    assert fake_opener["apps"] == [["calc"]]
+
+
+@pytest.mark.asyncio
+async def test_unrecognized_open_falls_through_to_llm(fake_opener):
+    """«Включи мозги» — не команда открыть что-то, а обычная фраза:
+    модель должна её увидеть, а не наткнуться на «не понял, что открывать»."""
+    llm = FakeLLM("шутка про мозги")
+    svc = make_service(llm)
+
+    reply = await svc.handle("telegram", "42", "включи мозги, пожалуйста")
+    await svc.drain()
+
+    assert reply == "шутка про мозги"
+    assert fake_opener["sites"] == []
+    assert fake_opener["apps"] == []
+
+
+@pytest.mark.asyncio
+async def test_create_task_by_voice_command():
+    from backend.services import tasks as task_svc
+
+    llm = FakeLLM("модель не должна отвечать")
+    svc = make_service(llm)
+
+    reply = await svc.handle("telegram", "42", "создай задачу купить корм коту")
+    await svc.drain()
+
+    assert "купить корм коту" in reply
+    titles = [t.title for t in task_svc.list_tasks()]
+    assert "купить корм коту" in titles
+    assert llm.calls == []
+
+
+# --- «Подтверждаю» → выполняет заблокированный клик/ввод (шаг подтверждения, 19.08.2026) ---
+
+
+@pytest.fixture
+def clean_pending(monkeypatch):
+    from backend.services import pending_action
+
+    pending_action._store.clear()
+    yield pending_action
+    pending_action._store.clear()
+
+
+@pytest.mark.asyncio
+async def test_confirm_with_no_pending_action_does_not_reach_llm(clean_pending):
+    llm = FakeLLM("модель не должна отвечать")
+    svc = make_service(llm)
+
+    reply = await svc.handle("telegram", "42", "подтверждаю")
+    await svc.drain()
+
+    assert "нечего" in reply.lower()
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_confirm_executes_pending_click_via_confirmed_path(clean_pending, monkeypatch):
+    from backend.services import computer_use
+
+    clean_pending.hold(
+        "telegram:42", "click", {"x": 10, "y": 20, "label": "Оплатить заказ"}, "описание"
+    )
+    calls = []
+    monkeypatch.setattr(computer_use, "click_confirmed", lambda x, y, label="": calls.append((x, y, label)) or "Кликнул")
+
+    llm = FakeLLM("модель не должна отвечать")
+    svc = make_service(llm)
+
+    reply = await svc.handle("telegram", "42", "да, подтверждаю")
+    await svc.drain()
+
+    assert calls == [(10, 20, "Оплатить заказ")]
+    assert "Подтверждено" in reply
+    assert llm.calls == []
+    # Одноразовое: второе «подтверждаю» без нового отказа — уже нечего подтверждать
+    assert clean_pending.get("telegram:42") is None
+
+
+@pytest.mark.asyncio
+async def test_confirm_executes_pending_type_via_confirmed_path(clean_pending, monkeypatch):
+    from backend.services import computer_use
+
+    clean_pending.hold(
+        "telegram:42", "type", {"text": "оплатить 500", "label": "поле суммы"}, "описание"
+    )
+    calls = []
+    monkeypatch.setattr(
+        computer_use, "type_text_confirmed", lambda text, label="": calls.append((text, label)) or "Ввёл"
+    )
+
+    svc = make_service(FakeLLM("модель не должна отвечать"))
+
+    reply = await svc.handle("telegram", "42", "подтверждаю")
+    await svc.drain()
+
+    assert calls == [("оплатить 500", "поле суммы")]
+    assert "Подтверждено" in reply
+
+
+@pytest.mark.asyncio
+async def test_cancel_clears_pending_action_without_executing(clean_pending, monkeypatch):
+    from backend.services import computer_use
+
+    clean_pending.hold("telegram:42", "click", {"x": 1, "y": 2, "label": "Оплатить"}, "")
+    monkeypatch.setattr(
+        computer_use, "click_confirmed", lambda *a, **k: (_ for _ in ()).throw(AssertionError("не должен был кликнуть"))
+    )
+
+    svc = make_service(FakeLLM("модель не должна отвечать"))
+    reply = await svc.handle("telegram", "42", "не надо, отмена")
+    await svc.drain()
+
+    assert "тмен" in reply.lower()
+    assert clean_pending.get("telegram:42") is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_word_without_pending_action_falls_through_to_llm(clean_pending):
+    """«Отмена» само по себе — обычное слово, может быть частью разговора,
+    если подтверждать нечего — не должно перехватываться."""
+    llm = FakeLLM("ответ про отмену планов")
+    svc = make_service(llm)
+
+    reply = await svc.handle("telegram", "42", "отмена встречи в четверг")
+    await svc.drain()
+
+    assert reply == "ответ про отмену планов"
+
+
+@pytest.mark.asyncio
+async def test_confirm_word_is_scoped_to_channel_and_user(clean_pending, monkeypatch):
+    """Заблокированное действие в одном канале не подтверждается из другого."""
+    from backend.services import computer_use
+
+    clean_pending.hold("telegram:42", "click", {"x": 1, "y": 2, "label": ""}, "")
+    monkeypatch.setattr(
+        computer_use, "click_confirmed", lambda *a, **k: (_ for _ in ()).throw(AssertionError("не должен был кликнуть"))
+    )
+
+    llm = FakeLLM("модель не должна отвечать")
+    svc = make_service(llm)
+
+    reply = await svc.handle("web", "42", "подтверждаю")
+    await svc.drain()
+
+    assert "нечего" in reply.lower()
+
+
 # --- Извлечение сущностей в граф (PR-7) ---
 
 

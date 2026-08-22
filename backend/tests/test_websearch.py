@@ -163,9 +163,22 @@ def test_only_listed_personas_get_the_tool(with_key):
     assert tools_svc.tools_for("Philosopher") == []
 
 
-def test_no_tool_without_a_key(without_key):
-    """Предлагать модели инструмент, который заведомо не сработает, — обман."""
+def test_no_tool_without_a_key(without_key, monkeypatch):
+    """Предлагать модели инструмент, который заведомо не сработает, — обман.
+
+    Найдено код-ревью 19.08.2026: этот тест раньше проверял ровно пустой
+    список у Орфея без ключа — после появления инструментов экрана
+    (шаг 3, свой отдельный ключ GEMINI_API_KEY, от Firecrawl не зависит)
+    первая правка ослабила проверку до «просто нет web_search», потеряв
+    гарантию точного списка. Здесь оба ключа сведены явно, чтобы список
+    снова был проверяемым целиком, а не только одним пунктом."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     assert tools_svc.tools_for("Orpheus") == []
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    names = [t["function"]["name"] for t in tools_svc.tools_for("Orpheus")]
+    assert "web_search" not in names
+    assert "screen_click" in names  # свой ключ, не зависит от Firecrawl
 
 
 def test_unknown_persona_gets_nothing(with_key):
@@ -261,7 +274,7 @@ async def test_tool_result_goes_back_to_the_model(with_key, monkeypatch):
             request=httpx.Request("POST", url),
         )
 
-    async def fake_tool(arguments):
+    async def fake_tool(arguments, action_key=""):
         return "[1] Ответ\nhttps://z.example\n42"
 
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
@@ -337,7 +350,7 @@ async def test_endless_tool_calls_are_cut_off(with_key, monkeypatch):
             request=httpx.Request("POST", url),
         )
 
-    async def fake_tool(arguments):
+    async def fake_tool(arguments, action_key=""):
         return "ничего"
 
     monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)

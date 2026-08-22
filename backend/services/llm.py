@@ -175,6 +175,80 @@ class LLMService:
         )
         return await self._gemini_audio(audio_path, prompt, max_tokens=1024)
 
+    async def describe_screen(self, image_png: bytes, question: str) -> str:
+        """Смотрит на скриншот через Gemini (мультимодальный, ключ уже есть).
+
+        Компьютерное управление (шаг 3, 19.08.2026): Джарвис должен понять,
+        куда кликнуть, глядя на реальный экран — не выдумывать координаты.
+        Отдельный от чата провайдер намеренно: персоны сидят на deepseek
+        (умеет tool-calling), а зрение есть только у Gemini, который tool
+        calling не умеет — поэтому смотрит Gemini, решает и жмёт deepseek.
+        """
+        if not self.gemini_api_key:
+            raise TranscriptionUnavailable(
+                "Не могу посмотреть на экран: не задан GEMINI_API_KEY"
+            )
+        return await self._gemini_vision(image_png, question, max_tokens=1024)
+
+    async def _gemini_vision(self, image_png: bytes, prompt: str, max_tokens: int) -> str:
+        """Тот же путь, что _gemini_audio, но картинкой.
+
+        Не обобщил в один метод с _gemini_audio: обобщение раньше времени
+        сцепило бы аудио и зрение общим форматом входа без реальной нужды —
+        сейчас разница только в одном поле payload.
+        """
+        if not self.gemini_api_key:
+            raise ValueError("GEMINI_API_KEY not set for vision processing")
+
+        import base64
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+        image_data = base64.b64encode(image_png).decode("utf-8")
+
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": prompt},
+                    {"inline_data": {"mime_type": "image/png", "data": image_data}},
+                ]
+            }],
+            "generationConfig": {"temperature": 0.1, "maxOutputTokens": max_tokens},
+        }
+        headers = {"Content-Type": "application/json"}
+
+        # Тот же 5xx-повтор, что у голоса (найдено 18.08.2026, тот же провайдер).
+        # Один клиент на все попытки, не по одному на каждую (найдено
+        # код-ревью 19.08.2026) — 5xx означает, что с самим соединением
+        # всё было в порядке, пересоздавать его на ровном месте незачем.
+        last_error: Exception | None = None
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            for attempt in range(3):
+                try:
+                    response = await client.post(
+                        f"{url}?key={self.gemini_api_key}", headers=headers, json=payload
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    # candidates может прийти пустым списком (например, ответ
+                    # срезан фильтром безопасности Gemini) — [{}] по умолчанию
+                    # у .get() спасает только от ОТСУТСТВИЯ ключа, не от
+                    # пустого списка; найдено код-ревью 19.08.2026
+                    candidates = data.get("candidates") or [{}]
+                    return candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                except httpx.HTTPStatusError as e:
+                    last_error = e
+                    if e.response.status_code < 500 or attempt == 2:
+                        logger.error(f"Gemini vision processing failed: {e}")
+                        raise
+                    wait = 2 ** attempt
+                    logger.warning("Gemini vision: %s, повтор через %dс (попытка %d/3)", e, wait, attempt + 2)
+                    await asyncio.sleep(wait)
+                except Exception as e:
+                    logger.error(f"Gemini vision processing failed: {e}")
+                    raise
+
+        raise last_error
+
     async def _gemini_audio(self, audio_path: str, prompt: str, max_tokens: int) -> str:
         """Общий путь для аудио-запросов к Gemini."""
         if not self.gemini_api_key:

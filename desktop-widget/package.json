@@ -1,0 +1,13 @@
+{
+  "name": "nexus-os-widget",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Плавающее окно Джарвиса поверх рабочего стола Windows — шаг 1 из плана 19.08.2026: держать разговор на виду при переключении окон, без управления компьютером.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^32.0.0"
+  }
+}

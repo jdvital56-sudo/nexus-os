@@ -16,7 +16,7 @@ from typing import Any, Callable, Awaitable
 
 import httpx
 
-from . import budget, websearch
+from . import budget, computer_use, websearch
 from .llm import LLMMessage, LLMResponse, LLMService
 
 logger = logging.getLogger(__name__)
@@ -33,18 +33,38 @@ REQUEST_TIMEOUT = 90.0
 # код и глубокий разбор от веба не выигрывают, а платить пришлось бы за всех.
 WEB_SEARCH_PERSONAS = {"orpheus", "labyrinth", "bastet"}
 
+# Кто имеет право трогать мышь и клавиатуру фаундера (шаг 3, 19.08.2026).
+# Только Ра/Orpheus — общий голос, с которым он и просил это делать.
+# Персонам вроде Птаха (код) или Сехмет (безопасность) клик по экрану не
+# нужен для их работы, а держать список коротким — держать риск ниже.
+COMPUTER_USE_PERSONAS = {"orpheus"}
+
 # Реестр инструментов: описание для модели + чем исполнять
 _REGISTRY: dict[str, tuple[dict[str, Any], Callable[[dict], Awaitable[str]]]] = {
     "web_search": (websearch.TOOL_SPEC, websearch.run_tool),
+    "screen_look": (computer_use.SCREEN_LOOK_SPEC, computer_use.run_screen_look),
+    "screen_click": (computer_use.SCREEN_CLICK_SPEC, computer_use.run_screen_click),
+    "screen_type": (computer_use.SCREEN_TYPE_SPEC, computer_use.run_screen_type),
+    "screen_key": (computer_use.SCREEN_KEY_SPEC, computer_use.run_screen_key),
+    "screen_scroll": (computer_use.SCREEN_SCROLL_SPEC, computer_use.run_screen_scroll),
 }
+
+_COMPUTER_USE_TOOLS = ["screen_look", "screen_click", "screen_type", "screen_key", "screen_scroll"]
 
 
 def tools_for(persona_name: str) -> list[dict[str, Any]]:
     """Инструменты, доступные персоне. Пустой список — обычный вызов без них."""
     name = (persona_name or "").strip().lower()
+    tools: list[dict[str, Any]] = []
     if name in WEB_SEARCH_PERSONAS and websearch.is_configured():
-        return [_REGISTRY["web_search"][0]]
-    return []
+        tools.append(_REGISTRY["web_search"][0])
+    # Без ключа Gemini screen_look гарантированно откажет, а без него
+    # координаты для click/type взять неоткуда — тот же принцип, что у
+    # web_search выше: не предлагать модели инструмент, который заведомо
+    # не сработает (найдено код-ревью 19.08.2026).
+    if name in COMPUTER_USE_PERSONAS and computer_use.vision_configured():
+        tools.extend(_REGISTRY[key][0] for key in _COMPUTER_USE_TOOLS)
+    return tools
 
 
 def supports_tools(llm: LLMService) -> bool:
@@ -64,7 +84,7 @@ def supports_tools(llm: LLMService) -> bool:
     return getattr(llm, "provider", None) in ("openai", "deepseek")
 
 
-async def _execute(name: str, raw_arguments: str) -> str:
+async def _execute(name: str, raw_arguments: str, action_key: str = "") -> str:
     entry = _REGISTRY.get(name)
     if entry is None:
         return f"Инструмент «{name}» не существует."
@@ -76,7 +96,11 @@ async def _execute(name: str, raw_arguments: str) -> str:
         return f"Не разобрал аргументы вызова: {raw_arguments!r}"
     if not isinstance(arguments, dict):
         return f"Аргументы должны быть объектом, пришло: {type(arguments).__name__}"
-    return await entry[1](arguments)
+    # action_key («channel:user_id») нужен только screen_click/screen_type —
+    # чтобы знать, кому класть заблокированное действие в pending_action.py.
+    # Остальные инструменты его игнорируют, но принимают, чтобы регистр
+    # оставался единым и не ветвился по типу инструмента здесь.
+    return await entry[1](arguments, action_key)
 
 
 async def chat_with_tools(
@@ -86,6 +110,7 @@ async def chat_with_tools(
     temperature: float = 0.7,
     max_tokens: int = 2000,
     kind: str = "interactive",
+    action_key: str = "",
 ) -> LLMResponse:
     """Как `llm.chat()`, но модель может позвать инструмент.
 
@@ -161,7 +186,7 @@ async def chat_with_tools(
                 function = call.get("function") or {}
                 name = function.get("name") or ""
                 used_tools.append(name)
-                output = await _execute(name, function.get("arguments") or "{}")
+                output = await _execute(name, function.get("arguments") or "{}", action_key)
                 history.append(
                     {
                         "role": "tool",

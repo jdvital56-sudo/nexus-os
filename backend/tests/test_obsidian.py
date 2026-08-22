@@ -189,6 +189,7 @@ async def test_ordinary_message_is_not_a_note_command(vault):
     svc = make_service(llm)
 
     reply = await svc.handle("telegram", "42", "сделай заметку о том, что я думаю")
+    await svc.drain()
 
     assert reply == "ответ модели"
 

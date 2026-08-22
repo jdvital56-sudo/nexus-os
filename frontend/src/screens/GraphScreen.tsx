@@ -2,37 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import MemoryGalaxy, { type GalaxyLink, type GalaxyNode } from '../components/MemoryGalaxy';
 import { getGraphMap, getNote } from '../lib/api';
 import { links as linksWord, nodes as nodesWord } from '../lib/format';
+import { TYPE_LABELS, colorOfType } from '../lib/graphColors';
 import type { ApiGraphNode, GraphMap } from '../types';
 
 // Карта второго мозга на настоящих данных (PR-20). До этого экран показывал
 // восемь выдуманных узлов вроде «Project Alpha» — красиво и ни о чём.
 // Отрисовка живёт в MemoryGalaxy, здесь — данные, легенда и карточка узла.
+// Цвета типов — в lib/graphColors.ts, общие с фоном экрана «Джарвис».
 
-const TYPE_COLORS: Record<string, string> = {
-  memory: '#00DC82',
-  concept: '#F5B642',
-  document: '#3B82F6',
-  file: '#38BDF8',
-  task: '#A78BFA',
-  agent: '#EC4899',
-  decision: '#FB923C',
-  session: '#94A3B8',
-};
-
-const TYPE_LABELS: Record<string, string> = {
-  memory: 'Память',
-  concept: 'Понятия',
-  document: 'Документы',
-  file: 'Файлы',
-  task: 'Задачи',
-  agent: 'Агенты',
-  decision: 'Решения',
-  session: 'Сессии',
-};
-
-function colorOf(type: string): string {
-  return TYPE_COLORS[type] ?? '#6B7280';
-}
+const colorOf = colorOfType;
 
 // Порог по числу связей. Единица по умолчанию: узел с одной связью почти
 // всегда шум — слово из одной заметки, которое больше нигде не встретилось.

@@ -177,11 +177,15 @@ TOOL_SPEC: dict[str, Any] = {
 }
 
 
-async def run_tool(arguments: dict[str, Any]) -> str:
+async def run_tool(arguments: dict[str, Any], action_key: str = "") -> str:
     """Выполняет вызов инструмента и складывает ответ для модели.
 
     Ошибку возвращаем текстом, а не исключением: модель должна узнать, что
     поиск не удался, и сказать об этом человеку, а не молча ответить по памяти.
+
+    action_key не используется здесь — принимается только чтобы регистр
+    инструментов в tools.py звал все исполнители единым протоколом (нужен
+    он лишь screen_click/screen_type, см. computer_use.py).
     """
     try:
         results = await search(

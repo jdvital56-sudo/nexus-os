@@ -1,0 +1,78 @@
+/* Тема экрана «Джарвис» (граф + кольцо) — из одобренного макета
+   (artifact 07699535, «Джарвис — граф + кольцо», см.
+   nexus-os-canonical-design). Своя холодная палитра, скоуп
+   `.jarvis-theme`, а не `:root` — Пантеон рядом держит золото в своём
+   скоупе, оба не должны перекрашивать друг друга. */
+
+.jarvis-theme {
+  --basalt: #0a0d10; --panel: #121820; --line: #263038;
+  --gold: #22d3ee; --gold-bright: #67e8f9; --torch: #f5b642;
+  --ink: #d7e4ea; --ink-dim: #8fa3ac; --ink-dimmer: #5b6b73;
+  --j-mono: ui-monospace, "SF Mono", Consolas, monospace;
+  --j-body: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  background: var(--basalt);
+  color: var(--ink);
+  font-family: var(--j-body);
+}
+
+.j-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+
+.j-brainbar { display: flex; align-items: center; gap: 8px; }
+.j-stat-chip {
+  font-size: 0.72rem; color: var(--ink-dimmer); background: rgba(18,24,32,0.72);
+  border: 1px solid var(--line); padding: 6px 11px; border-radius: 20px; font-family: var(--j-mono);
+  backdrop-filter: blur(3px);
+}
+
+.j-panel {
+  background: rgba(18,24,32,0.78); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px 12px; backdrop-filter: blur(3px);
+}
+.j-panel h4 { margin: 0 0 8px; font-size: 0.64rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dimmer); }
+.j-panel .j-row { display: flex; align-items: center; justify-content: space-between; gap: 7px; font-size: 0.76rem; padding: 3px 0; color: var(--ink-dim); }
+.j-panel .j-row b { color: var(--gold-bright); font-family: var(--j-mono); font-weight: 400; }
+.j-panel .j-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; box-shadow: 0 0 6px currentColor; }
+
+.j-feed {
+  background: rgba(18,24,32,0.55); border: 1px solid var(--line); border-radius: 10px; backdrop-filter: blur(3px);
+}
+.j-bubble-user { background: rgba(34,211,238,0.14); color: var(--ink); }
+.j-bubble-bot { background: rgba(18,24,32,0.85); border: 1px solid var(--line); color: var(--ink); }
+.j-bubble-persona { color: var(--gold-bright); font-family: var(--j-mono); }
+
+.j-inputbar {
+  display: flex; align-items: center; gap: 8px; padding: 8px 8px 8px 18px; border-radius: 30px;
+  background: rgba(18,24,32,0.85); border: 1px solid var(--line); backdrop-filter: blur(3px);
+}
+.j-inputbar input, .j-inputbar select { flex: 1; min-width: 0; background: none; border: none; outline: none; color: var(--ink); font-size: 0.88rem; }
+.j-inputbar input::placeholder { color: var(--ink-dimmer); }
+.j-inputbar select { flex: none; cursor: pointer; }
+.j-inputbar select option { background: var(--panel); color: var(--ink); }
+
+.j-iconbtn {
+  width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line);
+  background: none; color: var(--ink-dim); display: flex; align-items: center; justify-content: center; cursor: pointer;
+  flex: none; transition: border-color 150ms ease, color 150ms ease;
+}
+.j-iconbtn:hover { border-color: var(--gold); color: var(--gold-bright); }
+.j-iconbtn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--gold); }
+.j-iconbtn.active { border-color: var(--torch); color: var(--torch); box-shadow: 0 0 12px rgba(245,182,66,0.35); }
+.j-iconbtn.on { border-color: var(--gold); color: var(--gold-bright); }
+.j-iconbtn.send { background: var(--gold); color: var(--basalt); border-color: var(--gold); }
+.j-iconbtn.send:hover { color: var(--basalt); }
+.j-iconbtn:disabled { opacity: 0.35; cursor: default; }
+
+.j-btn-ghost {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; border-radius: 8px;
+  border: 1px solid var(--line); background: rgba(18,24,32,0.6); color: var(--ink-dim);
+  padding: 7px 12px; font-size: 0.82rem; font-family: var(--j-body); transition: border-color 150ms ease, color 150ms ease;
+}
+.j-btn-ghost:hover { border-color: var(--gold); color: var(--gold-bright); }
+.j-btn-ghost.active { border-color: var(--torch); color: var(--torch); }
+.j-btn-ghost:disabled { opacity: 0.35; cursor: default; }
+
+.j-select {
+  cursor: pointer; border-radius: 8px; border: 1px solid var(--line); background: rgba(18,24,32,0.6);
+  color: var(--ink-dim); padding: 7px 10px; font-size: 0.82rem; font-family: var(--j-body);
+}
+.j-select option { background: var(--panel); color: var(--ink); }

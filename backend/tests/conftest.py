@@ -1,5 +1,8 @@
 """Shared test fixtures."""
+import asyncio
+
 import pytest
+import pytest_asyncio
 from fastapi.testclient import TestClient
 from pathlib import Path
 import json
@@ -114,6 +117,26 @@ def temp_data_dir(tmp_path, monkeypatch):
             monkeypatch.setattr(svc_mod, "ensure_data_dir", patched_ensure)
 
     yield tmp_path
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _drain_background_tasks():
+    """Подчищает забытый ``await svc.drain()``.
+
+    ConversationService._spawn() — единственное место в бэкенде, где создаётся
+    asyncio.create_task (фоновая запись в память). Если тест забыл вызвать
+    drain(), задача переживает тест и позже читает/пишет модульные пути
+    (MEMORY_FILE и т.п.), которые temp_data_dir уже переключил на tmp_path
+    следующего теста. Страхуемся здесь, а не полагаемся на дисциплину каждого
+    теста.
+    """
+    yield
+    current = asyncio.current_task()
+    pending = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+    if pending:
+        for t in pending:
+            t.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
 
 
 @pytest.fixture

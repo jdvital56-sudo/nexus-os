@@ -1,8 +1,17 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru" translate="no">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Экран почти целиком русский с самой первой отрисовки — но короткие
+         подписи и имена сервисов (Hetzner, DeepSeek, fal.ai) сбивали
+         автоопределение языка Chrome, и тот иногда сам предлагал перевод и
+         превращал нормальный текст в бессмыслицу («Hetzner» → «Хетцнер»,
+         «Подписки» → «каменное мигрирующее» — багрепорт фаундера
+         19.08.2026). lang="ru" был неверно "en" с самого начала — до
+         JS, ещё на голом HTML; translate="no" и notranslate ниже
+         запрещают Chrome предлагать перевод этой страницы вообще. -->
+    <meta name="google" content="notranslate" />
     <title>Nexus OS</title>
     <style>
       * { margin: 0; padding: 0; box-sizing: border-box; }

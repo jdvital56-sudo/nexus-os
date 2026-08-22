@@ -50,6 +50,15 @@ const TAB_GLYPH: Record<string, string> = {
   jarvis: 'J',
 };
 
+// Куда ведёт каждая вкладка. У Анубиса маршрута нет — по канону визуала
+// для него ещё не существует макета, карточка честно остаётся неактивной,
+// а не ведёт в пустоту.
+const TAB_ROUTE: Record<string, string | null> = {
+  jarvis: '/chat',
+  thoth: '/personas',
+  anubis: null,
+};
+
 export default function Sidebar() {
   const location = useLocation();
   const { lang, setLang, t } = useLang();
@@ -72,15 +81,15 @@ export default function Sidebar() {
         <p className="mb-2 px-2 text-[0.62rem] uppercase tracking-[0.14em] text-gray-600">
           {t('Агенты')}
         </p>
-        {TABS.map((tab) => (
-          <div
-            key={tab.key}
-            className={`mb-1.5 flex items-start gap-2 rounded-md border px-2 py-1.5 ${
-              tab.egyptian
-                ? 'border-gray-800 text-primary-bright'
-                : 'border-jarvis-line bg-jarvis-panel/40 text-jarvis-bright'
-            }`}
-          >
+        {TABS.map((tab) => {
+          const route = TAB_ROUTE[tab.key] ?? null;
+          const active = route !== null && location.pathname === route;
+          const classes = `mb-1.5 flex items-start gap-2 rounded-md border px-2 py-1.5 transition-colors duration-200 ${
+            tab.egyptian
+              ? `border-gray-800 text-primary-bright ${route ? 'hover:bg-gray-800' : ''}`
+              : `border-jarvis-line bg-jarvis-panel/40 text-jarvis-bright ${route ? 'hover:bg-jarvis-panel/70' : ''}`
+          } ${active ? 'ring-1 ring-primary/50' : ''} ${route ? 'cursor-pointer' : 'cursor-default opacity-60'}`;
+          const glyph = (
             <span
               className={`grid h-6 w-6 shrink-0 place-items-center rounded border font-display text-xs ${
                 tab.egyptian
@@ -91,14 +100,28 @@ export default function Sidebar() {
             >
               {TAB_GLYPH[tab.key] ?? tab.title[0]}
             </span>
+          );
+          const label = (
             <span className="min-w-0">
               <span className="block text-sm leading-tight">{t(tab.title)}</span>
               <span className="mt-0.5 block text-[0.68rem] leading-snug text-gray-600">
-                {t(tab.duty)}
+                {route ? t(tab.duty) : `${t(tab.duty)} · ${t('экран ещё не готов')}`}
               </span>
             </span>
-          </div>
-        ))}
+          );
+
+          return route ? (
+            <Link key={tab.key} to={route} className={classes}>
+              {glyph}
+              {label}
+            </Link>
+          ) : (
+            <div key={tab.key} className={classes} title={t('Экран для этой вкладки ещё не сделан')}>
+              {glyph}
+              {label}
+            </div>
+          );
+        })}
       </div>
 
       <nav className="mt-4">

@@ -36,6 +36,15 @@ body {
   color: var(--ink);
 }
 
+/* Экран /widget включает это на body (WidgetScreen.tsx): окно Electron
+   само по себе прозрачное (main.js, transparent: true), но этот фон на
+   body рисуется поверх и всё равно закрашивает окно сплошным цветом —
+   без этого класса прозрачность окна не видно вообще. */
+body.widget-transparent,
+body.widget-transparent #root {
+  background: transparent;
+}
+
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;

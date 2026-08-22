@@ -102,7 +102,14 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, lang);
-    document.documentElement.lang = lang;
+    // Тег <html lang> НЕ переключаем на "en" вместе с этой кнопкой: перевод
+    // покрывает пока полсотни строк, всё остальное честно остаётся русским
+    // (см. комментарий вверху файла). Если сказать браузеру «это английская
+    // страница» про экран, где почти всё по-русски, Chrome сам берётся
+    // «переводить» уже русский текст и выдаёт бессмыслицу («Джарвис» →
+    // «Гервис» и подобное) — багрепорт фаундера 19.08.2026. Тег остаётся
+    // русским, пока перевод не покроет экран целиком по-настоящему.
+    document.documentElement.lang = 'ru';
   }, [lang]);
 
   const t = (text: string) => DICTS[lang][text] ?? text;
