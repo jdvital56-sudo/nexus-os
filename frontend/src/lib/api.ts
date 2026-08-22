@@ -22,8 +22,11 @@ const api = axios.create({
   },
 });
 
-// Локальный bearer-токен из data/auth.json; без него бэкенд отвечает 401
-const authToken = import.meta.env.VITE_API_TOKEN;
+// Локальный bearer-токен из data/auth.json; без него бэкенд отвечает 401.
+// Экспортирован — нужен и другим модулям, которые не могут послать
+// заголовок Authorization (audio-элемент в speakStreamUrl ниже, WebSocket
+// в ActivityScreen.tsx) и вместо этого кладут токен в строку запроса.
+export const authToken = import.meta.env.VITE_API_TOKEN;
 if (authToken) {
   api.defaults.headers.common.Authorization = `Bearer ${authToken}`;
 }
@@ -94,9 +97,36 @@ export const getVoiceStatus = () =>
   data<{ engine: string; enabled: boolean; ready: boolean; detail: string; voice: string; voices: Array<{ id: string; label: string; gender: string }> }>(
     api.get('/voice/status'),
   );
-/** Озвучка приходит файлом — браузер играет его сам, без потоков. */
-export const speak = (text: string, voice?: string) =>
-  api.post('/voice/say', { text, voice }, { responseType: 'blob' }).then((r) => r.data as Blob);
+/**
+ * URL потоковой озвучки — <audio src> грузит его сам, прогрессивно: играть
+ * начинает, как только пришли первые байты, не дожидаясь синтеза всей
+ * фразы целиком (найдено фаундером вживую 19.08.2026 — пауза перед
+ * голосовым ответом доходила до нескольких секунд из-за ожидания blob'а
+ * целиком, см. backend/api/voice.py, /say-stream).
+ *
+ * Токен — в строке запроса, не в заголовке: audio-элемент не умеет
+ * посылать Authorization, обычный способ этот обойти для медиа-ресурсов.
+ */
+export const speakStreamUrl = (text: string, voice?: string) => {
+  const params = new URLSearchParams({ text });
+  if (voice) params.set('voice', voice);
+  if (authToken) params.set('token', authToken);
+  return `${API_BASE_URL}/voice/say-stream?${params.toString()}`;
+};
+
+/**
+ * Распознавание записанного звука через Gemini на бэкенде — обходной путь
+ * для сред, где браузерный webkitSpeechRecognition не работает (Electron:
+ * облачная служба Google проверяет ключ, зашитый только в настоящий
+ * Chrome). См. lib/speech.ts.
+ */
+export const transcribe = (blob: Blob) => {
+  const form = new FormData();
+  form.append('file', blob, 'voice.webm');
+  return data<{ text: string }>(
+    api.post('/voice/transcribe', form, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  ).then((r) => r.text);
+};
 
 // --- Веб-чат ---
 // Тот же контур мышления, что у Телеграма, только другой канал

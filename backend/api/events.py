@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from ..core import eventbus
+from ..core.auth import _load_token
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,20 @@ async def broadcast(event_type: str, payload: dict[str, Any], source: str = even
 
 
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, token: str | None = None):
+    """Токен — в строке запроса (`?token=...`), не в заголовке: браузерный
+    WebSocket API не умеет слать Authorization при подключении, тот же
+    класс проблемы, что у /api/voice/say-stream (см. его же
+    _verify_query_token). Найдено код-ревью 20.08.2026: раньше эта ручка
+    вообще не проверяла ничего — кто угодно с сетевым доступом мог
+    подключиться и слушать всю ленту событий системы (память, задачи,
+    активность агентов) без единого токена.
+    """
+    stored = _load_token()
+    if stored and token != stored:
+        await websocket.close(code=1008)  # policy violation
+        return
+
     await websocket.accept()
     _clients.add(websocket)
     try:

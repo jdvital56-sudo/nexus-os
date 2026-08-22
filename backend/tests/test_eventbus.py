@@ -180,9 +180,19 @@ def live_client():
     return TestClient(app)
 
 
+def _ws_url() -> str:
+    """/ws требует токен с момента код-ревью 20.08.2026 — startup успевает
+    сгенерировать реальный токен через init_auth() до того, как тест
+    подключается, читаем его же."""
+    from backend.core.auth import _load_token
+
+    token = _load_token()
+    return f"/ws?token={token}" if token else "/ws"
+
+
 def test_websocket_streams_events_by_contract():
     """DoD PR-12: подключение к /ws показывает поток строго по схеме §3."""
-    with live_client() as c, c.websocket_connect("/ws") as ws:
+    with live_client() as c, c.websocket_connect(_ws_url()) as ws:
         hello = json.loads(ws.receive_text())
         assert hello["type"] == "connected"
         assert hello["v"] == 1
@@ -204,7 +214,7 @@ def test_websocket_receives_whole_dialog_stream():
         async def generate_response(self, m, context="", kind="interactive", json_mode=False):
             return "ответ модели"
 
-    with live_client() as c, c.websocket_connect("/ws") as ws:
+    with live_client() as c, c.websocket_connect(_ws_url()) as ws:
         ws.receive_text()  # connected
 
         svc = ConversationService(llm=Stub(), semantic_dedup=False, extract_entities=False)
@@ -222,8 +232,48 @@ async def _dialog(svc) -> None:
 
 def test_websocket_survives_client_disconnect():
     with live_client() as c:
-        with c.websocket_connect("/ws") as ws:
+        with c.websocket_connect(_ws_url()) as ws:
             ws.receive_text()
 
         # Клиент отвалился — запись в память не должна падать
         mem_svc.add_fact("После отключения", source="test")
+
+
+# --- Токен на /ws (найдено код-ревью 20.08.2026: раньше подключиться и
+# слушать всю ленту событий мог кто угодно, без единой проверки) ---
+
+
+def test_websocket_rejects_missing_token_when_configured(temp_data_dir):
+    from fastapi import WebSocketDisconnect
+
+    from backend.core.jsonio import write_json
+
+    write_json(temp_data_dir / "auth.json", {"token": "local-secret"})
+
+    with live_client() as c:
+        with pytest.raises(WebSocketDisconnect):
+            with c.websocket_connect("/ws"):
+                pass
+
+
+def test_websocket_rejects_wrong_token(temp_data_dir):
+    from fastapi import WebSocketDisconnect
+
+    from backend.core.jsonio import write_json
+
+    write_json(temp_data_dir / "auth.json", {"token": "local-secret"})
+
+    with live_client() as c:
+        with pytest.raises(WebSocketDisconnect):
+            with c.websocket_connect("/ws?token=wrong"):
+                pass
+
+
+def test_websocket_accepts_correct_token(temp_data_dir):
+    from backend.core.jsonio import write_json
+
+    write_json(temp_data_dir / "auth.json", {"token": "local-secret"})
+
+    with live_client() as c, c.websocket_connect("/ws?token=local-secret") as ws:
+        hello = json.loads(ws.receive_text())
+        assert hello["type"] == "connected"

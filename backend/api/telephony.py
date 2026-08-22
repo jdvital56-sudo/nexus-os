@@ -6,15 +6,45 @@ Low-cost stack: Vapi.ai (free 1000 mins) + Twilio ($15 trial credit)
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
+import os
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 
+from ..core.auth import get_token_dep
 from ..services.telephony_client import telephony_client
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/call", tags=["telephony"])
+auth = get_token_dep()
+
+
+def _verify_webhook_secret(request: Request) -> bool:
+    """Vapi/Twilio не умеют слать наш Bearer-токен — это они зовут нас, не
+    мы их (см. общий приём `_verify_query_token` в voice.py для того же
+    класса проблемы). Секрет кладётся в URL вебхука при настройке в
+    консоли Vapi/Twilio: /api/call/webhook/incoming?secret=...
+
+    Найдено код-ревью 20.08.2026: этих двух ручек не касался вообще
+    никакой auth — кто угодно с сетевым доступом мог слать поддельные
+    callId/callerId/pinCode напрямую, в обход настоящего звонка и лимита
+    попыток PIN (тот считается по caller_id из тела запроса, который
+    ничем не проверялся).
+    """
+    expected = os.getenv("TELEPHONY_WEBHOOK_SECRET", "")
+    if not expected:
+        # Не настроено — телефония и так не работает без VAPI/TWILIO
+        # ключей, но явно предупреждаем в логе, а не молча пропускаем.
+        logger.warning(
+            "TELEPHONY_WEBHOOK_SECRET не задан — вебхук телефонии "
+            "не защищён от поддельных запросов"
+        )
+        return True
+    provided = request.query_params.get("secret", "")
+    if provided != expected:
+        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    return True
 
 
 # ==================== REQUEST/RESPONSE MODELS ====================
@@ -63,7 +93,7 @@ class UsageStatsResponse(BaseModel):
 # ==================== ENDPOINTS ====================
 
 @router.post("/initiate", response_model=InitiateCallResponse)
-async def initiate_call(request: InitiateCallRequest):
+async def initiate_call(request: InitiateCallRequest, _=Depends(auth)):
     """
     Initiate outbound call via J.A.R.V.I.S.
     
@@ -94,7 +124,7 @@ async def initiate_call(request: InitiateCallRequest):
 
 
 @router.post("/{call_id}/end")
-async def end_call_endpoint(call_id: str):
+async def end_call_endpoint(call_id: str, _=Depends(auth)):
     """Terminate an active call"""
     try:
         result = await telephony_client.end_call(call_id)
@@ -110,7 +140,7 @@ async def end_call_endpoint(call_id: str):
 
 
 @router.get("/{call_id}", response_model=CallStatusResponse)
-async def get_call_status(call_id: str):
+async def get_call_status(call_id: str, _=Depends(auth)):
     """Get detailed status of a specific call"""
     try:
         details = await telephony_client.get_call_details(call_id)
@@ -135,7 +165,7 @@ async def get_call_status(call_id: str):
 
 
 @router.get("/active", response_model=List[CallStatusResponse])
-async def list_active_calls():
+async def list_active_calls(_=Depends(auth)):
     """List all currently active calls"""
     active = telephony_client.list_active_calls()
     
@@ -153,7 +183,9 @@ async def list_active_calls():
 
 
 @router.post("/webhook/incoming")
-async def handle_incoming_call_webhook(request: Request, background_tasks: BackgroundTasks):
+async def handle_incoming_call_webhook(
+    request: Request, background_tasks: BackgroundTasks, _=Depends(_verify_webhook_secret)
+):
     """
     Webhook endpoint for incoming calls from Vapi/Twilio
     
@@ -191,7 +223,7 @@ async def handle_incoming_call_webhook(request: Request, background_tasks: Backg
 
 
 @router.post("/webhook/pin")
-async def handle_pin_submission(request: Request):
+async def handle_pin_submission(request: Request, _=Depends(_verify_webhook_secret)):
     """
     Webhook endpoint for PIN code submission
     
@@ -226,7 +258,7 @@ async def handle_pin_submission(request: Request):
 
 
 @router.get("/usage", response_model=UsageStatsResponse)
-async def get_usage_stats():
+async def get_usage_stats(_=Depends(auth)):
     """Get telephony usage statistics (for monitoring billing)"""
     stats = await telephony_client.get_usage_stats()
     
@@ -239,7 +271,7 @@ async def get_usage_stats():
 
 
 @router.get("/setup-guide")
-async def get_setup_guide():
+async def get_setup_guide(_=Depends(auth)):
     """Return detailed setup instructions for telephony integration"""
     return {
         "instructions": telephony_client.get_setup_instructions(),
@@ -251,7 +283,8 @@ async def get_setup_guide():
             "TWILIO_AUTH_TOKEN": "Twilio Auth Token",
             "TWILIO_PHONE_NUMBER": "Your Twilio phone number (+E.164)",
             "CALL_PIN_HASH": "SHA256 hash of your 5-digit PIN",
-            "MAX_PIN_ATTEMPTS": "Max PIN attempts before lockout (default: 3)"
+            "MAX_PIN_ATTEMPTS": "Max PIN attempts before lockout (default: 3)",
+            "TELEPHONY_WEBHOOK_SECRET": "Свой секрет в URL вебхука Vapi/Twilio (?secret=...) — без него вебхук отвечает кому угодно",
         },
         "estimated_cost": {
             "monthly_base": "$1-5 USD",
@@ -263,7 +296,7 @@ async def get_setup_guide():
 
 
 @router.post("/test-pin-hash")
-async def test_pin_hash(request: Request):
+async def test_pin_hash(request: Request, _=Depends(auth)):
     """
     Utility endpoint to generate PIN hash for .env configuration
     

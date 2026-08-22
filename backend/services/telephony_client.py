@@ -4,12 +4,22 @@ Supports: Incoming/Outgoing calls, PIN authentication, Voice transcription
 Cost-optimized: Uses Vapi.ai free tier + Twilio trial ($15 credit)
 """
 
+import logging
 import os
 import httpx
 import hashlib
+import time
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
+
+# Сколько ждать после исчерпания попыток PIN, прежде чем звонящему снова
+# можно пробовать — найдено код-ревью 20.08.2026: раньше "локаут" сбрасывал
+# счётчик обратно в 0 в тот же момент, что его выставлял, то есть защиты от
+# перебора не было ни секунды.
+PIN_LOCKOUT_SECONDS = 300
 
 class TelephonyClient:
     """
@@ -41,6 +51,7 @@ class TelephonyClient:
         # State tracking
         self.active_calls: Dict[str, Dict] = {}
         self.pin_attempts: Dict[str, int] = {}
+        self.pin_lockout_until: Dict[str, float] = {}
         
     async def _vapi_request(self, method: str, endpoint: str, json_data: Optional[Dict] = None) -> Dict:
         """Make authenticated request to Vapi.ai API"""
@@ -149,29 +160,51 @@ class TelephonyClient:
     def verify_pin(self, caller_id: str, pin_code: str) -> bool:
         """
         Verify PIN code for incoming call authentication
-        
+
         Security Features:
         - Hash comparison (never store plain PIN)
         - Rate limiting (max 3 attempts per caller)
-        - Auto-lockout after max attempts
+        - Real lockout after max attempts (PIN_LOCKOUT_SECONDS)
+
+        Найдено код-ревью 20.08.2026, два реальных бага в этой функции:
+        1. Без CALL_PIN_HASH в .env раньше пускало ЛЮБОЙ ввод («режим
+           разработки») — телефонная линия без пароля вообще, если
+           фаундер забудет его задать перед включением фичи. Теперь без
+           настроенного PIN доступ отказан по умолчанию (fail closed), не
+           разрешён.
+        2. "Локаут" после исчерпания попыток тут же сбрасывал счётчик в 0
+           в момент срабатывания — следующая же попытка (даже в том же
+           звонке) начинала отсчёт заново, реальной защиты от перебора не
+           было ни секунды. Теперь настоящая блокировка по времени.
         """
         if not self.pin_hash:
-            # No PIN configured - allow access (development mode)
-            return True
-            
-        # Check attempt limit
+            logger.warning(
+                "CALL_PIN_HASH не задан — доступ по телефону отказан по умолчанию, "
+                "не разрешён (было наоборот, найдено код-ревью 20.08.2026)"
+            )
+            return False
+
+        now = time.time()
+        locked_until = self.pin_lockout_until.get(caller_id)
+        if locked_until is not None:
+            if now < locked_until:
+                return False
+            # Блокировка истекла — начинаем с чистого счётчика
+            self.pin_lockout_until.pop(caller_id, None)
+            self.pin_attempts.pop(caller_id, None)
+
         attempts = self.pin_attempts.get(caller_id, 0)
         if attempts >= self.max_attempts:
-            # Lockout - clear attempts after 5 minutes
-            self.pin_attempts[caller_id] = 0
+            self.pin_lockout_until[caller_id] = now + PIN_LOCKOUT_SECONDS
             return False
-            
+
         # Hash the provided PIN and compare
         input_hash = hashlib.sha256(pin_code.encode()).hexdigest()
-        
+
         if input_hash == self.pin_hash:
             # Success - reset attempts
             self.pin_attempts.pop(caller_id, None)
+            self.pin_lockout_until.pop(caller_id, None)
             return True
         else:
             # Failure - increment counter
@@ -312,6 +345,12 @@ class TelephonyClient:
    - Choose 5-digit PIN (e.g., 44435)
    - Generate hash: python -c "import hashlib; print(hashlib.sha256(b'44435').hexdigest())"
    - Add to .env: CALL_PIN_HASH=generated_hash
+
+3.5. Webhook Secret (защита от поддельных запросов):
+   - Придумайте свой секрет, добавьте в .env: TELEPHONY_WEBHOOK_SECRET=your_secret
+   - В консоли Vapi/Twilio укажите URL вебхука с этим секретом в строке
+     запроса: https://.../api/call/webhook/incoming?secret=your_secret
+   - Без этого шага вебхук отвечает любому, кто его найдёт
 
 4. Test Call:
    - POST /api/call/initiate with {"to_number": "+1234567890"}

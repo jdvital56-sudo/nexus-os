@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Radio } from 'lucide-react';
 import { CARD, Empty, NUM, PageHeader, Pill, when } from '../components/ui';
+import { authToken } from '../lib/api';
 
 // Живая лента событий из шины (/ws). Раньше экран показывал список агентов
 // и последних задач — то есть то же, что на других экранах, только мельче.
@@ -58,10 +59,13 @@ function describe(e: Envelope): string {
   return text.slice(0, 160);
 }
 
-// Шина висит в корне (/ws), а не под /api — префикса у её роутера нет
+// Шина висит в корне (/ws), а не под /api — префикса у её роутера нет.
+// Токен — в строке запроса: браузерный WebSocket API не умеет слать
+// Authorization при подключении (найдено код-ревью 20.08.2026: ручка
+// раньше вообще не проверяла токен, слушать мог кто угодно).
 const WS_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8420/api')
   .replace(/^http/, 'ws')
-  .replace(/\/api\/?$/, '') + '/ws';
+  .replace(/\/api\/?$/, '') + '/ws' + (authToken ? `?token=${encodeURIComponent(authToken)}` : '');
 
 export default function ActivityScreen() {
   const [events, setEvents] = useState<Envelope[]>([]);
