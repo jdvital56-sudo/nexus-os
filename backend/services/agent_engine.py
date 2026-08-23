@@ -132,15 +132,29 @@ def verify_librarian(ctx: AgentContext, act_results: list[dict]) -> dict:
 # === Reviewer (QA Guard) ===
 
 def orient_reviewer(ctx: AgentContext) -> dict:
-    """Reviewer: Read recent changes to the graph."""
+    """Reviewer: конкретная задача — уходит в настоящий ревью незакоммиченных
+    изменений (git diff + вердикт модели, см. _review_directed). Без задачи —
+    прежний обход графа на предмет узлов без единой связи (плановый прогон).
+
+    23.08.2026: раньше эта роль ВСЕГДА заводила ещё одну задачу «кто-то
+    пусть свяжет узел» и игнорировала переданную задачу целиком — даже
+    попроси её «проверь код» она бы не взглянула ни на один файл. Фаундер
+    прямо сказал: агенты должны реально работать, не быть трекерами.
+    """
+    if ctx.task and ctx.task.strip():
+        ctx.log_msg(f"Orient: реальная задача рецензии — «{ctx.task[:80]}»")
+        return {"directed": True}
     stats = graph_svc.get_stats()
     recent_nodes = graph_svc.list_nodes(limit=20)
     ctx.log_msg(f"Orient: graph has {stats.nodes} nodes, reviewing {len(recent_nodes)} recent")
-    return {"stats": stats.model_dump(), "recent_count": len(recent_nodes)}
+    return {"directed": False, "stats": stats.model_dump(), "recent_count": len(recent_nodes)}
 
 
 def observe_reviewer(ctx: AgentContext, orient_data: dict) -> list:
-    """Reviewer: Collect nodes/edges to check."""
+    """Reviewer: при директиве — сама задача. Иначе — узлы графа без связей,
+    как раньше."""
+    if orient_data.get("directed"):
+        return [{"directed": True, "task": ctx.task}]
     nodes = graph_svc.list_nodes(limit=50)
     issues = []
     # Check for orphan nodes (no edges)
@@ -160,10 +174,12 @@ def observe_reviewer(ctx: AgentContext, orient_data: dict) -> list:
     return issues
 
 
-def think_reviewer(ctx: AgentContext, issues: list) -> list[dict]:
-    """Reviewer: Decide which issues need fixing."""
+def think_reviewer(ctx: AgentContext, items: list) -> list[dict]:
+    """Reviewer: Decide which issues need fixing — или одна директива ревью."""
+    if items and items[0].get("directed"):
+        return [{"action": "review_directed", "task": items[0]["task"]}]
     actions = []
-    for issue in issues:
+    for issue in items:
         if issue["type"] == "orphan_node":
             actions.append({
                 "action": "flag_orphan",
@@ -175,11 +191,88 @@ def think_reviewer(ctx: AgentContext, issues: list) -> list[dict]:
     return actions
 
 
+def _git_diff(ctx: AgentContext) -> str:
+    """Diff незакоммиченного в репозитории. Пустая строка — либо ничего не
+    менялось, либо git недоступен (не считается ошибкой всего цикла)."""
+    import subprocess
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    try:
+        proc = subprocess.run(
+            ["git", "diff", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except Exception as e:
+        ctx.log_msg(f"Act: git diff недоступен — {e}")
+        return ""
+    diff = proc.stdout.strip()
+    # Длинный diff в промпт целиком не влезет разумно — режем, как в
+    # content_factory.py режет длинные сценарии
+    return diff[:12000] + "\n... (обрезано)" if len(diff) > 12000 else diff
+
+
+def _review_directed(ctx: AgentContext, task: str) -> dict:
+    """Настоящий ревью: задание — это уже сам предмет проверки (qa_guard.py
+    кладёт туда содержимое артефакта целиком, голосовая команда — короткую
+    просьбу). Если формулировка похожа на просьбу посмотреть код/изменения
+    — дополнительно прикладываем git diff незакоммиченного как контекст,
+    не заменяем им задание."""
+    import asyncio
+    import re
+
+    from .llm import LLMService
+    from ..core.config import settings
+
+    diff_context = ""
+    if re.search(r"код|diff|измен|правк|коммит|code|changes?\b", task, re.IGNORECASE):
+        diff = _git_diff(ctx)
+        if diff:
+            diff_context = f"\n\nDiff незакоммиченных изменений в репозитории:\n{diff}"
+
+    llm = LLMService(provider="deepseek", model="deepseek-chat", api_key=settings.deepseek_api_key)
+    prompt = (
+        f"{task}{diff_context}\n\n"
+        "Дай короткий вердикт по одной из двух форм:\n"
+        '— если нашёл реальную проблему: начни строку с "Issue: " и опиши "'
+        "конкретно, с местом в тексте/коде, не общими словами;\n"
+        '— если всё выглядит нормально: одна строка "OK: " и короткое пояснение.\n'
+        "Не выдумывай проблемы ради проблем."
+    )
+    try:
+        verdict = asyncio.run(llm.generate_response(prompt, kind=budget.BACKGROUND)).strip()
+    except Exception as e:
+        ctx.log_msg(f"Act: вердикт не удался — {e}")
+        return {"status": "error", "task": task, "error": str(e)}
+
+    # qa_guard.py разбирает именно ctx.log (result.output), не структурный
+    # result — вердикт обязан попасть туда целиком, строка за строкой
+    for line in verdict.splitlines():
+        if line.strip():
+            ctx.log_msg(line.strip())
+
+    from . import memory as mem_svc
+
+    fact = mem_svc.add_fact(
+        content=f"Рецензия «{task[:200]}»: {verdict}",
+        source="reviewer",
+        confidence=0.6,
+    )
+    ctx.log_msg(f"Act: вердикт записан в память ({fact.id})")
+    return {"status": "reviewed", "task": task, "verdict": verdict, "fact_id": fact.id}
+
+
 def act_reviewer(ctx: AgentContext, actions: list[dict]) -> list[dict]:
-    """Reviewer: Create review tasks for flagged issues."""
+    """Reviewer: реальный ревью по директиве, иначе — заводит задачи по
+    узлам без связей, как раньше."""
     results = []
     for action in actions:
-        if action["action"] == "flag_orphan":
+        if action["action"] == "review_directed":
+            results.append(_review_directed(ctx, action["task"]))
+        elif action["action"] == "flag_orphan":
             try:
                 task = task_svc.create_task(task_svc.TaskCreate(
                     title=f"Link orphan node: {action['label']}",
@@ -195,7 +288,11 @@ def act_reviewer(ctx: AgentContext, actions: list[dict]) -> list[dict]:
 
 
 def verify_reviewer(ctx: AgentContext, act_results: list[dict]) -> dict:
-    """Reviewer: Summarize review findings."""
+    """Reviewer: Summarize review findings — или итог настоящего ревью."""
+    reviewed = [r for r in act_results if r.get("status") == "reviewed"]
+    if reviewed:
+        ctx.log_msg(f"Verify: вердикт готов — {reviewed[0]['verdict'][:120]}")
+        return {"status": "reviewed", "verdict": reviewed[0]["verdict"], "fact_id": reviewed[0]["fact_id"]}
     tasks_created = sum(1 for r in act_results if r.get("status") == "task_created")
     ctx.log_msg(f"Verify: {tasks_created} tasks created for issues")
     return {"tasks_created": tasks_created, "total_issues": len(act_results)}
@@ -204,15 +301,36 @@ def verify_reviewer(ctx: AgentContext, act_results: list[dict]) -> dict:
 # === Builder ===
 
 def orient_builder(ctx: AgentContext) -> dict:
-    """Builder: Check tasks, identify what needs to be built."""
+    """Builder: конкретная задача — уходит в настоящее планирование
+    реализации (см. _build_directed). Без задачи — прежний обход
+    todo/in_progress задач (плановый прогон, не директива).
+
+    23.08.2026: раньше при любом вызове Строитель просто помечал задачу
+    статусом «в работе» и добавлял узел графа — кода не писал и не
+    предлагал никогда, даже по прямой просьбе. Фаундер прямо сказал:
+    агенты должны реально работать, не быть трекерами.
+
+    Сознательное ограничение, оставленное намеренно: Строитель НЕ пишет
+    файлы в боевом репозитории сам и не коммитит — только предлагает
+    конкретный план/патч, который проверяет человек, прежде чем он попадёт
+    в код. Это то же правило «безопасность важнее самостоятельности»,
+    что уже действует для computer_use.py и подтверждения кликов — не
+    новое исключение, а тот же принцип, применённый здесь.
+    """
+    if ctx.task and ctx.task.strip():
+        ctx.log_msg(f"Orient: реальная задача на реализацию — «{ctx.task[:80]}»")
+        return {"directed": True}
     tasks = task_svc.list_tasks(status="todo")
     in_progress = task_svc.list_tasks(status="in_progress")
     ctx.log_msg(f"Orient: {len(tasks)} todo tasks, {len(in_progress)} in progress")
-    return {"todo": len(tasks), "in_progress": len(in_progress), "tasks": [t.model_dump() for t in tasks[:5]]}
+    return {"directed": False, "todo": len(tasks), "in_progress": len(in_progress), "tasks": [t.model_dump() for t in tasks[:5]]}
 
 
 def observe_builder(ctx: AgentContext, orient_data: dict) -> list:
-    """Builder: Collect buildable tasks."""
+    """Builder: при директиве — сама задача. Иначе — задачи со словами
+    build/create/implement в названии, как раньше."""
+    if orient_data.get("directed"):
+        return [{"directed": True, "task": ctx.task}]
     buildable = []
     for t in orient_data.get("tasks", []):
         if "build" in t["title"].lower() or "create" in t["title"].lower() or "implement" in t["title"].lower():
@@ -221,10 +339,12 @@ def observe_builder(ctx: AgentContext, orient_data: dict) -> list:
     return buildable
 
 
-def think_builder(ctx: AgentContext, tasks: list) -> list[dict]:
-    """Builder: Plan build steps."""
+def think_builder(ctx: AgentContext, items: list) -> list[dict]:
+    """Builder: Plan build steps — или одна директива на реализацию."""
+    if items and items[0].get("directed"):
+        return [{"action": "build_directed", "task": items[0]["task"]}]
     actions = []
-    for t in tasks:
+    for t in items:
         actions.append({
             "action": "build",
             "task_id": t["id"],
@@ -235,11 +355,54 @@ def think_builder(ctx: AgentContext, tasks: list) -> list[dict]:
     return actions
 
 
+def _build_directed(ctx: AgentContext, task: str) -> dict:
+    """Настоящий план реализации моделью — не пишет и не коммитит код сам
+    (см. пояснение в orient_builder), только предлагает конкретный план,
+    который человек проверяет и применяет сам."""
+    import asyncio
+
+    from .llm import LLMService
+    from ..core.config import settings
+
+    llm = LLMService(provider="deepseek", model="deepseek-chat", api_key=settings.deepseek_api_key)
+    prompt = (
+        f"Задача на реализацию: {task}\n\n"
+        "Предложи конкретный план: какие файлы, скорее всего, нужно тронуть, "
+        "какие функции/модули завести или поменять, в каком порядке. Если "
+        "уместно — короткий фрагмент кода как иллюстрация, не полный файл. "
+        "Не выдумывай точные пути файлов, если не уверен — скажи, что нужно "
+        "уточнить структуру проекта. Это ПРЕДЛОЖЕНИЕ для человека, не "
+        "выполненная работа — не пиши так, будто уже сделал."
+    )
+    try:
+        plan = asyncio.run(llm.generate_response(prompt, kind=budget.BACKGROUND)).strip()
+    except Exception as e:
+        ctx.log_msg(f"Act: план не удался — {e}")
+        return {"status": "error", "task": task, "error": str(e)}
+
+    for line in plan.splitlines():
+        if line.strip():
+            ctx.log_msg(line.strip())
+
+    from . import memory as mem_svc
+
+    fact = mem_svc.add_fact(
+        content=f"Предложенный план реализации «{task[:200]}»: {plan}",
+        source="builder",
+        confidence=0.5,  # план, не факт — достоверность ниже находок Исследователя/Рецензента
+    )
+    ctx.log_msg(f"Act: план записан в память ({fact.id}), ждёт вашей проверки")
+    return {"status": "proposed", "task": task, "plan": plan, "fact_id": fact.id}
+
+
 def act_builder(ctx: AgentContext, actions: list[dict]) -> list[dict]:
-    """Builder: Mark tasks as in_progress, create implementation notes."""
+    """Builder: реальный план реализации по директиве, иначе — помечает
+    задачи «в работе» и заводит узел графа, как раньше."""
     results = []
     for action in actions:
-        if action["action"] == "build":
+        if action["action"] == "build_directed":
+            results.append(_build_directed(ctx, action["task"]))
+        elif action["action"] == "build":
             try:
                 task_svc.update_task(action["task_id"], task_svc.TaskUpdate(status=task_svc.TaskStatus.IN_PROGRESS))
                 graph_svc.add_node(GraphNode(
@@ -256,7 +419,11 @@ def act_builder(ctx: AgentContext, actions: list[dict]) -> list[dict]:
 
 
 def verify_builder(ctx: AgentContext, act_results: list[dict]) -> dict:
-    """Builder: Verify builds."""
+    """Builder: Verify builds — или итог настоящего планирования."""
+    proposed = [r for r in act_results if r.get("status") == "proposed"]
+    if proposed:
+        ctx.log_msg(f"Verify: план готов — {proposed[0]['plan'][:120]}")
+        return {"status": "proposed", "plan": proposed[0]["plan"], "fact_id": proposed[0]["fact_id"]}
     started = sum(1 for r in act_results if r["status"] == "started")
     ctx.log_msg(f"Verify: {started} builds started")
     return {"builds_started": started}
@@ -265,17 +432,33 @@ def verify_builder(ctx: AgentContext, act_results: list[dict]) -> dict:
 # === Researcher ===
 
 def orient_researcher(ctx: AgentContext) -> dict:
-    """Researcher: Identify knowledge gaps."""
+    """Researcher: конкретный запрос — уходит в настоящее исследование
+    (веб-поиск + синтез, см. _research_directed ниже). Без запроса —
+    прежний автономный обход графа на предмет слабо связанных узлов
+    (плановый прогон, не директива фаундера/Джарвиса).
+
+    23.08.2026: раньше эта роль ВСЕГДА делала обход графа и игнорировала
+    переданную задачу (ctx.task) целиком — даже при вызове с конкретным
+    вопросом «разберись, почему X» реального исследования не происходило,
+    только создавалась ещё одна задача «кто-то пусть исследует». Фаундер
+    прямо сказал: агенты должны реально работать, не быть трекерами.
+    """
+    if ctx.task and ctx.task.strip():
+        ctx.log_msg(f"Orient: реальный запрос — «{ctx.task[:80]}»")
+        return {"directed": True}
     stats = graph_svc.get_stats()
     from . import memory as mem_svc
     mem_stats = mem_svc.get_stats()
     active = mem_stats.get('active', 0)
     ctx.log_msg(f"Orient: graph has {stats.nodes} nodes, memory has {active} active facts")
-    return {"graph": stats.model_dump(), "memory": mem_stats}
+    return {"directed": False, "graph": stats.model_dump(), "memory": mem_stats}
 
 
 def observe_researcher(ctx: AgentContext, orient_data: dict) -> list:
-    """Researcher: Find sparse areas in the graph."""
+    """Researcher: при директиве — сама задача, единственный пункт. Иначе —
+    слабо связанные узлы графа, как раньше."""
+    if orient_data.get("directed"):
+        return [{"directed": True, "query": ctx.task}]
     nodes = graph_svc.list_nodes(limit=100)
     sparse = []
     for node in nodes:
@@ -289,10 +472,12 @@ def observe_researcher(ctx: AgentContext, orient_data: dict) -> list:
     return sparse[:10]
 
 
-def think_researcher(ctx: AgentContext, sparse: list) -> list[dict]:
-    """Researcher: Plan research tasks."""
+def think_researcher(ctx: AgentContext, items: list) -> list[dict]:
+    """Researcher: Plan research tasks — или одно направленное действие."""
+    if items and items[0].get("directed"):
+        return [{"action": "research_directed", "query": items[0]["query"]}]
     actions = []
-    for node in sparse:
+    for node in items:
         actions.append({
             "action": "research",
             "node_id": node["id"],
@@ -303,11 +488,57 @@ def think_researcher(ctx: AgentContext, sparse: list) -> list[dict]:
     return actions
 
 
+def _research_directed(ctx: AgentContext, query: str) -> dict:
+    """Настоящее исследование: веб-поиск + синтез моделью, результат кладём
+    в память фактом — не заводим ещё одну задачу «кто-то пусть посмотрит»."""
+    import asyncio
+
+    from . import websearch
+    from .llm import LLMService
+    from ..core.config import settings
+
+    if not websearch.is_configured():
+        ctx.log_msg("Act: веб-поиск не настроен (нет FIRECRAWL_API_KEY) — не могу исследовать по-настоящему")
+        return {"status": "unavailable", "query": query, "reason": "web_search не настроен"}
+
+    try:
+        search_results = asyncio.run(websearch.run_tool({"query": query}))
+    except Exception as e:
+        ctx.log_msg(f"Act: веб-поиск не удался — {e}")
+        return {"status": "error", "query": query, "error": str(e)}
+
+    llm = LLMService(provider="deepseek", model="deepseek-chat", api_key=settings.deepseek_api_key)
+    prompt = (
+        f"Вопрос: {query}\n\nНайденные источники:\n{search_results}\n\n"
+        "Дай короткий фактический ответ на вопрос по источникам выше — "
+        "3-6 предложений, с конкретными цифрами/фактами, если они есть. "
+        "Если источники не отвечают на вопрос — скажи это прямо, не выдумывай."
+    )
+    try:
+        finding = asyncio.run(llm.generate_response(prompt, kind=budget.BACKGROUND)).strip()
+    except Exception as e:
+        ctx.log_msg(f"Act: синтез находки не удался — {e}")
+        return {"status": "error", "query": query, "error": str(e)}
+
+    from . import memory as mem_svc
+
+    fact = mem_svc.add_fact(
+        content=f"Исследование «{query}»: {finding}",
+        source="researcher",
+        confidence=0.6,
+    )
+    ctx.log_msg(f"Act: находка записана в память ({fact.id})")
+    return {"status": "found", "query": query, "finding": finding, "fact_id": fact.id}
+
+
 def act_researcher(ctx: AgentContext, actions: list[dict]) -> list[dict]:
-    """Researcher: Create research tasks and notes."""
+    """Researcher: реальное исследование по директиве, иначе — заводит
+    задачи по слабо связанным узлам графа, как раньше."""
     results = []
     for action in actions:
-        if action["action"] == "research":
+        if action["action"] == "research_directed":
+            results.append(_research_directed(ctx, action["query"]))
+        elif action["action"] == "research":
             try:
                 task = task_svc.create_task(task_svc.TaskCreate(
                     title=f"Research: {action['label']}",
@@ -323,7 +554,11 @@ def act_researcher(ctx: AgentContext, actions: list[dict]) -> list[dict]:
 
 
 def verify_researcher(ctx: AgentContext, act_results: list[dict]) -> dict:
-    """Researcher: Summarize research plan."""
+    """Researcher: Summarize research plan — или итог настоящего исследования."""
+    found = [r for r in act_results if r.get("status") == "found"]
+    if found:
+        ctx.log_msg(f"Verify: находка готова — {found[0]['finding'][:120]}")
+        return {"status": "found", "finding": found[0]["finding"], "fact_id": found[0]["fact_id"]}
     tasks_created = sum(1 for r in act_results if r.get("status") == "task_created")
     ctx.log_msg(f"Verify: {tasks_created} research tasks created")
     return {"research_tasks": tasks_created}
@@ -595,6 +830,7 @@ def _think_with_llm(ctx: AgentContext, critical_tasks: list) -> tuple[list[dict]
 
     from . import memory as mem_svc
     from .llm import LLMService
+    from ..core.config import settings
 
     stats = graph_svc.get_stats()
     all_tasks = task_svc.list_tasks()
@@ -616,7 +852,13 @@ def _think_with_llm(ctx: AgentContext, critical_tasks: list) -> tuple[list[dict]
         state=state, memory=memory_block, tasks=tasks_block, agents=agents_block
     )
 
-    llm = LLMService()
+    # 23.08.2026: найдено при работе над Content Factory — LLMService() без
+    # аргументов берёт NEXSYS_LLM_PROVIDER=ollama из .env, а локальный
+    # Ollama на машине не поднят. Реальные персоны сидят на deepseek-chat
+    # с DEEPSEEK_API_KEY — этот вызов молча падал в except ниже и уходил в
+    # маршрут по тегам всегда, «умная» LLM-маршрутизация Джарвиса ни разу
+    # реально не срабатывала.
+    llm = LLMService(provider="deepseek", model="deepseek-chat", api_key=settings.deepseek_api_key)
     raw = asyncio.run(llm.generate_response(prompt, kind=budget.BACKGROUND, json_mode=True))
 
     text = raw.strip()

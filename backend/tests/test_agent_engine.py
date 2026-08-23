@@ -45,7 +45,13 @@ def test_librarian_cycle_with_documents(client):
 
 
 def test_reviewer_cycle(client):
-    """Reviewer should check graph and create tasks for issues."""
+    """Reviewer should check graph and create tasks for issues.
+
+    Пустая задача — не директива на настоящий ревью (см. 23.08.2026,
+    agent_engine.orient_reviewer): без неё эта проверка обошла бы граф
+    и звала настоящий DeepSeek за реальные деньги в обычном тестовом
+    прогоне.
+    """
     # Create reviewer
     r = client.post("/api/agents", json={"name": "QA", "role": "reviewer"})
     agent_id = r.json()["id"]
@@ -54,18 +60,23 @@ def test_reviewer_cycle(client):
     client.post("/api/graph/nodes", json={"id": "orphan1", "label": "Lonely Node", "node_type": "document"})
 
     # Run reviewer
-    r = client.post(f"/api/agents/{agent_id}/run", json={"task": "check graph", "context": {}})
+    r = client.post(f"/api/agents/{agent_id}/run", json={"task": "", "context": {}})
     data = r.json()
     assert data["status"] == "completed"
     assert "Orient" in data["output"]
 
 
 def test_builder_cycle(client):
-    """Builder role should execute a real cycle."""
+    """Builder role should execute a real cycle.
+
+    Пустая задача — не директива (23.08.2026, agent_engine.orient_builder):
+    непустая звала бы настоящий DeepSeek за реальный план в обычном
+    тестовом прогоне.
+    """
     r = client.post("/api/agents", json={"name": "Build", "role": "builder"})
     agent_id = r.json()["id"]
 
-    r = client.post(f"/api/agents/{agent_id}/run", json={"task": "build something", "context": {}})
+    r = client.post(f"/api/agents/{agent_id}/run", json={"task": "", "context": {}})
     data = r.json()
     assert data["status"] == "completed"
     assert "builder" in data["output"].lower()

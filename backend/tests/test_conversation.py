@@ -453,6 +453,69 @@ async def test_create_task_by_voice_command():
     assert llm.calls == []
 
 
+# --- «Запиши идею X» — раздел «Идеи», отдельно от задач (23.08.2026) ---
+
+
+@pytest.mark.asyncio
+async def test_record_idea_with_inline_content():
+    from backend.services import ideas as ideas_svc
+
+    llm = FakeLLM("модель не должна отвечать")
+    svc = make_service(llm)
+
+    reply = await svc.handle("web", "42", "запиши идею: голосовые уведомления о готовых задачах")
+    await svc.drain()
+
+    assert "голосовые уведомления" in reply.lower()
+    contents = [i.content for i in ideas_svc.list_ideas()]
+    assert "голосовые уведомления о готовых задачах" in contents
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_record_idea_without_content_uses_last_user_message():
+    """«Запиши это на будущее» без продолжения — берём то, что фаундер
+    сказал последним, не то, что ответил Джарвис."""
+    from backend.services import ideas as ideas_svc
+
+    llm = FakeLLM("отвечаю на предыдущий вопрос")
+    svc = make_service(llm)
+
+    await svc.handle("web", "42", "а что если сделать ночной прогон агентов автоматическим")
+    await svc.drain()
+
+    reply = await svc.handle("web", "42", "запиши это на будущее")
+    await svc.drain()
+
+    contents = [i.content for i in ideas_svc.list_ideas()]
+    assert "ночной прогон агентов автоматическим" in contents[0]
+    assert "Записал в идеи" in reply
+
+
+@pytest.mark.asyncio
+async def test_record_idea_without_content_and_no_history_asks_for_it():
+    llm = FakeLLM("не важно")
+    svc = make_service(llm)
+
+    reply = await svc.handle("web", "новый-42", "занеси в идеи")
+    await svc.drain()
+
+    assert "какую идею" in reply.lower()
+
+
+@pytest.mark.asyncio
+async def test_ideas_do_not_create_tasks():
+    from backend.services import tasks as task_svc
+
+    llm = FakeLLM("не важно")
+    svc = make_service(llm)
+
+    await svc.handle("web", "42", "запиши идею: попробовать новый TTS")
+    await svc.drain()
+
+    assert task_svc.list_tasks() == []
+
+
 # --- «Создай контент про X» → Content Factory, первый срез (22.08.2026) ---
 
 
@@ -1057,3 +1120,72 @@ async def test_other_personas_never_call_the_critic_or_advisor():
     await svc.drain()
 
     assert llm.chat_calls == []
+
+
+# --- handle_stream: 23.08.2026, тот же ответ, но по кускам ---
+
+
+async def _collect(agen):
+    return [chunk async for chunk in agen]
+
+
+@pytest.mark.asyncio
+async def test_handle_stream_yields_llm_reply():
+    """FakeLLM без provider — тот же запасной путь, что у реальных
+    Gemini/Anthropic/Ollama: один кусок, но собранный текст совпадает
+    с обычным handle()."""
+    llm = FakeLLM("привет из потока")
+    svc = make_service(llm)
+
+    chunks = await _collect(svc.handle_stream("web", "42", "привет"))
+    await svc.drain()
+
+    assert "".join(chunks) == "привет из потока"
+
+
+@pytest.mark.asyncio
+async def test_handle_stream_interceptor_still_returns_whole_reply():
+    """Перехватчики (календарь/задача/...) не режутся на куски — они и
+    так почти мгновенные."""
+    llm = FakeLLM("не должно быть использовано")
+    svc = make_service(llm)
+
+    chunks = await _collect(svc.handle_stream("web", "42", "создай задачу купить молоко"))
+    await svc.drain()
+
+    reply = "".join(chunks)
+    assert "молоко" in reply.lower() or "задача" in reply.lower()
+    assert reply != "не должно быть использовано"
+
+
+@pytest.mark.asyncio
+async def test_handle_stream_with_critic_yields_single_final_chunk():
+    """Критику нужен цельный черновик — стриминг для таких персон не
+    ломается, просто не даёт выигрыша в скорости: один кусок в конце."""
+    llm = FakeLLM("черновик Сехмет")
+    llm.chat_reply = "PASS. Находка обоснована."
+    svc = make_service(llm)
+
+    chunks = await _collect(svc.handle_stream("web", "42", "что случилось", "Sekhmet"))
+    await svc.drain()
+
+    assert chunks == ["черновик Сехмет"]
+    assert len(llm.chat_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_handle_stream_matches_handle_for_same_input():
+    """Один и тот же запрос через handle() и handle_stream() должен дать
+    один и тот же итоговый текст — стриминг не должен незаметно менять
+    сам ответ, только его доставку."""
+    llm_a = FakeLLM("одинаковый ответ")
+    llm_b = FakeLLM("одинаковый ответ")
+    svc_a = make_service(llm_a)
+    svc_b = make_service(llm_b)
+
+    reply = await svc_a.handle("web", "1", "вопрос")
+    await svc_a.drain()
+    chunks = await _collect(svc_b.handle_stream("web", "2", "вопрос"))
+    await svc_b.drain()
+
+    assert reply == "".join(chunks)

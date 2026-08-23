@@ -46,7 +46,9 @@ def test_delete_agent(client):
 def test_run_agent(client):
     r = client.post("/api/agents", json={"name": "Runner", "role": "reviewer"})
     aid = r.json()["id"]
-    r = client.post(f"/api/agents/{aid}/run", json={"task": "review code", "context": {}})
+    # Пустая задача — не директива на настоящий ревью (23.08.2026): с
+    # непустой этот тест звал бы настоящий DeepSeek за реальные деньги.
+    r = client.post(f"/api/agents/{aid}/run", json={"task": "", "context": {}})
     assert r.status_code == 200
     data = r.json()
     assert data["agent_id"] == aid

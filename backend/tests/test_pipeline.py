@@ -1,4 +1,21 @@
 """Content pipeline tests."""
+import pytest
+
+from backend.services.llm import LLMService
+
+
+@pytest.fixture(autouse=True)
+def no_real_llm_calls(monkeypatch):
+    """23.08.2026: Reviewer теперь реально зовёт LLM, когда ему дают
+    конкретную задачу (ctx.task) — content_pipeline.advance() запускает
+    его fire-and-forget при draft→review (результат отбрасывается, но
+    вызов настоящий). Без заглушки эти тесты стучались бы в настоящий
+    DeepSeek за реальные деньги."""
+
+    async def fake_generate_response(self, prompt, context="", kind="interactive", json_mode=False):
+        return "OK: тестовая заглушка, реальный вызов не делался"
+
+    monkeypatch.setattr(LLMService, "generate_response", fake_generate_response)
 
 
 def test_create_content(client):
