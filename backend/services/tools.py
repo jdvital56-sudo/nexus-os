@@ -12,14 +12,49 @@
 """
 import json
 import logging
-from typing import Any, Callable, Awaitable
+from typing import Any, AsyncGenerator, Callable, Awaitable
 
 import httpx
 
-from . import budget, computer_use, websearch
+from . import budget, computer_use, tts, websearch
 from .llm import LLMMessage, LLMResponse, LLMService
 
 logger = logging.getLogger(__name__)
+
+# 23.08.2026: фаундер спросил Ра голосом, где и как подключён её голос — она
+# честно не знала и начала расспрашивать его самого (её единственные
+# источники — recall() по прошлым разговорам и заметки Obsidian, а там про
+# TTS/wakeword ни слова, проверено). У неё не было способа посмотреть в
+# конфиг сама. Этот инструмент даёт ей такой способ — не гадать и не
+# переспрашивать то, что физически лежит в .env этой же машины.
+SYSTEM_STATUS_SPEC = {
+    "type": "function",
+    "function": {
+        "name": "system_status",
+        "description": (
+            "Текущая техническая конфигурация Nexus OS: какой движок и "
+            "голос синтеза речи (TTS) сейчас включён, готов ли он к работе, "
+            "и как устроено пробуждение по имени «Джарвис». Зови это вместо "
+            "вопроса фаундеру «где именно вы это подключали» — можно "
+            "посмотреть самой."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+}
+
+
+async def run_system_status(_arguments: dict, _action_key: str = "") -> str:
+    s = tts.status()
+    lines = [
+        f"TTS-движок: {s['engine']} ({s['detail']})",
+        f"Готов к синтезу: {'да' if s['ready'] else 'нет'}",
+        f"Текущий голос: {s['voice']}",
+        "Пробуждение по имени «Джарвис»: браузер — встроенное распознавание "
+        "речи Chrome/Edge; плавающий виджет (Electron) — локальный офлайн-"
+        "сервер wakeword/server.py на Vosk, слушает порт 127.0.0.1:8422, "
+        "запускается вручную через wakeword/start.ps1.",
+    ]
+    return "\n".join(lines)
 
 # Сколько раз подряд модель может позвать инструмент, прежде чем мы прервём.
 # Без предела модель, не найдя ответа, ищет по кругу и тратит деньги.
@@ -47,7 +82,13 @@ _REGISTRY: dict[str, tuple[dict[str, Any], Callable[[dict], Awaitable[str]]]] = 
     "screen_type": (computer_use.SCREEN_TYPE_SPEC, computer_use.run_screen_type),
     "screen_key": (computer_use.SCREEN_KEY_SPEC, computer_use.run_screen_key),
     "screen_scroll": (computer_use.SCREEN_SCROLL_SPEC, computer_use.run_screen_scroll),
+    "system_status": (SYSTEM_STATUS_SPEC, run_system_status),
 }
+
+# Кто может спросить систему о её же настройках (голос, wakeword). Только
+# Ра — тот же круг, что и computer_use ниже: он общий голос, ему и задают
+# вопросы вида «как ты сейчас настроена».
+SYSTEM_STATUS_PERSONAS = {"orpheus"}
 
 _COMPUTER_USE_TOOLS = ["screen_look", "screen_click", "screen_type", "screen_key", "screen_scroll"]
 
@@ -64,6 +105,8 @@ def tools_for(persona_name: str) -> list[dict[str, Any]]:
     # не сработает (найдено код-ревью 19.08.2026).
     if name in COMPUTER_USE_PERSONAS and computer_use.vision_configured():
         tools.extend(_REGISTRY[key][0] for key in _COMPUTER_USE_TOOLS)
+    if name in SYSTEM_STATUS_PERSONAS:
+        tools.append(_REGISTRY["system_status"][0])
     return tools
 
 
@@ -204,3 +247,161 @@ async def chat_with_tools(
     )
     result.over_budget = not within_budget
     return result
+
+
+# === Потоковый путь ===
+#
+# 23.08.2026: фаундер пожаловался вживую — «отвечает, но очень медленно,
+# большая задержка». Причина не в самой модели (~1.8с), а в том, что весь
+# конвейер ждал ПОЛНЫЙ текст ответа, прежде чем хоть что-то показать или
+# озвучить, — на длинном ответе это несколько секунд тишины впустую.
+# Раунды с реальным вызовом инструмента всё равно нельзя ни исполнить, ни
+# озвучить частично: там ждём целиком, как и раньше. Но финальный раунд
+# (тот, что реально произносится вслух) отдаёт текст по мере генерации.
+
+
+async def _iter_sse_events(
+    client: httpx.AsyncClient, url: str, headers: dict, payload: dict
+) -> AsyncGenerator[tuple[str, Any], None]:
+    """Разбирает SSE-поток одного раунда OpenAI-совместимого API.
+
+    Отдаёт ("content", кусок_текста) по мере прихода и, если раунд решил
+    вызвать инструмент — ("tool_calls", список) в конце: id/имя/аргументы
+    приходят кусками по индексу, здесь они уже склеены в тот же вид, что и
+    в обычном (нестримовом) ответе, дальше по коду разницы нет.
+    """
+    calls: dict[int, dict] = {}
+    usage: dict[str, int] = {}
+    async with client.stream("POST", url, headers=headers, json={**payload, "stream": True}) as response:
+        response.raise_for_status()
+        async for line in response.aiter_lines():
+            if not line.startswith("data:"):
+                continue
+            raw = line[len("data:"):].strip()
+            if raw == "[DONE]":
+                break
+            data = json.loads(raw)
+            if data.get("usage"):
+                usage = data["usage"]
+            choice = (data.get("choices") or [{}])[0]
+            delta = choice.get("delta") or {}
+            if delta.get("content"):
+                yield ("content", delta["content"])
+            for tc in delta.get("tool_calls") or []:
+                idx = tc.get("index", 0)
+                slot = calls.setdefault(
+                    idx, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}}
+                )
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
+                fn = tc.get("function") or {}
+                if fn.get("name"):
+                    slot["function"]["name"] += fn["name"]
+                if fn.get("arguments"):
+                    slot["function"]["arguments"] += fn["arguments"]
+    if calls:
+        yield ("tool_calls", [calls[i] for i in sorted(calls)])
+    if usage:
+        yield ("usage", usage)
+
+
+async def _plain_stream(
+    llm: LLMService, messages: list[LLMMessage], temperature: float, max_tokens: int, kind: str
+) -> AsyncGenerator[str, None]:
+    """Стриминг без инструментов вообще — персоне они не положены."""
+    # Возврат не проверяем: у потокового ответа нет LLMResponse, чтобы
+    # выставить over_budget — check() всё равно нужен ради своего побочного
+    # эффекта (BudgetExceeded для kind=background, событие в Activity).
+    budget.check(kind)
+    url = f"{llm.base_url}/chat/completions"
+    headers = {"Authorization": f"Bearer {llm.api_key}", "Content-Type": "application/json"}
+    history: list[dict[str, Any]] = [m.to_dict() for m in messages]
+    if llm.system_prompt and not any(m.get("role") == "system" for m in history):
+        history.insert(0, {"role": "system", "content": llm.system_prompt})
+    payload = {"model": llm.model, "messages": history, "temperature": temperature, "max_tokens": max_tokens}
+
+    total_usage: dict[str, int] = {}
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        async for kind_, value in _iter_sse_events(client, url, headers, payload):
+            if kind_ == "content":
+                yield value
+            elif kind_ == "usage":
+                for k, v in value.items():
+                    if isinstance(v, int):
+                        total_usage[k] = total_usage.get(k, 0) + v
+    budget.record(llm.model, total_usage)
+
+
+async def chat_with_tools_stream(
+    llm: LLMService,
+    messages: list[LLMMessage],
+    tools: list[dict[str, Any]],
+    temperature: float = 0.7,
+    max_tokens: int = 2000,
+    kind: str = "interactive",
+    action_key: str = "",
+) -> AsyncGenerator[str, None]:
+    """Как `chat_with_tools`, но финальный ответ отдаёт кусками по мере
+    генерации, а не одним блоком в конце. Раунды, где модель зовёт
+    инструмент, всё равно собираются целиком — частично пришедший вызов
+    ни исполнить, ни озвучить нельзя; в потоке они просто не производят
+    текста, который стоило бы отдавать наружу (проверено на практике
+    DeepSeek/OpenAI: раунд с tool_calls не шлёт content одновременно)."""
+    if not tools or not supports_tools(llm):
+        async for delta in _plain_stream(llm, messages, temperature, max_tokens, kind):
+            yield delta
+        return
+
+    # См. комментарий в _plain_stream выше — тот же резон.
+    budget.check(kind)
+    url = f"{llm.base_url}/chat/completions"
+    headers = {"Authorization": f"Bearer {llm.api_key}", "Content-Type": "application/json"}
+    history: list[dict[str, Any]] = [m.to_dict() for m in messages]
+    if llm.system_prompt and not any(m.get("role") == "system" for m in history):
+        history.insert(0, {"role": "system", "content": llm.system_prompt})
+
+    total_usage: dict[str, int] = {}
+
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        for round_number in range(MAX_ROUNDS + 1):
+            offer_tools = round_number < MAX_ROUNDS
+            payload: dict[str, Any] = {
+                "model": llm.model,
+                "messages": history,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            if offer_tools:
+                payload["tools"] = tools
+                payload["tool_choice"] = "auto"
+
+            tool_calls_this_round: list[dict] | None = None
+            content_parts: list[str] = []
+            async for kind_, value in _iter_sse_events(client, url, headers, payload):
+                if kind_ == "content":
+                    content_parts.append(value)
+                    yield value
+                elif kind_ == "tool_calls":
+                    tool_calls_this_round = value
+                elif kind_ == "usage":
+                    for k, v in value.items():
+                        if isinstance(v, int):
+                            total_usage[k] = total_usage.get(k, 0) + v
+
+            if not tool_calls_this_round:
+                budget.record(llm.model, total_usage)
+                return
+
+            history.append(
+                {"role": "assistant", "content": "".join(content_parts) or None, "tool_calls": tool_calls_this_round}
+            )
+            for call in tool_calls_this_round:
+                function = call.get("function") or {}
+                name = function.get("name") or ""
+                output = await _execute(name, function.get("arguments") or "{}", action_key)
+                history.append(
+                    {"role": "tool", "tool_call_id": call.get("id"), "content": output}
+                )
+
+    logger.warning("Модель не уложилась в %d обращений к инструментам (поток)", MAX_ROUNDS)
+    yield "Не удалось собрать ответ: слишком много обращений к поиску."

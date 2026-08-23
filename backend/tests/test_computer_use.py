@@ -279,5 +279,31 @@ def test_vision_configured_follows_the_env_key(with_gemini_key):
     assert cu.vision_configured()
 
 
+# --- system_status: Ра смотрит в свой же конфиг, а не спрашивает фаундера ---
+
+
+def test_orpheus_has_system_status_tool():
+    """Не завязан на ключи — в отличие от screen_look/web_search, читает
+    только .env этой же машины, ничего внешнего не требует."""
+    names = [t["function"]["name"] for t in tools_svc.tools_for("Orpheus")]
+    assert "system_status" in names
+
+
+def test_other_personas_do_not_have_system_status_tool():
+    for persona in ("Architect", "Sekhmet", "Philosopher"):
+        names = [t["function"]["name"] for t in tools_svc.tools_for(persona)]
+        assert "system_status" not in names
+
+
+@pytest.mark.asyncio
+async def test_system_status_reports_tts_and_wakeword(monkeypatch):
+    monkeypatch.setenv("NEXUS_TTS_ENGINE", "edge")
+    monkeypatch.setenv("NEXUS_TTS_VOICE", "ru-RU-DmitryNeural")
+    result = await tools_svc.run_system_status({}, "")
+    assert "edge" in result
+    assert "ru-RU-DmitryNeural" in result
+    assert "8422" in result
+
+
 def test_vision_not_configured_without_key(without_gemini_key):
     assert not cu.vision_configured()

@@ -8,7 +8,7 @@ import asyncio
 import hashlib
 import logging
 import re
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from ..agents.persona_manager import PersonaManager
 from ..core import eventbus
@@ -79,6 +79,18 @@ _OPEN_TRIGGER = re.compile(
 # задачу ...» — та же дисциплина: разбирается без модели, предсказуемо
 _TASK_TRIGGER = re.compile(
     r"^\s*(?:создай|поставь|добавь)\s+задачу\s+(?P<title>.+?)[\s.!?]*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# «Запиши идею X» / «запиши это как идею» / «запиши на будущее X» /
+# «добавь идею X» / «занеси в идеи X» — раздел «Идеи», отдельно от задач
+# (спецификация фаундера 23.08.2026, см. services/ideas.py). Содержимое
+# после ключевого слова необязательно — «запиши это на будущее» без
+# продолжения означает «то, что мы только что обсуждали», см. _try_idea.
+_IDEA_TRIGGER = re.compile(
+    r"^\s*(?:запиши|добавь|занеси)\s+"
+    r"(?:это\s+)?(?:как\s+)?(?:в\s+идеи|иде[юя]|на\s+будущее)"
+    r"\s*[:\-—]?\s*(?P<content>.*?)[\s.!?]*$",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -185,6 +197,13 @@ class ConversationService:
             await self._log_turn(channel, user_id, text, task_reply, "Задача")
             return task_reply
 
+        idea_reply = await self._try_idea(text, channel, user_id)
+        if idea_reply is not None:
+            self._emit_message(channel, "user", "Идея", text)
+            self._emit_message(channel, "assistant", "Идея", idea_reply)
+            await self._log_turn(channel, user_id, text, idea_reply, "Идея")
+            return idea_reply
+
         content_reply = await self._try_content(text)
         if content_reply is not None:
             self._emit_message(channel, "user", "Контент", text)
@@ -231,6 +250,130 @@ class ConversationService:
         self._spawn(self._extract(channel, user_id, text, reply, llm))
         return reply
 
+    async def handle_stream(
+        self,
+        channel: str,
+        user_id: str,
+        text: str,
+        persona: str | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Как `handle()`, но обычный ответ персоны уходит кусками по мере
+        генерации — 23.08.2026, ради этого весь стриминг и затевался: ждать
+        весь текст перед первым звуком было главной причиной ощутимой
+        паузы. Перехватчики команд (календарь/заметка/скилл/...) остаются
+        как есть — они и так почти мгновенные, разбивать их незачем.
+        Критику/советчику по-прежнему нужен цельный черновик для проверки —
+        для персон с ними (Сехмет/Имхотеп/Птах) отдаём один кусок в конце,
+        не хуже прежнего поведения, просто без выигрыша в скорости.
+        """
+        if not text or not text.strip():
+            raise ValueError("Пустое сообщение")
+
+        calendar_reply = await self._try_calendar(text)
+        if calendar_reply is not None:
+            self._emit_message(channel, "user", "Календарь", text)
+            self._emit_message(channel, "assistant", "Календарь", calendar_reply)
+            await self._log_turn(channel, user_id, text, calendar_reply, "Календарь")
+            yield calendar_reply
+            return
+
+        note_reply = await self._try_note(text)
+        if note_reply is not None:
+            self._emit_message(channel, "user", "Obsidian", text)
+            self._emit_message(channel, "assistant", "Obsidian", note_reply)
+            await self._log_turn(channel, user_id, text, note_reply, "Obsidian")
+            yield note_reply
+            return
+
+        skill_reply = await self._try_skill(text)
+        if skill_reply is not None:
+            self._emit_message(channel, "user", "Skill", text)
+            self._emit_message(channel, "assistant", "Skill", skill_reply)
+            await self._log_turn(channel, user_id, text, skill_reply, "Skill")
+            self._spawn(self._remember(channel, user_id, text, skill_reply, "Skill"))
+            yield skill_reply
+            return
+
+        open_reply = await self._try_open(text)
+        if open_reply is not None:
+            self._emit_message(channel, "user", "Открыть", text)
+            self._emit_message(channel, "assistant", "Открыть", open_reply)
+            await self._log_turn(channel, user_id, text, open_reply, "Открыть")
+            yield open_reply
+            return
+
+        task_reply = await self._try_task(text)
+        if task_reply is not None:
+            self._emit_message(channel, "user", "Задача", text)
+            self._emit_message(channel, "assistant", "Задача", task_reply)
+            await self._log_turn(channel, user_id, text, task_reply, "Задача")
+            yield task_reply
+            return
+
+        idea_reply = await self._try_idea(text, channel, user_id)
+        if idea_reply is not None:
+            self._emit_message(channel, "user", "Идея", text)
+            self._emit_message(channel, "assistant", "Идея", idea_reply)
+            await self._log_turn(channel, user_id, text, idea_reply, "Идея")
+            yield idea_reply
+            return
+
+        content_reply = await self._try_content(text)
+        if content_reply is not None:
+            self._emit_message(channel, "user", "Контент", text)
+            self._emit_message(channel, "assistant", "Контент", content_reply)
+            await self._log_turn(channel, user_id, text, content_reply, "Контент")
+            yield content_reply
+            return
+
+        confirm_reply = await self._try_confirm(text, channel, user_id)
+        if confirm_reply is not None:
+            self._emit_message(channel, "user", "Подтверждение", text)
+            self._emit_message(channel, "assistant", "Подтверждение", confirm_reply)
+            await self._log_turn(channel, user_id, text, confirm_reply, "Подтверждение")
+            yield confirm_reply
+            return
+
+        selected = self._select_persona(text, persona)
+        self._emit_message(channel, "user", selected["name"], text)
+
+        llm = self._llm_for(selected, channel=channel)
+        context = await asyncio.to_thread(
+            self._build_context, text, selected["name"], channel, user_id
+        )
+
+        needs_review = critic.needs_critic(selected["name"]) or critic.needs_advisor(selected["name"])
+        if needs_review:
+            # Критику/советчику нужен цельный черновик — тот же путь, что и
+            # раньше, отдаём результат одним куском в конце.
+            reply = await self._respond(
+                llm, selected["name"], text, context, action_key=f"{channel}:{user_id}"
+            )
+            if critic.needs_critic(selected["name"]):
+                passed, verdict = await critic.review(llm, selected["name"], text, reply)
+                if not passed:
+                    logger.info("Критик %s: %s", selected["name"], verdict[:200])
+                    reply = await critic.revise(llm, llm.system_prompt, text, reply, verdict)
+            else:
+                suggestion = await critic.advise(llm, selected["name"], text, reply)
+                if suggestion:
+                    logger.info("Советчик %s: %s", selected["name"], suggestion[:200])
+                    reply = f"{reply}\n\n— Совет: {suggestion}"
+            yield reply
+        else:
+            parts: list[str] = []
+            async for delta in self._respond_stream(
+                llm, selected["name"], text, context, action_key=f"{channel}:{user_id}"
+            ):
+                parts.append(delta)
+                yield delta
+            reply = "".join(parts)
+
+        self._emit_message(channel, "assistant", selected["name"], reply)
+        await self._log_turn(channel, user_id, text, reply, selected["name"])
+        self._spawn(self._remember(channel, user_id, text, reply, selected["name"]))
+        self._spawn(self._extract(channel, user_id, text, reply, llm))
+
     async def _respond(
         self,
         llm: LLMService,
@@ -268,6 +411,40 @@ class ConversationService:
             action_key=action_key,
         )
         return response.content
+
+    async def _respond_stream(
+        self,
+        llm: LLMService,
+        persona_name: str,
+        text: str,
+        context: str,
+        action_key: str = "",
+    ) -> AsyncGenerator[str, None]:
+        """Как `_respond`, но отдаёт ответ кусками по мере генерации —
+        23.08.2026, фаундер вживую пожаловался на задержку голоса: конвейер
+        ждал ПОЛНЫЙ текст ответа, прежде чем хоть что-то показать/озвучить.
+        Провайдеры без OpenAI-совместимого стриминга (Gemini/Anthropic/
+        Ollama, тестовые дублёры LLM) отдают ответ одним куском — не хуже,
+        чем было, просто не быстрее."""
+        from . import tools as tools_svc
+
+        if not tools_svc.supports_tools(llm):
+            reply = await llm.generate_response(text, context=context, kind=budget.INTERACTIVE)
+            yield reply
+            return
+
+        available = tools_svc.tools_for(persona_name)
+        full_prompt = f"Context: {context}\n\nUser: {text}\n\nAssistant:"
+        async for delta in tools_svc.chat_with_tools_stream(
+            llm,
+            [LLMMessage(role="user", content=full_prompt)],
+            tools=available,
+            temperature=0.7,
+            max_tokens=settings.max_reply_tokens,
+            kind=budget.INTERACTIVE,
+            action_key=action_key,
+        ):
+            yield delta
 
     async def _log_turn(
         self, channel: str, user_id: str, text: str, reply: str, persona: str
@@ -536,6 +713,39 @@ class ConversationService:
             logger.exception("Не удалось создать задачу")
             return f"Не удалось создать задачу: {e}"
         return f"✅ Задача создана: «{task.title}»."
+
+    async def _try_idea(self, text: str, channel: str, user_id: str) -> str | None:
+        """Записывает идею на будущее — отдельно от задач (см. ideas.py).
+
+        Без содержимого в самой фразе («запиши это на будущее») берёт
+        последнюю реплику фаундера из истории разговора: «это» почти
+        всегда значит то, что он только что сказал, не то, что ответил
+        Джарвис.
+        """
+        match = _IDEA_TRIGGER.match(text)
+        if not match:
+            return None
+
+        content = (match.group("content") or "").strip()
+        if not content:
+            thread = dialog_history.recent(channel, user_id)
+            last_user = next(
+                (t.get("text", "") for t in reversed(thread) if t.get("role") == "user"),
+                "",
+            )
+            content = last_user.strip()
+        if not content:
+            return "Какую идею записать? Скажи содержание или сначала произнеси саму идею."
+
+        from . import ideas as ideas_svc
+        from ..models.schemas import IdeaCreate
+
+        try:
+            idea = await asyncio.to_thread(ideas_svc.create_idea, IdeaCreate(content=content))
+        except Exception as e:
+            logger.exception("Не удалось записать идею")
+            return f"Не удалось записать идею: {e}"
+        return f"💡 Записал в идеи: «{idea.content[:80]}»."
 
     async def _try_content(self, text: str) -> str | None:
         """Запускает первый срез Content Factory по прямой команде.

@@ -43,6 +43,16 @@ export interface Listener {
 // два независимых определения, которые могут разойтись.
 const WAKE = /дж[аяе]рв[иеё]с\w*/i;
 
+// «Стоп» — прерывает Джарвиса ПОКА ОНА ГОВОРИТ, даже без имени перед этим:
+// 23.08.2026 фаундер вживую пожаловался, что «стоп» не работает и что она
+// вообще не останавливается, когда он начинает говорить. Причина была не в
+// этом регекспе (он уже ловил «стоп» в heard() — но только пока Джарвис уже
+// не говорит), а в том, что во время SPEAKING микрофон был полностью глух
+// (см. mute() ниже) — «стоп», сказанный поверх её речи, физически не долетал
+// до распознавания. Слов немного и все однозначные — минимальный риск, что
+// она случайно скажет одно из них о себе и остановит себя сама.
+const STOP = /стоп|хватит|замолчи|тихо|прекрати/i;
+
 // Сколько ждём после unmute(), прежде чем реально снова слушать — против
 // хвоста собственной озвучки Джарвиса, см. комментарий в mute()/unmute()
 // listenForWakeWord() ниже. Общая константа — то же соображение обязано
@@ -64,6 +74,10 @@ export function listenForWakeWord(
   handlers: {
     onWake: (rest: string) => void;
     onCommand: (text: string) => void;
+    /** Перебили Джарвиса, пока она говорила. null — просто «стоп», молчим;
+     * строка (возможно пустая) — сказали «Джарвис[, вопрос]», как обычное
+     * пробуждение, только посреди её фразы. */
+    onInterrupt?: (rest: string | null) => void;
     onPartial?: (text: string) => void;
     onError?: (reason: string) => void;
     isAwake: () => boolean;
@@ -76,22 +90,16 @@ export function listenForWakeWord(
   }
 
   let stopped = false;
-  // Пока Джарвис говорит сам, микрофон физически продолжает слушать браузерное
-  // распознавание — иначе поток приходится пересоздавать. Но результат, пока
-  // muted, просто выбрасывается: иначе колонки эхом уходят обратно в диалог,
-  // и Джарвис отвечает сам себе.
-  //
-  // 19.08.2026, найдено фаундером вживую: этого флага одного было мало —
-  // Джарвис слышал хвост собственной озвучки и отвечал сам себе, потом
-  // отвечал уже на СВОЙ новый хвост, и так по кругу. Причина — задержка
-  // распознавания: onresult с результатом озвучки Джарвиса иногда прилетает
-  // уже ПОСЛЕ audio.onended, когда unmute() успел снять флаг. Одного
-  // булева флага мало против этой гонки — здесь ещё и по-настоящему
-  // останавливаем распознавание на время речи (abort(), не просто
-  // игнорируем results) и возвращаем его с небольшой задержкой, чтобы
-  // отдать хвосту шанс долететь и быть отброшенным, пока muted ещё true.
+  // Пока Джарвис говорит сама, распознавание НЕ останавливаем — иначе её
+  // физически нельзя перебить (найдено фаундером вживую 23.08.2026: «стоп»
+  // не работал, и вообще ничего не работало, пока она говорит). muted лишь
+  // сужает то, на что мы реагируем: во время её речи наружу пропускаются
+  // только «Джарвис» (имя) или явное «стоп»/«хватит» — остальное, включая
+  // хвост её же голоса, долетевший из колонок в микрофон, отбрасывается.
+  // Слова однозначные и в её собственных ответах практически не
+  // встречаются — риск, что она услышит эхо и остановит/разбудит сама
+  // себя, намного меньше риска, что она вообще не остановится.
   let muted = false;
-  let intentionalStop = false;
   let unmuteTimer: number | null = null;
   const rec: Recognition = new Ctor();
   rec.lang = lang;
@@ -99,10 +107,28 @@ export function listenForWakeWord(
   rec.interimResults = true;
 
   rec.onresult = (event: any) => {
-    if (muted) return;
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i];
       const said = String(result[0].transcript).trim();
+
+      if (muted) {
+        if (!result.isFinal) continue;
+        if (STOP.test(said)) {
+          muted = false;
+          if (unmuteTimer) window.clearTimeout(unmuteTimer);
+          handlers.onInterrupt?.(null);
+        } else {
+          const m = said.match(WAKE);
+          if (m) {
+            muted = false;
+            if (unmuteTimer) window.clearTimeout(unmuteTimer);
+            const rest = said.slice((m.index ?? 0) + m[0].length).replace(/^[\s,.!?—-]+/, '');
+            handlers.onInterrupt?.(rest);
+          }
+        }
+        continue;
+      }
+
       if (!result.isFinal) {
         handlers.onPartial?.(said);
         continue;
@@ -132,12 +158,11 @@ export function listenForWakeWord(
     handlers.onError?.(reasons[event.error] ?? `Распознавание сломалось: ${event.error}`);
   };
 
-  // Браузер обрывает поток сам — поднимаем обратно, пока режим включён.
-  // intentionalStop — это НАШ abort() на время речи Джарвиса (см. mute()
-  // ниже), не естественный обрыв потока браузером: тут авто-restart не
-  // нужен, unmute() поднимет распознавание сам, с задержкой.
+  // Браузер обрывает поток сам каждые несколько секунд — поднимаем обратно,
+  // пока режим включён. Мьют больше не трогает сам поток (см. выше), так
+  // что это только естественные обрывы браузера, не наши.
   rec.onend = () => {
-    if (stopped || intentionalStop) return;
+    if (stopped) return;
     try {
       rec.start();
     } catch {
@@ -161,27 +186,15 @@ export function listenForWakeWord(
     mute: () => {
       if (unmuteTimer) window.clearTimeout(unmuteTimer);
       muted = true;
-      intentionalStop = true;
-      // abort(), не stop(): stop() всё ещё пытается вернуть результат из
-      // уже захваченного буфера — ровно то, чего мы хотим избежать
-      // (хвост собственного голоса). abort() бросает буфер без попытки
-      // распознать его.
-      try {
-        rec.abort();
-      } catch {
-        /* уже остановлен — не страшно */
-      }
     },
     unmute: () => {
       if (unmuteTimer) window.clearTimeout(unmuteTimer);
+      // Задержка — не для потока (он и так не останавливался), а чтобы
+      // не поймать самый хвост только что закончившейся фразы как ложный
+      // WAKE/STOP. Прерывание (onInterrupt) снимает muted само и сразу,
+      // без этой задержки — см. onresult выше.
       unmuteTimer = window.setTimeout(() => {
         muted = false;
-        intentionalStop = false;
-        try {
-          rec.start();
-        } catch {
-          /* уже слушает — не страшно */
-        }
       }, UNMUTE_DELAY_MS);
     },
   };
@@ -204,6 +217,7 @@ const WAKEWORD_SERVER_URL = 'ws://127.0.0.1:8422';
 export function listenForWakeWordElectron(handlers: {
   onWake: (rest: string) => void;
   onCommand: (text: string) => void;
+  onInterrupt?: (rest: string | null) => void;
   onPartial?: (text: string) => void;
   onError?: (reason: string) => void;
   isAwake: () => boolean;
@@ -216,7 +230,29 @@ export function listenForWakeWordElectron(handlers: {
   let everConnected = false;
 
   const handle = (text: string, isFinal: boolean) => {
-    if (muted || !text) return;
+    if (!text) return;
+
+    // Тот же смысл, что в listenForWakeWord() выше: сервер Vosk никогда не
+    // останавливается, muted лишь сужает реакцию до «Джарвис»/«стоп», пока
+    // она говорит — иначе её нельзя перебить (найдено фаундером 23.08.2026).
+    if (muted) {
+      if (!isFinal) return;
+      if (STOP.test(text)) {
+        muted = false;
+        if (unmuteTimer) window.clearTimeout(unmuteTimer);
+        handlers.onInterrupt?.(null);
+      } else {
+        const m = text.match(WAKE);
+        if (m) {
+          muted = false;
+          if (unmuteTimer) window.clearTimeout(unmuteTimer);
+          const rest = text.slice((m.index ?? 0) + m[0].length).replace(/^[\s,.!?—-]+/, '');
+          handlers.onInterrupt?.(rest);
+        }
+      }
+      return;
+    }
+
     if (!isFinal) {
       handlers.onPartial?.(text);
       return;

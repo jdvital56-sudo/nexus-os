@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { getChatHistory, getPersonas, getVoiceStatus, resetChat, sendChatMessage, speakStreamUrl } from './api';
+import { getChatHistory, getPersonas, getVoiceStatus, resetChat, sendChatMessageStream, speakStreamUrl } from './api';
 import {
   isElectronWidget,
   listen,
@@ -25,6 +25,27 @@ export interface Line {
   text: string;
   persona?: string;
   at?: string;
+}
+
+// Режет уже пришедший (но ещё не отправленный на озвучку) хвост текста на
+// законченные предложения. Требует НАСТОЯЩИЙ пробел/перенос после точки —
+// не достраиваем конец по концу текущего буфера ($ здесь нарочно нет):
+// поток ещё не закончился, и то, что сейчас выглядит как конец фразы,
+// может оказаться серединой следующего куска. Последний обрывок без
+// пробела после — забота вызывающего кода, досказать в конце потока.
+function extractReadySentences(buffer: string): { sentences: string[]; rest: string } {
+  const sentences: string[] = [];
+  let rest = buffer;
+  const boundary = /[.!?…]+[)"'»]?\s+/;
+  for (;;) {
+    const m = rest.match(boundary);
+    if (!m || m.index === undefined) break;
+    const end = m.index + m[0].length;
+    const piece = rest.slice(0, end).trim();
+    rest = rest.slice(end);
+    if (piece) sentences.push(piece);
+  }
+  return { sentences, rest };
 }
 
 export interface JarvisConversationOptions {
@@ -76,27 +97,63 @@ export function useJarvisConversation(t: (s: string) => string, opts: JarvisConv
       .catch(() => setVoiceReady(false));
   }, []);
 
-  const say = async (text: string) => {
+  // Очередь озвучки — 23.08.2026, вместе со стримингом: ответ теперь может
+  // озвучиваться по предложениям, готовым ещё до того, как модель дописала
+  // остальное, а не одним куском в самом конце. speaking — идёт ли сейчас
+  // реальное воспроизведение; очередь просто ждёт своего audio.onended.
+  const speechQueue = useRef<string[]>([]);
+  const speaking = useRef(false);
+
+  const stopSpeech = () => {
+    speechQueue.current = [];
+    speaking.current = false;
+    player.current?.pause();
+  };
+
+  const pumpSpeech = () => {
+    if (speaking.current) return;
+    const next = speechQueue.current.shift();
+    if (!next) return;
+    speaking.current = true;
     const resume = () => {
-      wakeListener.current?.unmute?.();
-      setState('ONLINE');
+      speaking.current = false;
+      if (speechQueue.current.length > 0) {
+        pumpSpeech();
+      } else {
+        wakeListener.current?.unmute?.();
+        setState('ONLINE');
+      }
     };
     try {
-      player.current?.pause();
       // audio.src, а не blob целиком: браузер грузит поток сам, начинает
       // играть по первым пришедшим байтам, не ждёт синтеза всей фразы.
-      const audio = new Audio(speakStreamUrl(text));
+      const audio = new Audio(speakStreamUrl(next));
       player.current = audio;
       setState('SPEAKING');
       wakeListener.current?.mute?.();
       audio.onended = resume;
       audio.onerror = resume;
-      await audio.play();
+      audio.play().catch(() => {
+        setError('Не удалось озвучить ответ.');
+        resume();
+      });
     } catch {
-      wakeListener.current?.unmute?.();
-      setState('ONLINE');
       setError('Не удалось озвучить ответ.');
+      resume();
     }
+  };
+
+  const enqueueSpeech = (piece: string) => {
+    if (!piece.trim()) return;
+    speechQueue.current.push(piece);
+    pumpSpeech();
+  };
+
+  /** Одна законченная фраза вне очереди стрима — например, «Джарвис,
+   * покажись» подтверждает голосом сам себя. Сбрасывает то, что играло. */
+  const say = (text: string) => {
+    stopSpeech();
+    enqueueSpeech(text);
   };
 
   const armSleep = () => {
@@ -114,6 +171,24 @@ export function useJarvisConversation(t: (s: string) => string, opts: JarvisConv
     setState('LISTENING');
     armSleep();
     if (rest.trim()) heard(rest.trim());
+  };
+
+  // Перебили Джарвиса, пока она говорила — «стоп» (rest === null, просто
+  // замолкаем) или «Джарвис[, вопрос]» поверх её речи (rest — как обычное
+  // пробуждение, wake() сам решит, ждать команду дальше или сразу её
+  // выполнить). До 23.08.2026 такого пути не было вообще: пока играл звук,
+  // микрофон был полностью глух — фаундер вживую пожаловался, что она не
+  // останавливается ни на «стоп», ни когда он просто начинает говорить.
+  const onInterrupt = (rest: string | null) => {
+    stopSpeech();
+    if (rest === null) {
+      awakeRef.current = false;
+      setAwake(false);
+      setState('ONLINE');
+      if (sleepTimer.current) window.clearTimeout(sleepTimer.current);
+      return;
+    }
+    wake(rest);
   };
 
   const heard = (said: string) => {
@@ -156,12 +231,14 @@ export function useJarvisConversation(t: (s: string) => string, opts: JarvisConv
           isAwake: () => awakeRef.current,
           onWake: wake,
           onCommand: heard,
+          onInterrupt,
           onError: setError,
         })
       : listenForWakeWord('ru-RU', {
           isAwake: () => awakeRef.current,
           onWake: wake,
           onCommand: heard,
+          onInterrupt,
           onError: (reason) => {
             setError(reason);
             setWakeMode(false);
@@ -262,7 +339,7 @@ export function useJarvisConversation(t: (s: string) => string, opts: JarvisConv
       wakeListener.current?.stop();
       recognizer.current?.stop();
       if (sleepTimer.current) window.clearTimeout(sleepTimer.current);
-      player.current?.pause();
+      stopSpeech();
     };
   }, []);
 
@@ -277,19 +354,65 @@ export function useJarvisConversation(t: (s: string) => string, opts: JarvisConv
     setText('');
     setState('PROCESSING');
     setError(null);
+    // Новый вопрос — то, что ещё доигрывало от прошлого ответа, больше не
+    // актуально (тот же случай, что и say(): не смешивать очереди).
+    stopSpeech();
+
+    const wantsVoice = (speakBack || speakReply) && voiceReady;
+    let assistantIndex = -1;
+    let full = '';
+    let unspoken = '';
+
+    setLines((prev) => {
+      assistantIndex = prev.length;
+      return [...prev, { role: 'assistant', text: '', persona: undefined }];
+    });
 
     try {
-      const res = await sendChatMessage(value, persona || undefined);
-      setLines((prev) => [...prev, { role: 'assistant', text: res.reply, persona: res.persona }]);
-      if ((speakBack || speakReply) && voiceReady) {
-        say(res.reply);
+      for await (const ev of sendChatMessageStream(value, persona || undefined)) {
+        if (ev.error) throw new Error(ev.error);
+
+        if (ev.delta) {
+          full += ev.delta;
+          unspoken += ev.delta;
+          const idx = assistantIndex;
+          setLines((prev) => {
+            const next = [...prev];
+            next[idx] = { ...next[idx], text: full };
+            return next;
+          });
+
+          if (wantsVoice) {
+            const { sentences, rest } = extractReadySentences(unspoken);
+            unspoken = rest;
+            sentences.forEach(enqueueSpeech);
+          }
+        }
+
+        if (ev.done && ev.persona) {
+          const idx = assistantIndex;
+          setLines((prev) => {
+            const next = [...prev];
+            next[idx] = { ...next[idx], persona: ev.persona };
+            return next;
+          });
+        }
+      }
+
+      if (wantsVoice) {
+        // Последний обрывок без завершающей пунктуации — поток кончился,
+        // достраивать больше нечего, озвучиваем как есть.
+        if (unspoken.trim()) enqueueSpeech(unspoken);
+        if (!speaking.current && speechQueue.current.length === 0) {
+          setState('ONLINE');
+        }
       } else {
         setState('SPEAKING');
         setTimeout(() => setState('ONLINE'), 1600);
       }
     } catch (e: any) {
       setState('ONLINE');
-      setError(e?.response?.data?.detail ?? t('Ответ не пришёл.'));
+      setError(e?.response?.data?.detail ?? e?.message ?? t('Ответ не пришёл.'));
     }
   };
 

@@ -171,9 +171,13 @@ def test_no_tool_without_a_key(without_key, monkeypatch):
     (шаг 3, свой отдельный ключ GEMINI_API_KEY, от Firecrawl не зависит)
     первая правка ослабила проверку до «просто нет web_search», потеряв
     гарантию точного списка. Здесь оба ключа сведены явно, чтобы список
-    снова был проверяемым целиком, а не только одним пунктом."""
+    снова был проверяемым целиком, а не только одним пунктом.
+
+    23.08.2026: system_status не зависит ни от одного ключа (читает только
+    .env этой же машины) — он остаётся, даже когда все внешние инструменты
+    заведомо не сработают и убраны."""
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    assert tools_svc.tools_for("Orpheus") == []
+    assert tools_svc.tools_for("Orpheus") == [tools_svc.SYSTEM_STATUS_SPEC]
 
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     names = [t["function"]["name"] for t in tools_svc.tools_for("Orpheus")]

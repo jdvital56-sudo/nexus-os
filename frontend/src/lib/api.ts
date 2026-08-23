@@ -138,6 +138,56 @@ export const sendChatMessage = (text: string, persona?: string) =>
   data<{ reply: string; persona: string }>(api.post('/chat/message', { text, persona }));
 export const resetChat = () => data<{ removed: number }>(api.post('/chat/reset'));
 
+export interface ChatStreamEvent {
+  delta?: string;
+  error?: string;
+  done?: boolean;
+  persona?: string;
+}
+
+/**
+ * Потоковый ответ (SSE) — текст приходит кусками по мере генерации, не
+ * одним блоком в конце (23.08.2026, фаундер вживую пожаловался на задержку
+ * голоса). Через fetch(), не EventSource: тому нужен GET без заголовков, а
+ * сюда нужен POST с телом и Authorization — обычным способом, без токена в
+ * строке запроса, как пришлось для speakStreamUrl выше.
+ */
+export async function* sendChatMessageStream(
+  text: string,
+  persona?: string,
+): AsyncGenerator<ChatStreamEvent, void, unknown> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+
+  const response = await fetch(`${API_BASE_URL}/chat/stream`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ text, persona }),
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(`Поток чата не открылся: ${response.status}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let idx: number;
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const chunk = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      const line = chunk.split('\n').find((l) => l.startsWith('data:'));
+      if (!line) continue;
+      yield JSON.parse(line.slice(5).trim()) as ChatStreamEvent;
+    }
+  }
+}
+
 // --- Артефакты ---
 // Система файлы не стирает: помечает и объясняет причину, стирает человек
 export const getArtifacts = () => data<any[]>(api.get('/artifacts'));
@@ -178,6 +228,17 @@ export const runAgent = (id: string, task: string, context: Record<string, any> 
 export const getTasks = () => data<any[]>(api.get('/tasks'));
 export const createTask = (payload: Record<string, any>) =>
   data<any>(api.post('/tasks', payload));
+
+// --- Идеи ---
+// Отдельно от задач — то, что откладывается на будущую разработку, а не
+// делается сейчас (спецификация фаундера 23.08.2026).
+export const getIdeas = (status?: string) =>
+  data<any[]>(api.get('/ideas', { params: status ? { status } : {} }));
+export const createIdea = (payload: Record<string, any>) =>
+  data<any>(api.post('/ideas', payload));
+export const updateIdea = (id: string, payload: Record<string, any>) =>
+  data<any>(api.patch(`/ideas/${id}`, payload));
+export const deleteIdea = (id: string) => data<{ ok: boolean }>(api.delete(`/ideas/${id}`));
 
 // --- Документы ---
 export const getDocuments = () => data<any[]>(api.get('/documents'));

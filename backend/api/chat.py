@@ -5,9 +5,11 @@
 I-1). Поэтому память, персоны, характер, скиллы и заметки работают здесь
 ровно так же, как в Телеграме, и нить разговора у каналов раздельная.
 """
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..core.auth import get_token_dep
@@ -71,6 +73,48 @@ async def send(req: Message, _=Depends(auth)):
     # Разметку не показываем: в чате она видна как мусор, а голосом
     # читается вслух названиями символов
     return {"reply": strip_markdown(reply), "persona": persona}
+
+
+@router.post("/stream")
+async def send_stream(req: Message, _=Depends(auth)):
+    """Как /message, но текст ответа уходит по кускам сразу по мере
+    генерации (SSE), а не одним блоком в конце — 23.08.2026, фаундер
+    вживую пожаловался на задержку голоса, см. conversation.py.handle_stream().
+
+    POST, не GET — EventSource умеет только GET и не умеет заголовков, а
+    Authorization нужен обычным Bearer-токеном, не через query-string, как
+    пришлось сделать для /say-stream (тот путь — известный компромисс ради
+    <audio src>, здесь ограничения нет: фронтенд читает поток через fetch()
+    + ReadableStream, где заголовки работают как обычно).
+    """
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Пустое сообщение")
+
+    service = get_conversation_service()
+
+    async def events():
+        try:
+            async for delta in service.handle_stream(
+                channel=CHANNEL, user_id=USER_ID, text=text, persona=req.persona
+            ):
+                yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.exception("Веб-чат (поток) не смог ответить")
+            yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            return
+
+        # Имя ответившей персоны известно только после handle_stream() —
+        # тот же приём, что у /message: смотрим, кто последний записался
+        # в нить разговора, а не пытаемся тащить персону через генератор.
+        thread = dialog_history.recent(CHANNEL, USER_ID)
+        persona = next(
+            (m.get("persona") for m in reversed(thread) if m.get("role") == "assistant"),
+            "",
+        )
+        yield f"data: {json.dumps({'done': True, 'persona': persona}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream")
 
 
 @router.post("/reset")

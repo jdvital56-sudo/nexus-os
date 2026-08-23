@@ -66,6 +66,18 @@ def default_voice() -> str:
     return os.getenv("NEXUS_TTS_VOICE", "") or EDGE_VOICES[0].id
 
 
+# 23.08.2026: фаундер попросил голос «более синтетичный, как у Железного
+# человека», оставаясь на русском (выбрал сам из вариантов — английский
+# акцент или платный ElevenLabs отклонены). У edge-tts нет отдельного
+# «роботизированного» голоса для ru-RU (только Дмитрий/Светлана) — рычаг,
+# который реально есть, это высота тона через SSML: ниже и ровнее пресета
+# по умолчанию читается на слух более механически, ближе к ассистенту, чем
+# к живому диктору. Настраиваемо через .env, чтобы можно было подстроить
+# на слух, не трогая код.
+def pitch_shift() -> str:
+    return os.getenv("NEXUS_TTS_PITCH", "-8Hz")
+
+
 def is_enabled() -> bool:
     return engine_name() != "none"
 
@@ -149,7 +161,7 @@ async def synthesize(text: str, voice: str | None = None) -> Path:
         from .personas import get_character
 
         rate = _rate_for(get_character().get("pace", 5))
-        return await _edge(text, voice or default_voice(), rate)
+        return await _edge(text, voice or default_voice(), rate, pitch_shift())
     if name == "omnivoice":
         return await _omnivoice(text)
     if name == "eleven":
@@ -157,7 +169,7 @@ async def synthesize(text: str, voice: str | None = None) -> Path:
     raise VoiceUnavailable(f"Неизвестный движок: {name}")
 
 
-async def _edge(text: str, voice: str, rate: str = "+0%") -> Path:
+async def _edge(text: str, voice: str, rate: str = "+0%", pitch: str = "+0Hz") -> Path:
     try:
         import edge_tts
     except ImportError as e:
@@ -165,11 +177,11 @@ async def _edge(text: str, voice: str, rate: str = "+0%") -> Path:
 
     from . import artifacts
 
-    # Голос и темп входят в имя файла: тот же текст другой скоростью — это
-    # другая запись, иначе она молча затирает предыдущую
-    out = artifacts.temp_dir() / f"voice_{voice}_{rate}_{abs(hash(text)) % 10**8}.mp3"
+    # Голос, темп и высота тона входят в имя файла: тот же текст с другими
+    # настройками — это другая запись, иначе она молча затирает предыдущую
+    out = artifacts.temp_dir() / f"voice_{voice}_{rate}_{pitch}_{abs(hash(text)) % 10**8}.mp3"
     try:
-        await edge_tts.Communicate(text, voice, rate=rate).save(str(out))
+        await edge_tts.Communicate(text, voice, rate=rate, pitch=pitch).save(str(out))
     except Exception as e:
         # Движок ходит в сеть — обрыв связи не должен выглядеть как поломка
         raise VoiceUnavailable(f"Озвучка не удалась: {e}") from e
@@ -213,7 +225,7 @@ def prepare_edge_stream(text: str, voice: str | None = None):
         text = text[:limit].rsplit(" ", 1)[0] + "…"
 
     logger.info("Потоковая озвучка %d символов голосом %s", len(text), voice or default_voice())
-    return edge_tts.Communicate(text, voice or default_voice(), rate=rate)
+    return edge_tts.Communicate(text, voice or default_voice(), rate=rate, pitch=pitch_shift())
 
 
 async def stream_chunks(communicate) -> AsyncGenerator[bytes, None]:

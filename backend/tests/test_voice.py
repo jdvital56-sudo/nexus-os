@@ -12,10 +12,11 @@ class _FakeCommunicate:
     """Подменяет edge_tts.Communicate — тесты не должны реально стучаться
     в сервис Microsoft за звуком."""
 
-    def __init__(self, text, voice, rate="+0%"):
+    def __init__(self, text, voice, rate="+0%", pitch="+0Hz"):
         self.text = text
         self.voice = voice
         self.rate = rate
+        self.pitch = pitch
 
     async def stream(self):
         # WordBoundary вперемешку с audio — как реально отдаёт edge-tts,
@@ -65,7 +66,7 @@ async def test_long_text_is_clipped(monkeypatch):
     monkeypatch.setenv("NEXUS_TTS_MAX_CHARS", "50")
     said: dict = {}
 
-    async def fake_edge(text, voice, rate="+0%"):
+    async def fake_edge(text, voice, rate="+0%", pitch="+0Hz"):
         said["text"] = text
         said["voice"] = voice
         said["rate"] = rate
@@ -161,8 +162,9 @@ async def test_pace_reaches_the_edge_call(monkeypatch):
     personas_svc.set_character({"pace": 0})
     said: dict = {}
 
-    async def fake_edge(text, voice, rate="+0%"):
+    async def fake_edge(text, voice, rate="+0%", pitch="+0Hz"):
         said["rate"] = rate
+        said["pitch"] = pitch
         return "файл.mp3"
 
     monkeypatch.setattr(tts, "_edge", fake_edge)
@@ -170,6 +172,17 @@ async def test_pace_reaches_the_edge_call(monkeypatch):
     await tts.synthesize("привет")
 
     assert said["rate"] == "-30%"
+
+
+def test_pitch_shift_default_is_lower_than_natural():
+    """23.08.2026: фаундер попросил более синтетичный голос, оставаясь на
+    русском — понижение высоты тона по умолчанию, а не «+0Hz»."""
+    assert tts.pitch_shift() == "-8Hz"
+
+
+def test_pitch_shift_configurable_via_env(monkeypatch):
+    monkeypatch.setenv("NEXUS_TTS_PITCH", "-15Hz")
+    assert tts.pitch_shift() == "-15Hz"
 
 
 # --- OmniVoice: отдельный процесс в своём venv, движок стучится к нему по HTTP ---
