@@ -21,6 +21,12 @@ httpx==0.28.1
 
 # Utilities
 networkx==3.5
+# Межпроцессный лок для JSON-хранилищ (core/jsonio.py, locked_update) —
+# веб-чат и Telegram-бот разные процессы, threading.Lock между ними не
+# работает; filelock — маленький, без транзитивных зависимостей, тот же
+# класс задачи, что уже решён вручную в core/singleton.py, но там только
+# для PID-файлов расписания/бота, не для данных.
+filelock==3.16.1
 
 # Hermes (Telegram-слой, планировщик Dream Cadence, Google-клиенты)
 python-telegram-bot==22.8

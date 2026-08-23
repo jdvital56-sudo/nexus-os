@@ -1,4 +1,27 @@
 """Memory system tests — 4-layer architecture."""
+import threading
+
+from backend.services import memory as mem_svc
+from backend.services.memory import MemoryLayer
+
+
+def test_add_fact_survives_concurrent_writers(client):
+    """23.08.2026, по итогам внешнего аудита: add_fact раньше делала
+    read-modify-write без лока — веб-чат и Telegram (разные процессы)
+    писали бы одновременно и теряли факты друг друга. 30 параллельных
+    add_fact — ни один не должен пропасть."""
+    def worker(i):
+        mem_svc.add_fact(f"факт номер {i}", layer=MemoryLayer.INBOX)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(30)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+
+    facts = mem_svc.get_facts(layer=MemoryLayer.INBOX)
+    assert len(facts) == 30
+    assert len({f.content for f in facts}) == 30  # все разные, ни один не задвоился/не потерялся
 
 
 def test_add_fact(client):

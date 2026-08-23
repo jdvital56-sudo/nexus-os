@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import pytest
 
 from backend.core.errors import NotFoundError
+from backend.core.jsonio import write_json
 from backend.services import curator as svc
 from backend.services import memory as mem_svc
 from backend.services.memory import MemoryLayer
@@ -17,7 +18,7 @@ def _add(content="факт", layer=MemoryLayer.OPERATIONAL, confidence=0.5, days
         for r in raw:
             if r["id"] == fact.id:
                 r["created_at"] = old
-        mem_svc._save(raw)
+        write_json(mem_svc.MEMORY_FILE, raw)
     return fact
 
 

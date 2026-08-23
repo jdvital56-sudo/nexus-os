@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from backend.core.jsonio import write_json
 from backend.services import memory as mem_svc
 from backend.services.memory import MemoryLayer
 
@@ -54,7 +55,7 @@ def test_old_facts_without_the_new_fields_still_work():
     for r in raw:
         r.pop("valid_from", None)
         r.pop("valid_until", None)
-    mem_svc._save(raw)
+    write_json(mem_svc.MEMORY_FILE, raw)
 
     reloaded = mem_svc.get_fact(fact.id)
     assert reloaded.is_active is True
@@ -87,7 +88,7 @@ def test_invalidate_works_on_a_fact_saved_before_the_feature(monkeypatch):
     raw = mem_svc._load()
     for r in raw:
         r.pop("valid_until", None)
-    mem_svc._save(raw)
+    write_json(mem_svc.MEMORY_FILE, raw)
 
     mem_svc.invalidate(fact.id)
 

@@ -15,7 +15,7 @@ from datetime import datetime
 
 from ..core.config import DATA_DIR, ensure_data_dir
 from ..core.errors import NotFoundError
-from ..core.jsonio import read_json, write_json
+from ..core.jsonio import locked_update, read_json
 from ..services import memory as mem_svc
 from ..services.memory import MemoryLayer
 
@@ -165,29 +165,34 @@ def _load_archive() -> list[dict]:
     return read_json(ARCHIVE_FILE, [])
 
 
-def _save_archive(records: list[dict]):
-    ensure_data_dir()
-    write_json(ARCHIVE_FILE, records)
-
-
 def archive_junk(items: list[dict] | None = None) -> int:
-    """Переносит мусор в архив. Оттуда его можно вернуть в любой момент."""
+    """Переносит мусор в архив. Оттуда его можно вернуть в любой момент.
+
+    23.08.2026: раньше читало/писало memory.json и archive.json напрямую
+    через приватные mem_svc._load/_save, без лока — тот же класс гонки,
+    что нашёл внешний аудит и что уже починено в самом memory.py.
+    locked_update — тот же межпроцессный лок, что у add_fact/update_fact.
+    """
     items = items if items is not None else find_junk()
     ids = {i["id"] for i in items}
     if not ids:
         return 0
 
-    facts = mem_svc._load()
-    moved, kept = [], []
-    for raw in facts:
-        if raw["id"] in ids:
-            moved.append({**raw, "archived_at": datetime.utcnow().isoformat()})
-        else:
-            kept.append(raw)
+    moved: list[dict] = []
 
+    def split(facts: list[dict]) -> list[dict]:
+        kept = []
+        for raw in facts:
+            if raw["id"] in ids:
+                moved.append({**raw, "archived_at": datetime.utcnow().isoformat()})
+            else:
+                kept.append(raw)
+        return kept
+
+    ensure_data_dir()
+    locked_update(mem_svc.MEMORY_FILE, split, default=[])
     if moved:
-        _save_archive(_load_archive() + moved)
-        mem_svc._save(kept)
+        locked_update(ARCHIVE_FILE, lambda records: records + moved, default=[])
     return len(moved)
 
 
@@ -196,15 +201,23 @@ def list_archive() -> list[dict]:
 
 
 def restore(fact_id: str) -> dict:
-    """Возвращает факт из архива обратно в память."""
+    """Возвращает факт из архива обратно в память.
+
+    Порядок нарочно такой: сперва кладём факт обратно в память, потом
+    убираем его из архива — если между этими двумя шагами что-то упадёт,
+    факт временно окажется в обоих местах (заметно и безопасно), а не
+    пропадёт из обоих сразу.
+    """
     archive = _load_archive()
-    for i, raw in enumerate(archive):
-        if raw["id"] == fact_id:
-            restored = {k: v for k, v in raw.items() if k != "archived_at"}
-            mem_svc._save(mem_svc._load() + [restored])
-            _save_archive(archive[:i] + archive[i + 1:])
-            return restored
-    raise NotFoundError("Archived fact", fact_id)
+    match = next((raw for raw in archive if raw["id"] == fact_id), None)
+    if match is None:
+        raise NotFoundError("Archived fact", fact_id)
+    restored = {k: v for k, v in match.items() if k != "archived_at"}
+
+    ensure_data_dir()
+    locked_update(mem_svc.MEMORY_FILE, lambda facts: facts + [restored], default=[])
+    locked_update(ARCHIVE_FILE, lambda records: [r for r in records if r["id"] != fact_id], default=[])
+    return restored
 
 
 # === Полный проход ===

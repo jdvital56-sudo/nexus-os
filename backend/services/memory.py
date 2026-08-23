@@ -21,7 +21,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 from ..core.config import DATA_DIR, ensure_data_dir
 from ..core.errors import NotFoundError
-from ..core.jsonio import read_json, write_json
+from ..core.jsonio import locked_update, read_json
 from ..core import eventbus
 
 logger = logging.getLogger(__name__)
@@ -109,11 +109,6 @@ def _load() -> list[dict]:
     return []
 
 
-def _save(facts: list[dict]):
-    ensure_data_dir()
-    write_json(MEMORY_FILE, facts)
-
-
 def add_fact(
     content: str,
     layer: MemoryLayer = MemoryLayer.INBOX,
@@ -124,7 +119,6 @@ def add_fact(
     related_docs: list[str] | None = None,
 ) -> MemoryFact:
     """Add a new memory fact."""
-    facts = _load()
     fact = MemoryFact(
         content=content,
         layer=layer,
@@ -134,8 +128,13 @@ def add_fact(
         tags=tags or [],
         related_docs=related_docs or [],
     )
-    facts.append(fact.model_dump())
-    _save(facts)
+    # Веб-чат и Telegram — разные процессы, оба могут дописывать память
+    # одновременно (P0 из внешнего аудита 23.08.2026, подтверждено тестом
+    # на 50 параллельных писателей в test_jsonio.py). locked_update держит
+    # межпроцессный лок ровно на время самого чтения-записи файла —
+    # индексация и событие ниже уже вне лока, они не про сам файл.
+    ensure_data_dir()
+    locked_update(MEMORY_FILE, lambda facts: facts + [fact.model_dump()], default=[])
 
     # Индексируем здесь, а не у вызывающего: иначе факты, добавленные не
     # через диалог, оставались бы невидимыми для recall()
@@ -206,20 +205,29 @@ def get_fact(fact_id: str) -> MemoryFact:
 
 def update_fact(fact_id: str, **kwargs) -> MemoryFact:
     """Update a memory fact."""
-    facts = _load()
-    for i, f in enumerate(facts):
-        if f["id"] == fact_id:
-            for k, v in kwargs.items():
-                # Поля, добавленные позже, в старых записях отсутствуют —
-                # без сверки со схемой invalidate() на них молча ничего бы
-                # не делал, а факт остался бы вечно действующим.
-                if (k in f or k in MemoryFact.model_fields) and v is not None:
-                    f[k] = v
-            f["updated_at"] = datetime.utcnow().isoformat()
-            facts[i] = f
-            _save(facts)
-            return MemoryFact(**f)
-    raise NotFoundError("Memory fact", fact_id)
+    updated: dict | None = None
+
+    def mutate(facts: list[dict]) -> list[dict]:
+        nonlocal updated
+        for i, f in enumerate(facts):
+            if f["id"] == fact_id:
+                for k, v in kwargs.items():
+                    # Поля, добавленные позже, в старых записях отсутствуют —
+                    # без сверки со схемой invalidate() на них молча ничего
+                    # бы не делал, а факт остался бы вечно действующим.
+                    if (k in f or k in MemoryFact.model_fields) and v is not None:
+                        f[k] = v
+                f["updated_at"] = datetime.utcnow().isoformat()
+                facts[i] = f
+                updated = f
+                return facts
+        return facts
+
+    ensure_data_dir()
+    locked_update(MEMORY_FILE, mutate, default=[])
+    if updated is None:
+        raise NotFoundError("Memory fact", fact_id)
+    return MemoryFact(**updated)
 
 
 def supersede(old_id: str, new_content: str, source: str = "", confidence: float = 0.5) -> MemoryFact:
@@ -436,14 +444,19 @@ def ingest_from_document(doc_id: str, content: str, source: str = "") -> list[Me
 
 def cleanup_expired() -> int:
     """Remove expired facts. Returns count removed."""
-    facts = _load()
-    active = []
     removed = 0
-    for f in facts:
-        fact = MemoryFact(**f)
-        if fact.is_expired and not fact.superseded_by:
-            removed += 1
-        else:
-            active.append(f)
-    _save(active)
+
+    def mutate(facts: list[dict]) -> list[dict]:
+        nonlocal removed
+        active = []
+        for f in facts:
+            fact = MemoryFact(**f)
+            if fact.is_expired and not fact.superseded_by:
+                removed += 1
+            else:
+                active.append(f)
+        return active
+
+    ensure_data_dir()
+    locked_update(MEMORY_FILE, mutate, default=[])
     return removed
