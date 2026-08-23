@@ -11,6 +11,7 @@ import ActivityScreen from './screens/ActivityScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import DocumentsScreen from './screens/DocumentsScreen';
 import TasksScreen from './screens/TasksScreen';
+import IdeasScreen from './screens/IdeasScreen';
 import PipelineScreen from './screens/PipelineScreen';
 import PersonasScreen from './screens/PersonasScreen';
 import WalletScreen from './screens/WalletScreen';
@@ -48,6 +49,7 @@ export default function App() {
                   <Route path="/graph" element={<GraphScreen />} />
                   <Route path="/documents" element={<DocumentsScreen />} />
                   <Route path="/tasks" element={<TasksScreen />} />
+                  <Route path="/ideas" element={<IdeasScreen />} />
                   <Route path="/pipeline" element={<PipelineScreen />} />
                   <Route path="/activity" element={<ActivityScreen />} />
                   <Route path="/settings" element={<SettingsScreen />} />

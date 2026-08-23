@@ -35,6 +35,7 @@ class Settings(BaseModel):
     graph_file: Path = None  # Will be set in __init__
     documents_file: Path = None
     tasks_file: Path = None
+    ideas_file: Path = None
     agents_file: Path = None
     auth_file: Path = None
     skills_dir: Path = None
@@ -124,6 +125,7 @@ class Settings(BaseModel):
         self.graph_file = self.data_dir / "graph.json"
         self.documents_file = self.data_dir / "documents.json"
         self.tasks_file = self.data_dir / "tasks.json"
+        self.ideas_file = self.data_dir / "ideas.json"
         self.agents_file = self.data_dir / "agents.json"
         self.auth_file = self.data_dir / "auth.json"
         self.skills_dir = self.data_dir / "skills"
@@ -152,6 +154,7 @@ DATA_DIR = settings.data_dir
 GRAPH_FILE = settings.graph_file
 DOCUMENTS_FILE = settings.documents_file
 TASKS_FILE = settings.tasks_file
+IDEAS_FILE = settings.ideas_file
 AGENTS_FILE = settings.agents_file
 AUTH_FILE = settings.auth_file
 SKILLS_DIR = settings.skills_dir

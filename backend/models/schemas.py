@@ -86,6 +86,45 @@ class TaskUpdate(BaseModel):
     assigned_agent: str | None = None
 
 
+# === Идеи ===
+# Отдельно от задач (Task) — задача делается сейчас, идея откладывается на
+# будущую разработку. Спецификация от фаундера 23.08.2026: попадает сюда
+# либо по его прямой просьбе («запиши это на будущее»), либо по моей
+# собственной инициативе, когда я замечаю что-то стоящее по ходу работы.
+
+class IdeaSource(str, Enum):
+    FOUNDER = "founder"
+    SYSTEM = "system"
+
+
+class IdeaStatus(str, Enum):
+    NEW = "new"
+    CONSIDERED = "considered"
+    PLANNED = "planned"
+    DISMISSED = "dismissed"
+
+
+class Idea(BaseModel):
+    id: str
+    content: str
+    source: IdeaSource = IdeaSource.FOUNDER
+    status: IdeaStatus = IdeaStatus.NEW
+    context: str = ""
+    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+
+
+class IdeaCreate(BaseModel):
+    content: str
+    source: IdeaSource = IdeaSource.FOUNDER
+    context: str = ""
+
+
+class IdeaUpdate(BaseModel):
+    content: str | None = None
+    status: IdeaStatus | None = None
+
+
 # === Content Factory ===
 # Идея -> сценарий (LLM) -> озвучка/картинка/видео (fal.ai) -> approve/reject
 # человеком. Автопубликация не входит — см. шапку services/content_factory.py.

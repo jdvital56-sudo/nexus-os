@@ -17,7 +17,8 @@ import {
   CreditCard,
   Package,
   MessageSquare,
-  Mail
+  Mail,
+  Lightbulb
 } from 'lucide-react';
 
 // Названия по-русски: система личная, и половина экранов уже говорит
@@ -32,6 +33,7 @@ const menuItems = [
   { path: '/agents', label: 'Агенты', icon: Bot },
   { path: '/personas', label: 'Пантеон', icon: Drama },
   { path: '/tasks', label: 'Задачи', icon: CheckSquare },
+  { path: '/ideas', label: 'Идеи', icon: Lightbulb },
   { path: '/documents', label: 'Документы', icon: FileText },
   { path: '/artifacts', label: 'Артефакты', icon: Package },
   { path: '/pipeline', label: 'Контент', icon: Workflow },

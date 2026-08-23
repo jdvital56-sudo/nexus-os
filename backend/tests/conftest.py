@@ -18,12 +18,14 @@ def temp_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "GRAPH_FILE", tmp_path / "graph.json")
     monkeypatch.setattr(cfg, "DOCUMENTS_FILE", tmp_path / "documents.json")
     monkeypatch.setattr(cfg, "TASKS_FILE", tmp_path / "tasks.json")
+    monkeypatch.setattr(cfg, "IDEAS_FILE", tmp_path / "ideas.json")
     monkeypatch.setattr(cfg, "AGENTS_FILE", tmp_path / "agents.json")
     monkeypatch.setattr(cfg, "AUTH_FILE", tmp_path / "auth.json")
 
     # Also patch the service modules directly since they may have cached references
     import backend.services.documents as doc_svc
     import backend.services.tasks as task_svc
+    import backend.services.ideas as ideas_svc
     import backend.services.graph as graph_svc
     import backend.services.agents as agent_svc
     import backend.services.skills as skills_svc
@@ -33,6 +35,7 @@ def temp_data_dir(tmp_path, monkeypatch):
 
     monkeypatch.setattr(doc_svc, "DOCUMENTS_FILE", tmp_path / "documents.json")
     monkeypatch.setattr(task_svc, "TASKS_FILE", tmp_path / "tasks.json")
+    monkeypatch.setattr(ideas_svc, "IDEAS_FILE", tmp_path / "ideas.json")
     monkeypatch.setattr(graph_svc, "GRAPH_FILE", tmp_path / "graph.json")
     monkeypatch.setattr(agent_svc, "AGENTS_FILE", tmp_path / "agents.json")
     monkeypatch.setattr(auth_mod, "AUTH_FILE", tmp_path / "auth.json")
