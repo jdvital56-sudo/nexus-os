@@ -86,6 +86,37 @@ class TaskUpdate(BaseModel):
     assigned_agent: str | None = None
 
 
+# === Content Factory ===
+# Идея -> сценарий (LLM) -> озвучка/картинка/видео (fal.ai) -> approve/reject
+# человеком. Автопубликация не входит — см. шапку services/content_factory.py.
+
+class ContentStatus(str, Enum):
+    DRAFT = "draft"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class ContentPlanRequest(BaseModel):
+    topic: str
+    count: int = 3
+    platforms: list[str] = Field(default_factory=lambda: ["tiktok", "instagram"])
+
+
+class ContentItem(BaseModel):
+    id: str
+    topic: str
+    script: str
+    caption: str = ""
+    hashtags: list[str] = Field(default_factory=list)
+    platforms: list[str] = Field(default_factory=list)
+    status: ContentStatus = ContentStatus.DRAFT
+    voice_file: str | None = None
+    image_file: str | None = None
+    video_file: str | None = None
+    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+
+
 # === Knowledge Graph ===
 
 class NodeType(str, Enum):

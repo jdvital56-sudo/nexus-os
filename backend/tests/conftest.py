@@ -80,6 +80,9 @@ def temp_data_dir(tmp_path, monkeypatch):
     import backend.services.chat_log as chat_log_svc
     monkeypatch.setattr(chat_log_svc, "LOG_FILE", tmp_path / "chat_log.json")
 
+    import backend.services.content_factory as content_svc
+    monkeypatch.setattr(content_svc, "CONTENT_FILE", tmp_path / "content_items.json")
+
     import backend.core.singleton as singleton_mod
     monkeypatch.setattr(singleton_mod, "LOCK_FILE", tmp_path / "scheduler.lock")
     monkeypatch.setattr(singleton_mod, "BOT_LOCK_FILE", tmp_path / "hermes_bot.lock")

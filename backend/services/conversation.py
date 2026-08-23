@@ -82,6 +82,15 @@ _TASK_TRIGGER = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# «Джарвис, создай контент про X» / «сделай контент-план на тему X» —
+# первый срез Content Factory (см. services/content_factory.py). Тоже без
+# модели на этапе распознавания команды: сама генерация плана уже идёт
+# через LLM внутри content_factory.generate_plan.
+_CONTENT_TRIGGER = re.compile(
+    r"^\s*(?:создай|сделай|запусти)\s+контент[- ]?(?:план)?\s+(?:на\s+тему\s+|про\s+|о\s+)?(?P<topic>.+?)[\s.!?]*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
 # «Подтверждаю» — исполняет заблокированный computer_use.py клик/ввод
 # по-настоящему (см. pending_action.py). Ищем подстрокой, не полным
 # совпадением фразы: фаундер может сказать «да, подтверждаю» или «ладно,
@@ -175,6 +184,13 @@ class ConversationService:
             self._emit_message(channel, "assistant", "Задача", task_reply)
             await self._log_turn(channel, user_id, text, task_reply, "Задача")
             return task_reply
+
+        content_reply = await self._try_content(text)
+        if content_reply is not None:
+            self._emit_message(channel, "user", "Контент", text)
+            self._emit_message(channel, "assistant", "Контент", content_reply)
+            await self._log_turn(channel, user_id, text, content_reply, "Контент")
+            return content_reply
 
         confirm_reply = await self._try_confirm(text, channel, user_id)
         if confirm_reply is not None:
@@ -520,6 +536,35 @@ class ConversationService:
             logger.exception("Не удалось создать задачу")
             return f"Не удалось создать задачу: {e}"
         return f"✅ Задача создана: «{task.title}»."
+
+    async def _try_content(self, text: str) -> str | None:
+        """Запускает первый срез Content Factory по прямой команде.
+
+        Только план + черновики (сценарий/подпись/хэштеги), без озвучки и
+        без публикации — это шаги, которые фаундер делает потом через API/UI
+        осознанно, не одной случайно расслышанной фразой.
+        """
+        match = _CONTENT_TRIGGER.match(text)
+        if not match:
+            return None
+
+        topic = match.group("topic").strip()
+        if not topic:
+            return "Скажи тему: «создай контент про утренние ритуалы»."
+
+        from . import content_factory
+
+        try:
+            items = await content_factory.generate_plan(topic)
+        except Exception as e:
+            logger.exception("Не удалось создать план контента")
+            return f"Не удалось создать план контента: {e}"
+
+        titles = "; ".join(f"«{i.caption or i.script[:40]}»" for i in items)
+        return (
+            f"✅ Готово {len(items)} черновика(ов) по теме «{topic}»: {titles}. "
+            "Ждут вашего approve/reject в /api/content."
+        )
 
     async def _try_confirm(self, text: str, channel: str, user_id: str) -> str | None:
         """«Подтверждаю» → на самом деле выполняет заблокированный клик/ввод.

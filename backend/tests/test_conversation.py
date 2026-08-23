@@ -453,6 +453,54 @@ async def test_create_task_by_voice_command():
     assert llm.calls == []
 
 
+# --- «Создай контент про X» → Content Factory, первый срез (22.08.2026) ---
+
+
+@pytest.mark.asyncio
+async def test_create_content_by_voice_command(monkeypatch):
+    """Content Factory использует свой собственный LLM (как dream/curator),
+    не персону разговора — команда не должна трогать llm персоны."""
+    import backend.services.llm as llm_mod
+
+    class FakeContentLLM:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def generate_response(self, user_message, context="", kind="interactive", json_mode=False):
+            return '[{"script": "Сценарий", "caption": "Подпись", "hashtags": []}]'
+
+    monkeypatch.setattr(llm_mod, "LLMService", FakeContentLLM)
+
+    llm = FakeLLM("модель не должна отвечать")
+    svc = make_service(llm)
+
+    reply = await svc.handle("telegram", "42", "создай контент про утренние ритуалы")
+    await svc.drain()
+
+    assert "утренние ритуалы" in reply
+    assert llm.calls == []
+
+    from backend.services import content_factory
+    items = content_factory.list_items()
+    assert len(items) == 1
+    assert items[0].topic == "утренние ритуалы"
+
+
+@pytest.mark.asyncio
+async def test_content_command_without_topic_asks_for_it(monkeypatch):
+    import backend.services.llm as llm_mod
+    monkeypatch.setattr(llm_mod, "LLMService", lambda: None)  # не должно вызваться
+
+    llm = FakeLLM("модель не должна отвечать")
+    svc = make_service(llm)
+
+    reply = await svc.handle("telegram", "42", "создай контент   ")
+    await svc.drain()
+
+    assert "тему" in reply.lower()
+    assert llm.calls == []
+
+
 # --- «Подтверждаю» → выполняет заблокированный клик/ввод (шаг подтверждения, 19.08.2026) ---
 
 

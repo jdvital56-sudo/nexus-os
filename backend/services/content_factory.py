@@ -1,0 +1,329 @@
+"""Nexus Content Factory — идея -> сценарий -> голос/картинка/видео -> approve.
+
+Заявлено фаундером 22.08.2026 как «контент завод»: полный конвейер тренд ->
+сценарий/картинка/голос -> видео -> approval -> календарь -> публикация ->
+аналитика, собранный из нескольких внешних open-source репозиториев
+(SocialFlow/VidPipe/OpenSocial/Social Agent AI/GenLab, см. память
+nexus-os-content-factory-idea). Решено начать с узкого среза без единого
+внешнего репозитория и без автопубликации:
+
+    идея -> N сценариев (LLM) -> озвучка (tts.py, тот же движок, что у
+    Джарвиса) -> картинка/видео (fal.ai) -> черновик ждёт approve/reject
+    человеком -> готовые файлы отдаются фаундеру, публикует он сам.
+
+Автопубликация в соцсети НЕ входит — фаундер прямо потребовал, что ничего
+не публикуется без его подтверждения, а интеграций с площадками (OAuth и
+т.п.) в системе пока просто нет.
+"""
+import asyncio
+import json
+import logging
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+import httpx
+
+from ..core.config import DATA_DIR, ensure_data_dir
+from ..core.errors import NotFoundError, ValidationError
+from ..core.jsonio import read_json, write_json
+from ..models.schemas import ContentItem, ContentStatus
+
+logger = logging.getLogger(__name__)
+
+CONTENT_FILE = DATA_DIR / "content_items.json"
+
+FAL_IMAGE_MODEL = "fal-ai/flux/schnell"
+FAL_VIDEO_MODEL = "fal-ai/ltx-video"
+FAL_QUEUE_POLL_SECONDS = 3
+FAL_QUEUE_MAX_POLLS = 100  # ~5 минут — видео у fal.ai обычно готово раньше
+
+
+def _load() -> list[dict]:
+    ensure_data_dir()
+    return read_json(CONTENT_FILE, []) or []
+
+
+def _save(items: list[dict]) -> None:
+    ensure_data_dir()
+    write_json(CONTENT_FILE, items)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def list_items(status: str | None = None) -> list[ContentItem]:
+    items = [ContentItem(**i) for i in _load()]
+    if status:
+        items = [i for i in items if i.status.value == status]
+    return sorted(items, key=lambda i: i.created_at, reverse=True)
+
+
+def get_item(item_id: str) -> ContentItem:
+    for i in _load():
+        if i["id"] == item_id:
+            return ContentItem(**i)
+    raise NotFoundError("ContentItem", item_id)
+
+
+def _parse_plan(raw: str) -> list[dict]:
+    """Разбирает JSON-ответ модели в список сценариев.
+
+    Модель иногда возвращает объект {"items": [...]} вместо голого массива,
+    иногда оборачивает JSON в текст вокруг — не молчим на мусорном вводе,
+    поднимаем понятную ошибку вместо того, чтобы создать пустые черновики.
+    """
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValidationError(f"Модель вернула не JSON: {e}") from e
+
+    items = data if isinstance(data, list) else data.get("items")
+    if not isinstance(items, list) or not items:
+        raise ValidationError("Модель не вернула ни одного сценария")
+    return items
+
+
+async def generate_plan(topic: str, count: int = 3, platforms: list[str] | None = None, llm=None) -> list[ContentItem]:
+    """Идея -> N черновиков сценариев через LLM.
+
+    Голос синтезируется отдельным шагом (synthesize_voice), не здесь —
+    чтобы медленная/упавшая озвучка одного черновика не проваливала весь
+    план и не блокировала остальные.
+    """
+    if not topic or not topic.strip():
+        raise ValidationError("Нужна тема для плана контента")
+    count = max(1, min(int(count), 10))
+    platforms = platforms or ["tiktok", "instagram"]
+
+    if llm is None:
+        from .llm import LLMService
+        from ..core.config import settings
+
+        # LLMService() без аргументов берёт NEXSYS_LLM_PROVIDER=ollama из
+        # .env — дешёвый вариант, но локальный Ollama на этой машине не
+        # поднят. Настоящие персоны (Orpheus и др.) все сидят на
+        # deepseek-chat с ключом DEEPSEEK_API_KEY (persona_manager.py) —
+        # берём тот же провайдер, а не ловим ConnectError в проде.
+        llm = LLMService(
+            provider="deepseek",
+            model="deepseek-chat",
+            api_key=settings.deepseek_api_key,
+        )
+
+    from . import budget
+
+    prompt = (
+        f"Придумай {count} коротких видео-сценария на тему «{topic}» "
+        f"для площадок: {', '.join(platforms)}.\n"
+        'Ответь ТОЛЬКО JSON-массивом объектов вида '
+        '{"script": "текст сценария для озвучки, 2-4 предложения", '
+        '"caption": "подпись к посту", "hashtags": ["тег1", "тег2"]}. '
+        "Без пояснений вокруг JSON, без markdown-обрамления."
+    )
+    raw = await llm.generate_response(prompt, kind=budget.BACKGROUND, json_mode=True)
+    drafts = _parse_plan(raw)
+
+    items = _load()
+    created: list[ContentItem] = []
+    for d in drafts[:count]:
+        item = ContentItem(
+            id=str(uuid.uuid4())[:8],
+            topic=topic,
+            script=str(d.get("script", "")).strip(),
+            caption=str(d.get("caption", "")).strip(),
+            hashtags=[str(h) for h in d.get("hashtags", [])],
+            platforms=platforms,
+        )
+        items.append(item.model_dump())
+        created.append(item)
+    _save(items)
+    logger.info("Content Factory: создано %d черновиков по теме «%s»", len(created), topic)
+    return created
+
+
+def _content_dir() -> Path:
+    from . import artifacts
+
+    path = artifacts.artifacts_dir() / "content"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+async def synthesize_voice(item_id: str) -> ContentItem:
+    """Озвучивает сценарий черновика тем же движком, что и голос Джарвиса
+    (services.tts) — заводить второй голосовой движок незачем."""
+    from . import tts
+
+    item = get_item(item_id)
+    if not item.script:
+        raise ValidationError("У черновика нет сценария для озвучки")
+
+    tmp_path = await tts.synthesize(item.script)
+    dest = _content_dir() / f"{item.id}{tmp_path.suffix}"
+    tmp_path.replace(dest)
+
+    items = _load()
+    for i in items:
+        if i["id"] == item_id:
+            i["voice_file"] = dest.name
+            i["updated_at"] = _now()
+            _save(items)
+            return ContentItem(**i)
+    raise NotFoundError("ContentItem", item_id)
+
+
+def voice_file_path(item_id: str) -> Path:
+    item = get_item(item_id)
+    if not item.voice_file:
+        raise ValidationError(f"Озвучка ещё не готова для черновика «{item_id}»")
+    path = _content_dir() / item.voice_file
+    if not path.is_file():
+        raise NotFoundError("Файл озвучки", item.voice_file)
+    return path
+
+
+def _fal_headers() -> dict:
+    from ..core.config import settings
+
+    if not settings.fal_api_key:
+        raise ValidationError(
+            "Генерация картинок/видео выключена: не задан FAL_KEY в .env"
+        )
+    return {"Authorization": f"Key {settings.fal_api_key}"}
+
+
+async def _fal_download(client: httpx.AsyncClient, url: str, dest: Path) -> None:
+    resp = await client.get(url)
+    resp.raise_for_status()
+    dest.write_bytes(resp.content)
+
+
+def _set_field(item_id: str, field: str, value: str) -> ContentItem:
+    items = _load()
+    for i in items:
+        if i["id"] == item_id:
+            i[field] = value
+            i["updated_at"] = _now()
+            _save(items)
+            return ContentItem(**i)
+    raise NotFoundError("ContentItem", item_id)
+
+
+async def generate_image(item_id: str, prompt: str | None = None) -> ContentItem:
+    """Картинка для черновика через fal.ai (flux/schnell, синхронный вызов —
+    обычно готово за пару секунд, отдельная очередь не нужна)."""
+    item = get_item(item_id)
+    headers = _fal_headers()
+    prompt = prompt or item.script or item.topic
+    if not prompt:
+        raise ValidationError("Нужен сценарий или тема, чтобы придумать картинку")
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            f"https://fal.run/{FAL_IMAGE_MODEL}",
+            headers=headers,
+            json={"prompt": prompt, "image_size": "portrait_16_9"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        images = data.get("images") or []
+        if not images:
+            raise ValidationError("fal.ai не вернул картинку")
+
+        dest = _content_dir() / f"{item.id}.jpg"
+        await _fal_download(client, images[0]["url"], dest)
+
+    logger.info("Content Factory: картинка готова для «%s»", item_id)
+    return _set_field(item_id, "image_file", dest.name)
+
+
+def image_file_path(item_id: str) -> Path:
+    item = get_item(item_id)
+    if not item.image_file:
+        raise ValidationError(f"Картинка ещё не готова для черновика «{item_id}»")
+    path = _content_dir() / item.image_file
+    if not path.is_file():
+        raise NotFoundError("Файл картинки", item.image_file)
+    return path
+
+
+async def generate_video(item_id: str, prompt: str | None = None) -> ContentItem:
+    """Видео для черновика через fal.ai (ltx-video, очередь — генерация
+    видео не укладывается в разумный синхронный HTTP-таймаут)."""
+    item = get_item(item_id)
+    headers = _fal_headers()
+    prompt = prompt or item.script or item.topic
+    if not prompt:
+        raise ValidationError("Нужен сценарий или тема, чтобы придумать видео")
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        submit = await client.post(
+            f"https://queue.fal.run/{FAL_VIDEO_MODEL}",
+            headers=headers,
+            json={"prompt": prompt},
+        )
+        submit.raise_for_status()
+        job = submit.json()
+        status_url = job["status_url"]
+        response_url = job["response_url"]
+
+        for _ in range(FAL_QUEUE_MAX_POLLS):
+            status = await client.get(status_url, headers=headers)
+            status.raise_for_status()
+            state = status.json().get("status")
+            if state == "COMPLETED":
+                break
+            if state in ("ERROR", "CANCELLED"):
+                raise ValidationError(f"fal.ai не смог сделать видео: {state}")
+            await asyncio.sleep(FAL_QUEUE_POLL_SECONDS)
+        else:
+            raise ValidationError("fal.ai не успел сделать видео за отведённое время")
+
+        result = await client.get(response_url, headers=headers)
+        result.raise_for_status()
+        video = (result.json().get("video") or {}).get("url")
+        if not video:
+            raise ValidationError("fal.ai не вернул видео")
+
+        dest = _content_dir() / f"{item.id}.mp4"
+        await _fal_download(client, video, dest)
+
+    logger.info("Content Factory: видео готово для «%s»", item_id)
+    return _set_field(item_id, "video_file", dest.name)
+
+
+def video_file_path(item_id: str) -> Path:
+    item = get_item(item_id)
+    if not item.video_file:
+        raise ValidationError(f"Видео ещё не готово для черновика «{item_id}»")
+    path = _content_dir() / item.video_file
+    if not path.is_file():
+        raise NotFoundError("Файл видео", item.video_file)
+    return path
+
+
+def set_status(item_id: str, status: ContentStatus) -> ContentItem:
+    items = _load()
+    for i in items:
+        if i["id"] == item_id:
+            i["status"] = status.value
+            i["updated_at"] = _now()
+            _save(items)
+            return ContentItem(**i)
+    raise NotFoundError("ContentItem", item_id)
+
+
+def delete_item(item_id: str) -> bool:
+    items = _load()
+    target = next((i for i in items if i["id"] == item_id), None)
+    if target is None:
+        raise NotFoundError("ContentItem", item_id)
+    for field in ("voice_file", "image_file", "video_file"):
+        if target.get(field):
+            path = _content_dir() / target[field]
+            if path.is_file():
+                path.unlink()
+    _save([i for i in items if i["id"] != item_id])
+    return True

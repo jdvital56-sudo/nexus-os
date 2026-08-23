@@ -89,6 +89,10 @@ class Settings(BaseModel):
     # Apollo.io API Key (for contact/company search)
     apollo_api_key: str = os.getenv("NEXSYS_APOLLO_API_KEY", "")
 
+    # fal.ai (генерация картинок/видео для Content Factory). Имя без
+    # префикса NEXSYS: FAL_KEY — стандартное имя переменной для SDK fal-client.
+    fal_api_key: str = os.getenv("FAL_KEY", "")
+
     # Сжатие контекста через Headroom. Выключено намеренно: сжатие лоссовое,
     # включать только после проверки на живых прогонах (см. /api/system/compression).
     compression: bool = os.getenv("NEXUS_COMPRESSION", "off").lower() in ("on", "true", "1")
@@ -164,6 +168,7 @@ LLM_API_KEY = settings.llm_api_key
 LLM_BASE_URL = settings.llm_base_url
 GEMINI_API_KEY = settings.gemini_api_key
 APOLLO_API_KEY = settings.apollo_api_key
+FAL_API_KEY = settings.fal_api_key
 VECTOR_STORE_TYPE = settings.vector_store_type
 CHROMA_PERSIST_DIR = settings.chroma_persist_dir
 LOG_LEVEL = settings.log_level
