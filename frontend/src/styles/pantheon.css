@@ -123,3 +123,94 @@
 @media (max-width: 980px) {
   .p-gallery { grid-template-columns: repeat(3, 1fr); }
 }
+
+/* ============================================================
+   Карточки сущностей (Идеи, Задачи) — 23.08.2026.
+   Фаундер прямо попросил: списки строк ему непонятны, нужны
+   карточки «как в Пантеоне» — наведение подсвечивает, клик
+   раскрывает суть целиком. Живут в ЭТОМ файле, а не в своём:
+   палитра одна на всё (у неё уже 7 вариантов, дублировать их
+   значило бы править цвет в двух местах и разойтись). Экран
+   оборачивается в .pantheon-theme и получает ту же тему, что
+   выбрана переключателем палитр на экране Пантеона.
+   ============================================================ */
+
+.n-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.n-grid.wide { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+
+.n-card {
+  border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+  padding: 13px 14px 12px; cursor: pointer; text-align: left; font: inherit; color: inherit;
+  display: flex; flex-direction: column; gap: 7px; width: 100%;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease, background 140ms ease;
+}
+.n-card:hover { border-color: var(--gold); background: var(--panel-2); transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,0.35); }
+.n-card:focus-visible { outline: none; border-color: var(--gold); box-shadow: 0 0 0 2px rgba(201,162,75,0.35); }
+.n-card.open { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); transform: none; grid-column: 1 / -1; }
+
+/* Полоса слева — статус читается до чтения текста */
+.n-card { border-left-width: 3px; border-left-style: solid; }
+.n-card[data-tone="neutral"] { border-left-color: var(--ink-dimmer); }
+.n-card[data-tone="progress"] { border-left-color: var(--lapis); }
+.n-card[data-tone="good"] { border-left-color: var(--gold); }
+.n-card[data-tone="warn"] { border-left-color: var(--torch); }
+.n-card[data-tone="off"] { border-left-color: #6b4a4a; }
+
+.n-card .n-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.n-card .n-title {
+  font-family: var(--display); font-size: 0.95rem; line-height: 1.35; color: var(--ink); margin: 0;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.n-card.open .n-title { -webkit-line-clamp: unset; color: var(--gold-bright); }
+
+.n-badge {
+  flex: none; font-size: 0.64rem; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 20px; border: 1px solid var(--line);
+  background: rgba(0,0,0,0.25); color: var(--ink-dim); font-family: var(--p-mono);
+}
+.n-badge[data-tone="progress"] { color: var(--lapis); border-color: rgba(77,132,196,0.4); }
+.n-badge[data-tone="good"] { color: var(--gold-bright); border-color: rgba(201,162,75,0.4); }
+.n-badge[data-tone="warn"] { color: var(--torch); border-color: rgba(232,121,42,0.4); }
+.n-badge[data-tone="off"] { color: #c98a8a; border-color: rgba(201,138,138,0.35); }
+
+.n-card .n-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.7rem; color: var(--ink-dimmer); font-family: var(--p-mono); }
+.n-card .n-hint { margin-left: auto; opacity: 0; transition: opacity 140ms ease; }
+.n-card:hover .n-hint { opacity: 1; }
+.n-card.open .n-hint { opacity: 1; color: var(--gold); }
+
+/* Раскрытая часть — появляется по клику */
+.n-body { border-top: 1px solid var(--line); margin-top: 3px; padding-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+.n-body .n-full { font-family: var(--p-body); font-size: 0.88rem; line-height: 1.6; color: var(--ink); white-space: pre-wrap; margin: 0; }
+.n-body .n-label { font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dimmer); }
+.n-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.n-actions .n-act {
+  cursor: pointer; font-family: var(--p-body); font-size: 0.76rem; padding: 5px 11px;
+  border-radius: 6px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-dim);
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.n-actions .n-act:hover { border-color: var(--gold); color: var(--gold-bright); }
+.n-actions .n-act.danger:hover { border-color: #a35a5a; color: #d99a9a; }
+.n-actions .n-act.active { border-color: var(--gold); color: var(--gold-bright); background: rgba(201,162,75,0.12); }
+.n-actions .n-spacer { margin-left: auto; }
+
+.n-empty { border: 1px dashed var(--line); border-radius: 8px; background: var(--panel); padding: 26px 18px; text-align: center; }
+.n-empty p { margin: 0; color: var(--ink-dim); }
+.n-empty .n-sub { margin-top: 6px; font-size: 0.84rem; color: var(--ink-dimmer); }
+
+.n-newbox { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 13px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 9px; }
+.n-newbox textarea, .n-newbox input {
+  width: 100%; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  color: var(--ink); font-family: var(--p-body); font-size: 0.88rem; line-height: 1.5; padding: 9px 11px; resize: vertical;
+}
+.n-newbox textarea:focus, .n-newbox input:focus { outline: none; border-color: var(--gold); }
+
+.n-filters { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 12px; }
+.n-filters button {
+  cursor: pointer; font-family: var(--p-body); font-size: 0.76rem; padding: 5px 12px; border-radius: 20px;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink-dimmer);
+}
+.n-filters button.active { border-color: var(--gold); color: var(--gold-bright); background: rgba(201,162,75,0.1); }
+
+@media (max-width: 760px) {
+  .n-grid, .n-grid.wide { grid-template-columns: 1fr; }
+}

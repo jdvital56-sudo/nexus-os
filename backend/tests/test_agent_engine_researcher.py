@@ -56,7 +56,7 @@ def test_directed_research_search_failure_is_reported_not_swallowed(client, with
     result = agent_engine.execute_cycle(_agent(), "что-то важное")
 
     assert result["status"] == "completed"  # цикл не падает целиком
-    assert result["result"]["verify"] == {"research_tasks": 0}
+    assert result["result"]["verify"] == {"noted": 0}
     assert "Firecrawl недоступен" in result["output"]
     # execute_cycle сам кладёт в память сводку любого прогона (_remember_run,
     # source="agent:{id}") — это не то же самое, что настоящая находка
@@ -72,4 +72,4 @@ def test_empty_task_still_does_the_old_sweep(client):
     result = agent_engine.execute_cycle(_agent(), "")
 
     assert result["status"] == "completed"
-    assert "research_tasks" in result["result"]["verify"]
+    assert "noted" in result["result"]["verify"]

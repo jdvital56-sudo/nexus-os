@@ -265,25 +265,51 @@ def _review_directed(ctx: AgentContext, task: str) -> dict:
     return {"status": "reviewed", "task": task, "verdict": verdict, "fact_id": fact.id}
 
 
+def _note_sweep_findings(ctx: AgentContext, kind: str, labels: list[str]) -> dict:
+    """Итог планового обхода — ОДНОЙ записью в память, а не N задачами.
+
+    23.08.2026: фаундер открыл экран задач и не понял, что там — из 16
+    задач 15 оказались автомусором вида «Link orphan node: Без Названия»
+    и «Research: json», созданным этими обходами. Их никто никогда не брал
+    в работу: Библиотекарь не подхватывает задачи сам, они мертвы по
+    рождению и только прятали единственную настоящую задачу человека.
+    Список задач — это то, что человек собирается делать; наблюдения
+    системы о самой себе там не место, им место в памяти.
+    """
+    if not labels:
+        return {"action": kind, "status": "nothing", "count": 0}
+
+    from . import memory as mem_svc
+
+    shown = ", ".join(labels[:8])
+    more = f" и ещё {len(labels) - 8}" if len(labels) > 8 else ""
+    try:
+        fact = mem_svc.add_fact(
+            content=f"Плановый обход ({kind}): {len(labels)} узлов требуют внимания — {shown}{more}.",
+            source=f"agent-sweep:{kind}",
+            confidence=0.4,
+            ttl_hours=168,  # неделя: наблюдение о состоянии графа быстро устаревает
+        )
+        ctx.log_msg(f"Act: {len(labels)} находок записаны одной заметкой ({fact.id}), задачи не плодим")
+        return {"action": kind, "status": "noted", "count": len(labels), "fact_id": fact.id}
+    except Exception as e:
+        ctx.log_msg(f"Act: не удалось записать находки — {e}")
+        return {"action": kind, "status": "error", "error": str(e)}
+
+
 def act_reviewer(ctx: AgentContext, actions: list[dict]) -> list[dict]:
-    """Reviewer: реальный ревью по директиве, иначе — заводит задачи по
-    узлам без связей, как раньше."""
+    """Reviewer: реальный ревью по директиве, иначе — одна заметка в память
+    по итогам обхода (раньше плодил задачу на каждый узел, см.
+    _note_sweep_findings)."""
     results = []
+    orphans = []
     for action in actions:
         if action["action"] == "review_directed":
             results.append(_review_directed(ctx, action["task"]))
         elif action["action"] == "flag_orphan":
-            try:
-                task = task_svc.create_task(task_svc.TaskCreate(
-                    title=f"Link orphan node: {action['label']}",
-                    description=f"Node '{action['node_id']}' has no connections. {action['recommendation']}",
-                    assigned_agent="librarian",
-                    tags=["review", "auto"],
-                ))
-                results.append({"action": "flag_orphan", "status": "task_created", "task_id": task.id})
-                ctx.log_msg(f"Act: created task for orphan '{action['label']}'")
-            except Exception as e:
-                results.append({"action": "flag_orphan", "status": "error", "error": str(e)})
+            orphans.append(action["label"])
+    if orphans:
+        results.append(_note_sweep_findings(ctx, "несвязанные узлы", orphans))
     return results
 
 
@@ -293,9 +319,9 @@ def verify_reviewer(ctx: AgentContext, act_results: list[dict]) -> dict:
     if reviewed:
         ctx.log_msg(f"Verify: вердикт готов — {reviewed[0]['verdict'][:120]}")
         return {"status": "reviewed", "verdict": reviewed[0]["verdict"], "fact_id": reviewed[0]["fact_id"]}
-    tasks_created = sum(1 for r in act_results if r.get("status") == "task_created")
-    ctx.log_msg(f"Verify: {tasks_created} tasks created for issues")
-    return {"tasks_created": tasks_created, "total_issues": len(act_results)}
+    noted = sum(r.get("count", 0) for r in act_results if r.get("status") == "noted")
+    ctx.log_msg(f"Verify: {noted} находок отмечено в памяти")
+    return {"noted": noted, "total_issues": len(act_results)}
 
 
 # === Builder ===
@@ -532,24 +558,18 @@ def _research_directed(ctx: AgentContext, query: str) -> dict:
 
 
 def act_researcher(ctx: AgentContext, actions: list[dict]) -> list[dict]:
-    """Researcher: реальное исследование по директиве, иначе — заводит
-    задачи по слабо связанным узлам графа, как раньше."""
+    """Researcher: реальное исследование по директиве, иначе — одна заметка
+    в память по итогам обхода (раньше плодил задачу «Research: X» на каждый
+    слабо связанный узел, см. _note_sweep_findings)."""
     results = []
+    sparse = []
     for action in actions:
         if action["action"] == "research_directed":
             results.append(_research_directed(ctx, action["query"]))
         elif action["action"] == "research":
-            try:
-                task = task_svc.create_task(task_svc.TaskCreate(
-                    title=f"Research: {action['label']}",
-                    description=f"Node '{action['node_id']}' has only {action['connections']} connections. Find related information.",
-                    assigned_agent="librarian",
-                    tags=["research", "auto"],
-                ))
-                results.append({"node_id": action["node_id"], "status": "task_created", "task_id": task.id})
-                ctx.log_msg(f"Act: created research task for '{action['label']}'")
-            except Exception as e:
-                results.append({"node_id": action["node_id"], "status": "error", "error": str(e)})
+            sparse.append(action["label"])
+    if sparse:
+        results.append(_note_sweep_findings(ctx, "слабо связанные узлы", sparse))
     return results
 
 
@@ -559,9 +579,9 @@ def verify_researcher(ctx: AgentContext, act_results: list[dict]) -> dict:
     if found:
         ctx.log_msg(f"Verify: находка готова — {found[0]['finding'][:120]}")
         return {"status": "found", "finding": found[0]["finding"], "fact_id": found[0]["fact_id"]}
-    tasks_created = sum(1 for r in act_results if r.get("status") == "task_created")
-    ctx.log_msg(f"Verify: {tasks_created} research tasks created")
-    return {"research_tasks": tasks_created}
+    noted = sum(r.get("count", 0) for r in act_results if r.get("status") == "noted")
+    ctx.log_msg(f"Verify: {noted} находок отмечено в памяти")
+    return {"noted": noted}
 
 
 # === Curator ===

@@ -228,6 +228,9 @@ export const runAgent = (id: string, task: string, context: Record<string, any> 
 export const getTasks = () => data<any[]>(api.get('/tasks'));
 export const createTask = (payload: Record<string, any>) =>
   data<any>(api.post('/tasks', payload));
+export const updateTask = (id: string, payload: Record<string, any>) =>
+  data<any>(api.patch(`/tasks/${id}`, payload));
+export const deleteTask = (id: string) => data<{ ok: boolean }>(api.delete(`/tasks/${id}`));
 
 // --- Идеи ---
 // Отдельно от задач — то, что откладывается на будущую разработку, а не

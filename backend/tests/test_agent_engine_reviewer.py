@@ -110,4 +110,4 @@ def test_empty_task_still_does_the_old_orphan_sweep(client):
     result = agent_engine.execute_cycle(_agent(), "")
 
     assert result["status"] == "completed"
-    assert "tasks_created" in result["result"]["verify"]
+    assert "noted" in result["result"]["verify"]
