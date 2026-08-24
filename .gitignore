@@ -82,3 +82,8 @@ credentials.json
 client_secret_*.json
 gmail_token.json
 google_token.json
+
+# Голоса Piper — по 61 МБ каждый, качаются с huggingface.co/rhasspy/piper-voices
+# (см. voice_engine/piper_voices/README.md). В git им делать нечего.
+voice_engine/piper_voices/*.onnx
+voice_engine/piper_voices/*.onnx.json

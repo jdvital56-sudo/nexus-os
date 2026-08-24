@@ -260,6 +260,15 @@ export const updateIdea = (id: string, payload: Record<string, any>) =>
   data<any>(api.patch(`/ideas/${id}`, payload));
 export const deleteIdea = (id: string) => data<{ ok: boolean }>(api.delete(`/ideas/${id}`));
 
+// Исследователь: ищет тренды по направлениям фаундера и кладёт находки в
+// «Идеи» с пометкой «предложил Джарвис». Своей выдачи у него нет —
+// результат читается обычным getIdeas().
+export const getDirections = () => data<string[]>(api.get('/researcher/directions'));
+export const setDirections = (directions: string[]) =>
+  data<string[]>(api.put('/researcher/directions', { directions }));
+export const runResearch = (direction?: string) =>
+  data<any[]>(api.post('/researcher/run', null, { params: direction ? { direction } : {} }));
+
 // Контент-завод: план -> озвучка/картинка/видео -> подтверждение в Telegram
 // -> дата публикации -> напоминание. Публикует фаундер сам, система только
 // помнит, куда и когда он собирался (решение 23.08.2026).

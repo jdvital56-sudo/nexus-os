@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Plus } from 'lucide-react';
-import { createIdea, deleteIdea, getIdeas, updateIdea } from '../lib/api';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Search } from 'lucide-react';
+import {
+  createContentPlan,
+  createIdea,
+  deleteIdea,
+  getDirections,
+  getIdeas,
+  runResearch,
+  setDirections,
+  updateIdea,
+} from '../lib/api';
 import { ErrorBox, PageHeader } from '../components/ui';
 import '../styles/pantheon.css';
 
@@ -48,6 +58,11 @@ export default function IdeasScreen() {
   const [content, setContent] = useState('');
   const [openId, setOpenId] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  const [directions, setDirs] = useState<string[]>([]);
+  const [showDirs, setShowDirs] = useState(false);
+  const [dirsDraft, setDirsDraft] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const navigate = useNavigate();
   // Палитра общая с Пантеоном: фаундер выбирает её там, здесь только читаем —
   // две независимые темы на соседних экранах выглядели бы поломкой.
   const palette = localStorage.getItem('pantheon-palette') || 'gold';
@@ -62,6 +77,69 @@ export default function IdeasScreen() {
   };
 
   useEffect(load, []);
+
+  useEffect(() => {
+    getDirections()
+      .then((d) => {
+        setDirs(d);
+        setDirsDraft(d.join('\n'));
+      })
+      .catch(() => {
+        /* направления — не главное на экране, молча без них */
+      });
+  }, []);
+
+  /** Разведка трендов сейчас: Исследователь кладёт находки сюда же. */
+  const research = async () => {
+    if (directions.length === 0) {
+      setShowDirs(true);
+      setError('Сначала задайте направления — по чему искать.');
+      return;
+    }
+    setBusy('research');
+    try {
+      const found = await runResearch();
+      setError(found.length === 0 ? 'Новых тем не нашлось — всё уже в списке.' : null);
+      load();
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || 'Не удалось поискать тренды.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const saveDirections = async () => {
+    const list = dirsDraft
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    setBusy('dirs');
+    try {
+      const saved = await setDirections(list);
+      setDirs(saved);
+      setDirsDraft(saved.join('\n'));
+      setShowDirs(false);
+      setError(null);
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || 'Не удалось сохранить направления.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** Идея -> контент: тема уезжает в контент-завод, идея уходит «в план». */
+  const toContent = async (idea: any) => {
+    setBusy(`content:${idea.id}`);
+    try {
+      await createContentPlan({ topic: idea.content, count: 3 });
+      await updateIdea(idea.id, { status: 'planned' });
+      setError(null);
+      navigate('/content');
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || 'Не удалось сделать контент по идее.');
+      setBusy(null);
+    }
+  };
 
   const create = async () => {
     if (!content.trim()) return;
@@ -106,13 +184,24 @@ export default function IdeasScreen() {
         title="Идеи"
         subtitle="То, что откладывается на будущую разработку — не делается прямо сейчас. Скажите «запиши идею X» или «запиши это на будущее»."
         action={
-          <button
-            onClick={() => setShowCreate(!showCreate)}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 hover:border-gray-600"
-          >
-            <Plus className="h-4 w-4" aria-hidden />
-            Новая идея
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={research}
+              disabled={busy === 'research'}
+              title="Посмотреть, что сейчас обсуждают по вашим направлениям"
+              className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 hover:border-gray-600 disabled:opacity-60"
+            >
+              <Search className="h-4 w-4" aria-hidden />
+              {busy === 'research' ? 'ищу…' : 'Найти тренды'}
+            </button>
+            <button
+              onClick={() => setShowCreate(!showCreate)}
+              className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 hover:border-gray-600"
+            >
+              <Plus className="h-4 w-4" aria-hidden />
+              Новая идея
+            </button>
+          </div>
         }
       />
 
@@ -123,6 +212,39 @@ export default function IdeasScreen() {
       )}
 
       <div className="pantheon-theme" data-palette={palette}>
+        {/* Направления Исследователя: задаются один раз, дальше он ходит по
+            ним сам — и по кнопке, и утром в 9:30, ничего не спрашивая. */}
+        <div className="n-when" style={{ marginBottom: 12 }}>
+          <span className="n-sub">
+            {directions.length > 0
+              ? `Исследователь смотрит: ${directions.join(', ')}`
+              : 'Исследователь пока не знает, где искать'}
+          </span>
+          <button className="n-act" onClick={() => setShowDirs(!showDirs)}>
+            {showDirs ? 'свернуть' : 'настроить направления'}
+          </button>
+        </div>
+
+        {showDirs && (
+          <div className="n-newbox">
+            <div className="n-label">По каким направлениям искать — по одному в строке</div>
+            <textarea
+              value={dirsDraft}
+              onChange={(e) => setDirsDraft(e.target.value)}
+              placeholder={'спа и велнес\nаренда жилья в Дубае\nоливковое масло'}
+              rows={4}
+            />
+            <div className="n-actions">
+              <button className="n-act n-spacer" onClick={saveDirections} disabled={busy === 'dirs'}>
+                {busy === 'dirs' ? 'сохраняю…' : 'Сохранить'}
+              </button>
+              <button className="n-act" onClick={() => setShowDirs(false)}>
+                Отмена
+              </button>
+            </div>
+          </div>
+        )}
+
         {showCreate && (
           <div className="n-newbox">
             <textarea
@@ -223,6 +345,20 @@ export default function IdeasScreen() {
                         <p className="n-full">{i.context}</p>
                       </div>
                     )}
+                    <div>
+                      <div className="n-label">Воплотить</div>
+                      <div className="n-actions" style={{ marginTop: 6 }}>
+                        <button
+                          className="n-act"
+                          disabled={busy === `content:${i.id}`}
+                          onClick={() => toContent(i)}
+                          title="Придумать по этой идее сценарии в разделе «Контент»"
+                        >
+                          {busy === `content:${i.id}` ? 'придумываю…' : 'сделать контент по идее'}
+                        </button>
+                      </div>
+                    </div>
+
                     <div>
                       <div className="n-label">Что с ней делать</div>
                       <div className="n-actions" style={{ marginTop: 6 }}>

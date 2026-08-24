@@ -13,7 +13,7 @@ from .core.config import (
 )
 from .core.errors import NexsysError, nexsys_error_handler, generic_error_handler
 from .core.auth import init_auth
-from .api import documents, tasks, ideas, graph, agents, webhooks, skills, calendar, obsidian, pipeline, memory, events, vector_search, fireflies, telephony, personas, dream, wallet, artifacts, gmail, sources, system, curator, chat, voice, content_factory
+from .api import documents, tasks, ideas, graph, agents, webhooks, skills, calendar, obsidian, pipeline, memory, events, vector_search, fireflies, telephony, personas, dream, wallet, artifacts, gmail, sources, system, curator, chat, voice, content_factory, researcher
 
 # Configure logging
 log_config = {
@@ -76,6 +76,7 @@ app.include_router(system.router)
 app.include_router(chat.router)
 app.include_router(voice.router)
 app.include_router(content_factory.router)
+app.include_router(researcher.router)
 
 
 @app.get("/api/health")
@@ -116,6 +117,23 @@ async def startup():
         start_dream_cadence()
     except Exception as e:
         logger.warning(f"Dream Cadence не запущен: {e}")
+
+    # Прогрев голоса: модель Piper грузится в память 4-7 секунд, и без
+    # прогрева эту задержку ловил бы первый же вопрос после перезапуска —
+    # ровно то, на что фаундер жаловался 24.08.2026. Дальше синтез идёт за
+    # полсекунды. В фоне: старт API не должен ждать голос, а если модель не
+    # скачана или движок другой — это просто не наш случай, не ошибка.
+    async def _warm_voice():
+        from .services import tts
+
+        if tts.engine_name() != "piper":
+            return
+        try:
+            await _asyncio.to_thread(tts._piper_load, tts.default_voice())
+        except Exception as e:
+            logger.info("Голос не прогрет (%s) — синтез поднимет модель при первом запросе", e)
+
+    _asyncio.create_task(_warm_voice())
 
 
     # Log startup info (without exposing token in production)

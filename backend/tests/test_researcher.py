@@ -138,6 +138,43 @@ async def test_research_dedupe_ignores_case_and_spaces(monkeypatch):
     assert second == []
 
 
+@pytest.mark.asyncio
+async def test_model_is_told_what_was_already_proposed(monkeypatch):
+    """Отсева по точному совпадению мало — это нашёл живой прогон 24.08.
+
+    На втором заходе модель выдала те же темы другими словами («Ментальное
+    здоровье в спа» вместо «mental wellness в спа»), совпадение строк их не
+    поймало, и очередь идей начала копиться дублями. Единственный, кто
+    понимает, что это одно и то же, — сама модель, поэтому список уже
+    предложенного уходит ей в промпт.
+    """
+    monkeypatch.setattr(researcher.websearch, "search", StubSearch())
+
+    await researcher.research("спа", llm=StubLLM())
+
+    second = StubLLM('[{"topic": "Совсем новая тема", "why": "свежая"}]')
+    await researcher.research("спа", llm=second)
+
+    prompt = second.prompts[0]
+    assert "Утренние спа-ритуалы дома" in prompt
+    assert "не предлагай" in prompt.lower()
+
+
+@pytest.mark.asyncio
+async def test_prompt_stays_small_when_ideas_pile_up(monkeypatch):
+    """Список предложенного не должен раздувать промпт без предела."""
+    monkeypatch.setattr(researcher.websearch, "search", StubSearch())
+
+    for n in range(60):
+        ideas_svc.propose(f"Тема номер {n}")
+
+    llm = StubLLM('[{"topic": "Новая", "why": "-"}]')
+    await researcher.research("спа", llm=llm)
+
+    listed = llm.prompts[0].count("Тема номер")
+    assert listed <= researcher.RECENT_TOPICS_SHOWN
+
+
 # === Утренний обход всех направлений ===
 
 @pytest.mark.asyncio
@@ -181,3 +218,55 @@ async def test_daily_sweep_survives_one_broken_direction(monkeypatch):
 
     assert count == 2  # второе направление отработало
     assert calls["n"] == 2
+
+
+# === Как модель заворачивает ответ (найдено живым прогоном 24.08) ===
+
+
+@pytest.mark.asyncio
+async def test_parse_accepts_any_wrapper_key(monkeypatch):
+    """Модель оборачивает массив как хочет: items, topics, темы…
+
+    Живой прогон упал на «Модель ответила не списком тем» — DeepSeek
+    завернул темы не в тот ключ, которого ждал разбор. Ключ здесь не
+    смысловой, а случайный: берём первый список, какой бы ни был ярлык.
+    """
+    monkeypatch.setattr(researcher.websearch, "search", StubSearch())
+
+    raw = '{"topics": [{"topic": "Обёрнутая тема", "why": "-"}]}'
+    created = await researcher.research("спа", llm=StubLLM(raw))
+
+    assert [i.content for i in created] == ["Обёрнутая тема"]
+
+
+@pytest.mark.asyncio
+async def test_empty_object_means_nothing_new(monkeypatch):
+    """Пустой объект — это «нового нет», а не поломка."""
+    monkeypatch.setattr(researcher.websearch, "search", StubSearch())
+
+    assert await researcher.research("спа", llm=StubLLM("{}")) == []
+
+
+@pytest.mark.asyncio
+async def test_object_without_any_list_is_an_error(monkeypatch):
+    """А вот содержательный ответ не тем форматом — честная ошибка."""
+    monkeypatch.setattr(researcher.websearch, "search", StubSearch())
+
+    with pytest.raises(ValidationError):
+        await researcher.research("спа", llm=StubLLM('{"ответ": "не знаю"}'))
+
+
+@pytest.mark.asyncio
+async def test_single_topic_object_is_accepted(monkeypatch):
+    """Одну тему модель отдаёт голым объектом, а не массивом из одного.
+
+    Третья находка живого прогона 24.08: когда предлагать почти нечего,
+    DeepSeek возвращает {"topic": ..., "why": ...} без обёртки в массив.
+    Ронять на этом всю разведку — терять единственную найденную тему.
+    """
+    monkeypatch.setattr(researcher.websearch, "search", StubSearch())
+
+    raw = '{"topic": "Одинокая тема", "why": "больше ничего нового"}'
+    created = await researcher.research("спа", llm=StubLLM(raw))
+
+    assert [i.content for i in created] == ["Одинокая тема"]

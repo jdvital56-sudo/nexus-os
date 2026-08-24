@@ -23,6 +23,11 @@ import webbrowser
 
 logger = logging.getLogger(__name__)
 
+# Куда вести по голому «включи музыку», без названия сервиса. YouTube
+# Music, а не Spotify: он открывается в браузере без отдельной подписки и
+# без установленного приложения — то есть сработает наверняка.
+MUSIC_DEFAULT = "https://music.youtube.com"
+
 # Название сайта по-русски/по-английски -> адрес. Дополнять по мере нужды.
 SITE_ALIASES: dict[str, str] = {
     "ютуб": "https://youtube.com",
@@ -38,6 +43,21 @@ SITE_ALIASES: dict[str, str] = {
     "github": "https://github.com",
     "капкат": "https://capcut.com",
     "capcut": "https://capcut.com",
+    # Музыка (24.08.2026): фаундер сказал «включи музыку», Джарвис ответил
+    # «не могу» — и был прав, музыкальных сервисов в этом списке не было
+    # вовсе, команда не распознавалась и уходила в обычный разговор.
+    "музыку": MUSIC_DEFAULT,
+    "музыка": MUSIC_DEFAULT,
+    "ютуб музыку": "https://music.youtube.com",
+    "youtube music": "https://music.youtube.com",
+    "спотифай": "https://open.spotify.com",
+    "спотифай музыку": "https://open.spotify.com",
+    "spotify": "https://open.spotify.com",
+    "яндекс музыку": "https://music.yandex.ru",
+    "яндекс музыка": "https://music.yandex.ru",
+    "саундклауд": "https://soundcloud.com",
+    "soundcloud": "https://soundcloud.com",
+    "радио": "https://radio.garden",
 }
 
 # Программа по-русски -> команда Windows. Только эти — никогда не берём

@@ -464,6 +464,19 @@ class DreamCadence:
             replace_existing=True,
         )
 
+        # Исследователь: утром приносит свежие темы по направлениям фаундера.
+        # В 9:30, после проверки подписок — чтобы два утренних сообщения не
+        # приходили одной пачкой и не читались как одно.
+        from ..services import researcher
+
+        self.scheduler.add_job(
+            researcher.daily_sweep,
+            trigger=CronTrigger(hour=9, minute=30),
+            id="content_researcher",
+            name="Trend Researcher",
+            replace_existing=True,
+        )
+
         # Контент-завод: раз в 5 минут смотрит, не наступил ли срок
         # публикации у назначенных черновиков. Отдельный планировщик заводить
         # незачем — этот уже под межпроцессным замком, а второй прислал бы

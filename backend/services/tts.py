@@ -48,7 +48,18 @@ EDGE_VOICES = [
     Voice("en-US-AriaNeural", "Aria", "female"),
 ]
 
-ENGINES = ("none", "edge", "omnivoice", "eleven")
+ENGINES = ("none", "piper", "edge", "omnivoice", "eleven")
+
+# Голоса Piper — локальные файлы модели (.onnx) рядом с проектом.
+# Скачиваются с huggingface.co/rhasspy/piper-voices, ~63 МБ на голос.
+PIPER_VOICES = [
+    Voice("ru_RU-dmitri-medium", "Дмитрий (локальный)", "male"),
+    Voice("ru_RU-irina-medium", "Ирина (локальная)", "female"),
+    Voice("ru_RU-ruslan-medium", "Руслан (локальный)", "male"),
+    Voice("ru_RU-denis-medium", "Денис (локальный)", "male"),
+]
+
+PIPER_VOICES_DIR = Path(__file__).resolve().parents[2] / "voice_engine" / "piper_voices"
 
 # Отдельный процесс в своём venv (voice_engine/.venv) — держит модель в
 # памяти. Зависимости OmniVoice (torch, transformers, gradio) конфликтуют
@@ -63,7 +74,10 @@ def engine_name() -> str:
 
 
 def default_voice() -> str:
-    return os.getenv("NEXUS_TTS_VOICE", "") or EDGE_VOICES[0].id
+    stored = os.getenv("NEXUS_TTS_VOICE", "")
+    if stored:
+        return stored
+    return PIPER_VOICES[0].id if engine_name() == "piper" else EDGE_VOICES[0].id
 
 
 # 23.08.2026: фаундер попросил голос «более синтетичный, как у Железного
@@ -92,7 +106,12 @@ def _rate_for(pace: int) -> str:
 
 
 def list_voices() -> list[dict]:
-    if engine_name() == "edge":
+    name = engine_name()
+    if name == "piper":
+        # Только реально скачанные: показывать в выпадашке голос, которого
+        # нет на диске, значит обещать то, что выберут и не получат.
+        return [v.__dict__ for v in PIPER_VOICES if (PIPER_VOICES_DIR / f"{v.id}.onnx").is_file()]
+    if name == "edge":
         return [v.__dict__ for v in EDGE_VOICES]
     return []
 
@@ -102,13 +121,27 @@ def status() -> dict:
     name = engine_name()
     detail = {
         "none": "голос выключен: NEXUS_TTS_ENGINE не задан",
+        "piper": "локальный синтез на этом компьютере, без интернета",
         "edge": "нейронные голоса Microsoft Edge, бесплатно",
         "omnivoice": "локальная модель, ничего не уходит наружу",
         "eleven": "ElevenLabs, оплата по символам",
     }[name]
 
     ready = True
-    if name == "edge":
+    if name == "piper":
+        try:
+            import piper  # noqa: F401
+        except ImportError:
+            ready = False
+            detail = "движок piper выбран, но пакет piper-tts не установлен"
+        else:
+            downloaded = [v for v in PIPER_VOICES if (PIPER_VOICES_DIR / f"{v.id}.onnx").is_file()]
+            if not downloaded:
+                ready = False
+                detail = f"движок piper выбран, но ни один голос не скачан в {PIPER_VOICES_DIR}"
+            else:
+                detail = f"локальный синтез, голосов скачано: {len(downloaded)}"
+    elif name == "edge":
         try:
             import edge_tts  # noqa: F401
         except ImportError:
@@ -157,6 +190,8 @@ async def synthesize(text: str, voice: str | None = None) -> Path:
     if len(text) > limit:
         text = text[:limit].rsplit(" ", 1)[0] + "…"
 
+    if name == "piper":
+        return await _piper(text, voice or default_voice())
     if name == "edge":
         from .personas import get_character
 
@@ -295,4 +330,94 @@ async def _omnivoice(text: str) -> Path:
     out = artifacts.temp_dir() / f"voice_omnivoice_{abs(hash(text)) % 10**8}.wav"
     out.write_bytes(r.content)
     logger.info("Озвучено %d символов движком omnivoice", len(text))
+    return out
+
+
+# === Piper: локальный синтез ===============================================
+#
+# 24.08.2026, по жалобе фаундера «отвечает через 15 секунд». Измерено, а не
+# предположено: edge-tts (серверы Microsoft) отдавал первый байт звука за
+# 2.4, 3.7 и 37.4 секунды в трёх замерах подряд — разброс не наш, а сетевой,
+# и предсказать его нельзя. Piper считает на этом же процессоре: 0.41-0.66
+# секунды, медиана 0.55 на восьми замерах. Плюс работает без интернета.
+#
+# Модель держим загруженной в память процесса: сама загрузка стоит 4.5
+# секунды, платить их на каждую фразу было бы бессмысленно.
+_piper_voice = None
+_piper_voice_id: str | None = None
+
+
+def _piper_short_path(path: Path | str) -> str:
+    """Короткое DOS-имя (8.3) пути.
+
+    Нативный espeak-ng внутри Piper не читает пути с кириллицей, а у
+    фаундера имя пользователя Windows «Вадим» — падает с «Illegal byte
+    sequence». Ровно та же ловушка, что уже ловила Vosk 19.08.2026
+    (см. wakeword/server.py), и то же решение: Windows сама держит для
+    каждой папки ASCII-алиас.
+    """
+    import ctypes
+
+    buf = ctypes.create_unicode_buffer(260)
+    ctypes.windll.kernel32.GetShortPathNameW(str(Path(path).resolve()), buf, 260)
+    return buf.value or str(path)
+
+
+def _piper_load(voice_id: str):
+    """Модель в память. Повторный вызов с тем же голосом — бесплатный."""
+    global _piper_voice, _piper_voice_id
+    if _piper_voice is not None and _piper_voice_id == voice_id:
+        return _piper_voice
+
+    try:
+        import piper
+        from piper import PiperVoice
+    except ImportError as e:
+        raise VoiceUnavailable(
+            "Пакет piper-tts не установлен: pip install piper-tts"
+        ) from e
+
+    model = PIPER_VOICES_DIR / f"{voice_id}.onnx"
+    if not model.is_file():
+        raise VoiceUnavailable(
+            f"Голос {voice_id} не скачан. Файл ожидается здесь: {model}"
+        )
+
+    # Путь к данным espeak — только короткий (см. _piper_short_path выше).
+    # Саму модель грузим полным путём: её читает Python, ему кириллица не мешает.
+    os.environ["ESPEAK_DATA_PATH"] = _piper_short_path(
+        Path(piper.__file__).parent / "espeak-ng-data"
+    )
+
+    _piper_voice = PiperVoice.load(str(model.resolve()))
+    _piper_voice_id = voice_id
+    logger.info("Piper: голос %s загружен в память", voice_id)
+    return _piper_voice
+
+
+async def _piper(text: str, voice_id: str) -> Path:
+    """Синтез на этой же машине. Возвращает WAV — Piper отдаёт только его,
+    а браузер играет WAV не хуже MP3."""
+    import asyncio
+    import wave
+
+    from . import artifacts
+
+    out = artifacts.temp_dir() / f"voice_{voice_id}_{abs(hash(text)) % 10**8}.wav"
+    if out.is_file():
+        return out
+
+    def _run() -> None:
+        v = _piper_load(voice_id)
+        with wave.open(str(out), "wb") as wf:
+            v.synthesize_wav(text, wf)
+
+    # Синтез — счёт на процессоре, он блокирующий: без to_thread он бы
+    # останавливал весь event loop бэкенда на полсекунды при каждой фразе.
+    try:
+        await asyncio.to_thread(_run)
+    except VoiceUnavailable:
+        raise
+    except Exception as e:
+        raise VoiceUnavailable(f"Piper не смог синтезировать речь: {e}") from e
     return out
