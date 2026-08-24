@@ -34,3 +34,16 @@ repos:
           - fastapi
           - pydantic
         files: ^backend/
+
+  # Защита от захвата чужой работы: несколько сессий Claude Code часто
+  # идут в одном дереве, и `git add -A` утаскивает чужие файлы в свой
+  # коммит (случилось 24.08.2026). Осознанный большой коммит проходит с
+  # NEXUS_BIG_COMMIT=1. Тот же скрипт ставится и без pre-commit — `make hooks`.
+  - repo: local
+    hooks:
+      - id: no-blind-add-all
+        name: Не захватывать работу соседней сессии
+        entry: scripts/pre-commit
+        language: script
+        pass_filenames: false
+        always_run: true

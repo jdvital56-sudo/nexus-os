@@ -1,4 +1,4 @@
-.PHONY: install test run dev docker clean
+.PHONY: install test run dev docker clean hooks
 
 # Git Bash/WSL на Windows не имеют python3 — берём то, что доступно (I-8)
 PYTHON ?= $(shell command -v python3 2>/dev/null || command -v python)
@@ -11,6 +11,13 @@ install:
 
 test:
 	$(PYTHON) -m pytest
+
+# Заслон от `git add -A`: несколько сессий часто идут в одном дереве, и
+# слепой коммит утаскивает чужую незакоммиченную работу (см. CLAUDE.md)
+hooks:
+	cp scripts/pre-commit .git/hooks/pre-commit
+	chmod +x .git/hooks/pre-commit
+	@echo "Хук поставлен. Большой коммит осознанно: NEXUS_BIG_COMMIT=1 git commit ..."
 
 run:
 	$(PYTHON) -m cli.main start

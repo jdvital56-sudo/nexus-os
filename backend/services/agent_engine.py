@@ -3,11 +3,10 @@
 This is the real execution loop for NEXSYS agents.
 Each agent role implements the 5 phases differently.
 """
-import json
 import logging
 import time
 from datetime import datetime
-from ..core import eventbus
+from ..core import eventbus, llmjson
 from ..models.schemas import Agent, AgentRole, AgentStatus, GraphNode, NodeType
 from . import budget
 from . import graph as graph_svc
@@ -881,11 +880,10 @@ def _think_with_llm(ctx: AgentContext, critical_tasks: list) -> tuple[list[dict]
     llm = LLMService(provider="deepseek", model="deepseek-chat", api_key=settings.deepseek_api_key)
     raw = asyncio.run(llm.generate_response(prompt, kind=budget.BACKGROUND, json_mode=True))
 
-    text = raw.strip()
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        text = text[start : end + 1]
-    data = json.loads(text)
+    # Разбор общий (core/llmjson): здесь он был самым слабым в системе —
+    # не умел снимать ```json-обрамление, которое два соседних модуля уже
+    # научились снимать. Теперь знание одно на всех.
+    data = llmjson.parse_object(raw)
 
     known_ids = {t["id"] for t in critical_tasks}
     titles_by_id = {t["id"]: t["title"] for t in critical_tasks}

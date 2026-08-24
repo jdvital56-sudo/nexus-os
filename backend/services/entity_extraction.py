@@ -4,11 +4,11 @@
 фоновой нагрузкой для дневного бюджета (I-4): если деньги на сегодня кончились,
 извлечение просто не происходит — диалог от этого не страдает.
 """
-import json
 import logging
 import re
 from typing import Any
 
+from ..core import llmjson
 from ..models.schemas import EdgeType, GraphEdge, GraphNode, NodeType
 from . import budget
 from . import graph as graph_svc
@@ -55,24 +55,13 @@ def _node_id(name: str) -> str:
 
 
 def _parse(raw: str) -> dict[str, list[dict]]:
-    """Достаёт JSON из ответа модели — та любит обернуть его в ```json."""
-    text = raw.strip()
-    fence = re.search(r"```(?:json)?\s*(.+?)\s*```", text, re.DOTALL)
-    if fence:
-        text = fence.group(1)
-    else:
-        start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end > start:
-            text = text[start : end + 1]
+    """Достаёт сущности и связи из ответа модели.
 
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        logger.warning("Модель вернула не JSON, извлечение пропущено")
-        return {"entities": [], "relations": []}
-
-    if not isinstance(data, dict):
-        return {"entities": [], "relations": []}
+    Извлечение — фоновая работа поверх обычного разговора: неразобранный
+    ответ не должен ронять сам разговор, поэтому пропускаем извлечение и
+    идём дальше. Разбор общий, см. core/llmjson.
+    """
+    data = llmjson.object_or({}, raw)
     entities = [e for e in data.get("entities", []) if isinstance(e, dict) and e.get("name")]
     relations = [
         r

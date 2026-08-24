@@ -12,9 +12,9 @@
 Публикует и решает по-прежнему человек: Исследователь не создаёт контент,
 он приносит темы.
 """
-import json
 import logging
 
+from ..core import llmjson
 from ..core.config import DATA_DIR, ensure_data_dir
 from ..core.errors import ValidationError
 from ..core.jsonio import read_json, write_json
@@ -90,34 +90,15 @@ def _existing_topics() -> set[str]:
 
 
 def _parse_topics(raw: str) -> list[dict]:
-    """Разбирает ответ модели. Пустой массив — законный ответ «нового нет».
+    """Разбирает ответ модели. Пустой список — законное «нового нет».
 
     Мусор вместо JSON — ошибка: молча вернуть пустоту значит показать
     фаундеру «трендов нет», когда на самом деле сломался разбор.
     """
     try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise ValidationError(f"Модель вернула не JSON: {e}") from e
-
-    if isinstance(data, list):
-        return data
-
-    if isinstance(data, dict):
-        # Одну тему модель отдаёт голым объектом, без обёртки в массив.
-        if "topic" in data:
-            return [data]
-
-        # Ключ обёртки модель выбирает сама и всякий раз разный: items,
-        # topics, «темы»… Живой прогон 24.08.2026 упал ровно на этом.
-        # Смысла в ярлыке нет — берём первый список, какой найдём.
-        for value in data.values():
-            if isinstance(value, list):
-                return value
-        if not data:
-            return []  # пустой объект — «нового нет», это законный ответ
-
-    raise ValidationError("Модель ответила не списком тем")
+        return llmjson.parse_list(raw, item_hint="topic")
+    except llmjson.LLMJsonError as e:
+        raise ValidationError(str(e)) from e
 
 
 async def research(direction: str, llm=None) -> list[Idea]:

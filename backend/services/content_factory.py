@@ -16,7 +16,6 @@ nexus-os-content-factory-idea). Решено начать с узкого сре
 т.п.) в системе пока просто нет.
 """
 import asyncio
-import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -24,6 +23,7 @@ from pathlib import Path
 
 import httpx
 
+from ..core import llmjson
 from ..core.config import DATA_DIR, ensure_data_dir
 from ..core.errors import NotFoundError, ValidationError
 from ..core.jsonio import read_json, write_json
@@ -70,17 +70,20 @@ def get_item(item_id: str) -> ContentItem:
 def _parse_plan(raw: str) -> list[dict]:
     """Разбирает JSON-ответ модели в список сценариев.
 
-    Модель иногда возвращает объект {"items": [...]} вместо голого массива,
-    иногда оборачивает JSON в текст вокруг — не молчим на мусорном вводе,
-    поднимаем понятную ошибку вместо того, чтобы создать пустые черновики.
+    Все капризы модели (```-обрамление, болтовня вокруг, обёртка под
+    произвольным ключом, одиночный сценарий без массива) живут в общем
+    core/llmjson — раньше каждый модуль знал только те из них, на которых
+    успел обжечься сам.
+
+    В отличие от Исследователя, пустой список здесь — ошибка: попросили
+    сценарии, получили ноль, значит создавать нечего и надо сказать честно.
     """
     try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise ValidationError(f"Модель вернула не JSON: {e}") from e
+        items = llmjson.parse_list(raw, item_hint="script")
+    except llmjson.LLMJsonError as e:
+        raise ValidationError(str(e)) from e
 
-    items = data if isinstance(data, list) else data.get("items")
-    if not isinstance(items, list) or not items:
+    if not items:
         raise ValidationError("Модель не вернула ни одного сценария")
     return items
 

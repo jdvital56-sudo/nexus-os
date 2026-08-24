@@ -7,10 +7,8 @@
 дневному бюджету (I-4) и жить в том же процессе, что и API (I-3).
 """
 
-import json
 import logging
 import os
-import re
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -18,7 +16,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from backend.core import eventbus
+from backend.core import eventbus, llmjson
 from backend.core.config import settings
 from backend.services import budget, dream as dream_store
 from backend.services.llm import LLMService
@@ -57,21 +55,13 @@ _HYGIENE_PROMPT = """Ты отвечаешь за гигиену памяти Ne
 
 
 def _parse_json(raw: str) -> dict:
-    """Модели любят обернуть JSON в ```json или болтовню — достаём его."""
-    text = raw.strip()
-    fence = re.search(r"```(?:json)?\s*(.+?)\s*```", text, re.DOTALL)
-    if fence:
-        text = fence.group(1)
-    else:
-        start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end > start:
-            text = text[start : end + 1]
-    try:
-        data = json.loads(text)
-        return data if isinstance(data, dict) else {}
-    except json.JSONDecodeError:
-        logger.warning("Ответ модели не разобран как JSON")
-        return {}
+    """Модели любят обернуть JSON в ```json или болтовню — достаём его.
+
+    Ночной прогон фоновый: неразобранный ответ не должен ронять весь обход
+    измерений, поэтому берём пустой словарь и идём дальше (в лог пишется).
+    Сам разбор — общий, см. core/llmjson.
+    """
+    return llmjson.object_or({}, raw)
 
 
 class DreamCadence:
