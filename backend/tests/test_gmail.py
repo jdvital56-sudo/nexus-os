@@ -157,3 +157,44 @@ def test_api_without_credentials_returns_503(client, monkeypatch):
     })
 
     assert r.status_code == 503
+
+
+# --- Потокобезопасность (23.08.2026) ---
+
+
+def test_service_is_per_thread():
+    """httplib2 под googleapiclient не потокобезопасен: один общий service
+    на процесс рвал SSL при параллельных запросах («record layer failure»),
+    и экран почты, грузящий черновики и письма разом, получал 500 на оба.
+    Найдено вживую — почта выглядела пустой."""
+    import threading
+
+    from backend.services.gmail import GmailClient
+
+    client = GmailClient()
+    client.service = "сервис-главного-потока"
+    seen = {}
+
+    def worker():
+        seen["before"] = client.service  # в своём потоке ещё пусто
+        client.service = "сервис-рабочего-потока"
+        seen["after"] = client.service
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+
+    assert seen["before"] is None, "поток не должен видеть чужой service"
+    assert seen["after"] == "сервис-рабочего-потока"
+    assert client.service == "сервис-главного-потока", "чужой поток не затирает наш"
+
+
+def test_service_is_reused_within_one_thread():
+    """Переиспользование внутри потока сохраняется — иначе каждый запрос
+    заново поднимал бы OAuth-сессию."""
+    from backend.services.gmail import GmailClient
+
+    client = GmailClient()
+    assert client.service is None
+    client.service = "сервис"
+    assert client.service == "сервис"

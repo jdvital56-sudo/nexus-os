@@ -13,6 +13,7 @@ gmail.compose разрешает и создание черновиков, и о
 import base64
 import logging
 import os
+import threading
 from email.message import EmailMessage
 from typing import Any
 
@@ -36,7 +37,24 @@ class GmailClient:
     """Клиент Gmail без единого метода отправки."""
 
     def __init__(self):
-        self.service = None
+        # Один общий service на весь процесс ломался при параллельных
+        # запросах: httplib2 под googleapiclient не потокобезопасен, и два
+        # одновременных вызова рвали SSL-сессию («record layer failure»).
+        # Найдено вживую 23.08.2026 — экран почты грузит черновики и письма
+        # разом, и оба запроса падали в 500, из-за чего почта выглядела
+        # пустой. Держим отдельный service на поток: FastAPI выполняет
+        # синхронные ручки в пуле потоков, так что их немного и переиспользование
+        # внутри потока сохраняется.
+        self._local = threading.local()
+
+    @property
+    def service(self):
+        """Совместимость с прежним полем — тесты и код читают client.service."""
+        return getattr(self._local, "service", None)
+
+    @service.setter
+    def service(self, value):
+        self._local.service = value
 
     def is_configured(self) -> bool:
         """Вход в Google общий с календарём — файл кладётся один раз."""
