@@ -94,14 +94,10 @@ _IDEA_TRIGGER = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-# «Джарвис, создай контент про X» / «сделай контент-план на тему X» —
-# первый срез Content Factory (см. services/content_factory.py). Тоже без
-# модели на этапе распознавания команды: сама генерация плана уже идёт
-# через LLM внутри content_factory.generate_plan.
-_CONTENT_TRIGGER = re.compile(
-    r"^\s*(?:создай|сделай|запусти)\s+контент[- ]?(?:план)?\s+(?:на\s+тему\s+|про\s+|о\s+)?(?P<topic>.+?)[\s.!?]*$",
-    re.IGNORECASE | re.DOTALL,
-)
+# «Джарвис, создай контент на тему X на 27 августа, выставь на инстаграм» —
+# разбор темы, даты и площадок вынесен в services/content_speech.py, см.
+# _try_content. Тоже без модели на этапе распознавания команды: сама
+# генерация плана уже идёт через LLM внутри content_factory.generate_plan.
 
 # «Подтверждаю» — исполняет заблокированный computer_use.py клик/ввод
 # по-настоящему (см. pending_action.py). Ищем подстрокой, не полным
@@ -748,32 +744,89 @@ class ConversationService:
         return f"💡 Записал в идеи: «{idea.content[:80]}»."
 
     async def _try_content(self, text: str) -> str | None:
-        """Запускает первый срез Content Factory по прямой команде.
+        """Запускает Content Factory по прямой команде.
 
-        Только план + черновики (сценарий/подпись/хэштеги), без озвучки и
-        без публикации — это шаги, которые фаундер делает потом через API/UI
-        осознанно, не одной случайно расслышанной фразой.
+        Фраза-образец фаундера (23.08.2026): «создай контент на тему X на 27
+        августа, выставь на инстаграм и тикток». Дата и площадки
+        необязательны — без них получается просто черновик без расписания.
+
+        Названа дата — доводим черновик до конца (озвучка + картинка) и шлём
+        кнопками в Telegram: фаундер просил «пришли, я проверю и дам добро»,
+        а не «создай полуфабрикат, который я потом руками дособираю».
         """
-        match = _CONTENT_TRIGGER.match(text)
-        if not match:
+        from . import content_speech
+
+        command = content_speech.parse_command(text)
+        if command is None:
             return None
 
-        topic = match.group("topic").strip()
-        if not topic:
+        if not command.topic:
             return "Скажи тему: «создай контент про утренние ритуалы»."
 
         from . import content_factory
 
         try:
-            items = await content_factory.generate_plan(topic)
+            items = await content_factory.generate_plan(
+                command.topic,
+                platforms=command.platforms or None,
+            )
         except Exception as e:
             logger.exception("Не удалось создать план контента")
             return f"Не удалось создать план контента: {e}"
 
-        titles = "; ".join(f"«{i.caption or i.script[:40]}»" for i in items)
+        if command.when is None:
+            titles = "; ".join(f"«{i.caption or i.script[:40]}»" for i in items)
+            return (
+                f"✅ Готово {len(items)} черновика(ов) по теме «{command.topic}»: {titles}. "
+                "Ждут вас в разделе «Контент»."
+            )
+
+        return await self._finish_scheduled_content(items, command)
+
+    async def _finish_scheduled_content(self, items, command) -> str:
+        """Досоздаёт назначенный на дату черновик и отправляет на подтверждение.
+
+        Берём первый черновик из плана: расписание — про один конкретный
+        пост на конкретное время, остальные варианты остаются черновиками,
+        фаундер выберет их сам, если первый не понравится.
+
+        Озвучка и картинка делаются мягко: если fal.ai не отвечает или ключ
+        не задан, черновик всё равно должен доехать до Telegram — текст
+        сценария сам по себе уже полезен, а картинку можно догенерировать
+        из интерфейса.
+        """
+        from . import content_factory
+
+        item = items[0]
+        when = command.when.isoformat()
+
+        for step, run in (
+            ("озвучку", lambda: content_factory.synthesize_voice(item.id)),
+            ("картинку", lambda: content_factory.generate_image(item.id)),
+        ):
+            try:
+                await run()
+            except Exception as e:
+                logger.warning("Content Factory: не сделал %s для «%s»: %s", step, item.id, e)
+
+        try:
+            content_factory.schedule_item(item.id, when)
+        except Exception as e:
+            logger.exception("Не удалось назначить дату публикации")
+            return f"Черновик создан, но дату поставить не вышло: {e}"
+
+        sent = await content_factory.send_for_approval(item.id)
+
+        human_date = command.when.strftime("%d.%m в %H:%M")
+        platforms = ", ".join(command.platforms) if command.platforms else "площадки не заданы"
+        if sent.status.value == "pending_approval":
+            return (
+                f"✅ Черновик «{item.caption or command.topic}» назначен на {human_date} "
+                f"({platforms}). Отправил вам в Telegram — посмотрите и дайте добро."
+            )
         return (
-            f"✅ Готово {len(items)} черновика(ов) по теме «{topic}»: {titles}. "
-            "Ждут вашего approve/reject в /api/content."
+            f"✅ Черновик «{item.caption or command.topic}» назначен на {human_date} "
+            f"({platforms}). В Telegram отправить не смог — откройте раздел «Контент»."
         )
 
     async def _try_confirm(self, text: str, channel: str, user_id: str) -> str | None:

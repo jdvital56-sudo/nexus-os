@@ -243,6 +243,39 @@ export const updateIdea = (id: string, payload: Record<string, any>) =>
   data<any>(api.patch(`/ideas/${id}`, payload));
 export const deleteIdea = (id: string) => data<{ ok: boolean }>(api.delete(`/ideas/${id}`));
 
+// Контент-завод: план -> озвучка/картинка/видео -> подтверждение в Telegram
+// -> дата публикации -> напоминание. Публикует фаундер сам, система только
+// помнит, куда и когда он собирался (решение 23.08.2026).
+export const getContentItems = (status?: string) =>
+  data<any[]>(api.get('/content', { params: status ? { status } : {} }));
+export const createContentPlan = (payload: Record<string, any>) =>
+  data<any[]>(api.post('/content/plan', payload));
+export const contentVoice = (id: string) => data<any>(api.post(`/content/${id}/voice`));
+export const contentImage = (id: string) => data<any>(api.post(`/content/${id}/image`));
+export const contentVideo = (id: string) => data<any>(api.post(`/content/${id}/video`));
+export const scheduleContent = (id: string, scheduled_at: string) =>
+  data<any>(api.post(`/content/${id}/schedule`, { scheduled_at }));
+export const setContentPlatforms = (id: string, platforms: string[]) =>
+  data<any>(api.post(`/content/${id}/platforms`, { platforms }));
+export const sendContentForApproval = (id: string) =>
+  data<any>(api.post(`/content/${id}/send-approval`));
+export const approveContent = (id: string) => data<any>(api.post(`/content/${id}/approve`));
+export const rejectContent = (id: string) => data<any>(api.post(`/content/${id}/reject`));
+export const markContentPosted = (id: string) => data<any>(api.post(`/content/${id}/posted`));
+export const deleteContent = (id: string) => data<{ ok: boolean }>(api.delete(`/content/${id}`));
+/**
+ * Ссылка на готовый файл черновика для <img src> / <audio src>.
+ *
+ * Токен — в строке запроса, не в заголовке: эти теги не умеют слать
+ * Authorization, и без него браузер получал 401, а на карточке была
+ * пустота вместо реально сгенерированной картинки (найдено живым
+ * прогоном 23.08.2026). Тот же приём, что у speakStreamUrl выше.
+ */
+export const contentMediaUrl = (id: string, kind: 'voice' | 'image' | 'video') => {
+  const base = `${API_BASE_URL}/content/${id}/${kind}`;
+  return authToken ? `${base}?token=${encodeURIComponent(authToken)}` : base;
+};
+
 // --- Документы ---
 export const getDocuments = () => data<any[]>(api.get('/documents'));
 export const createDocument = (payload: Record<string, any>) =>

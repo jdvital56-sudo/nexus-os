@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Play, Sparkles, ChevronDown, ChevronRight } from 'lucide-react';
+import { Play } from 'lucide-react';
 import { getSkill, getSkills, runSkill, setSkillEnabled } from '../lib/api';
+import { ErrorBox, PageHeader } from '../components/ui';
 import { plural } from '../lib/format';
+import '../styles/pantheon.css';
 
 // Скиллы — это записанный порядок действий: создать задачу, положить узел в
-// граф, отметить в журнале. Бэкенд их исполняет с PR-6, а экран до сих пор
-// был заглушкой с текстом «интерфейс подключается в PR-21».
+// граф, отметить в журнале. Система выполнит его точно так, как записано —
+// без модели и без импровизации.
 //
 // Главное, что здесь должно быть видно: что именно скилл сделает, если его
 // запустить. Кнопка «выполнить» без этого — прыжок в темноту.
+//
+// Переписано 24.08.2026 на карточки (стиль Пантеона, восьмой экран).
 
 interface SkillStep {
   action: string;
@@ -50,8 +54,6 @@ const ACTIONS: Record<string, string> = {
   log: 'отметить в журнале',
 };
 
-const CARD = 'rounded-lg border border-gray-800 bg-dark p-5';
-
 /** Плейсхолдеры вида {topic} — это и есть параметры скилла. */
 function paramsOf(detail: SkillDetail | undefined): string[] {
   const found = new Set<string>();
@@ -72,6 +74,7 @@ export default function SkillsScreen() {
   const [busy, setBusy] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
   const [result, setResult] = useState<{ id: string; log: RunEntry[]; name: string } | null>(null);
+  const palette = localStorage.getItem('pantheon-palette') || 'gold';
 
   const load = useCallback(() => {
     setLoading(true);
@@ -107,9 +110,7 @@ export default function SkillsScreen() {
     setToggling(skill.id);
     try {
       await setSkillEnabled(skill.id, next);
-      setSkills((prev) =>
-        prev.map((s) => (s.id === skill.id ? { ...s, enabled: next } : s)),
-      );
+      setSkills((prev) => prev.map((s) => (s.id === skill.id ? { ...s, enabled: next } : s)));
       setError(null);
     } catch {
       setError('Не удалось переключить скилл.');
@@ -131,174 +132,180 @@ export default function SkillsScreen() {
     }
   };
 
-  if (error && skills.length === 0) {
-    return (
-      <div className="p-6 lg:p-8">
-        <h1 className="mb-4 text-2xl font-bold text-gray-100">Скиллы</h1>
-        <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-5 text-sm text-red-100">{error}</div>
-      </div>
-    );
-  }
-
   return (
     <div className="p-6 lg:p-8">
-      <header className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-100 lg:text-3xl">Скиллы</h1>
-        <p className="mt-1 text-sm text-gray-400">
-          Записанный порядок действий. Система выполнит его точно так, как здесь написано —
-          без модели и без импровизации.
-        </p>
-      </header>
+      <PageHeader
+        title="Скиллы"
+        subtitle="Записанный порядок действий. Система выполнит его точно так, как здесь написано — без модели и без импровизации."
+      />
 
-      {loading && skills.length === 0 && (
-        <div className={`${CARD} h-24 animate-pulse motion-reduce:animate-none`} />
+      {error && (
+        <div className="mb-6">
+          <ErrorBox message={error} onRetry={load} />
+        </div>
       )}
 
-      {!loading && skills.length === 0 && (
-        <div className={`${CARD} text-center text-gray-300`}>Скиллов пока нет.</div>
-      )}
+      <div className="pantheon-theme" data-palette={palette}>
+        {loading && skills.length === 0 && (
+          <div className="n-empty">
+            <p>Загружаю…</p>
+          </div>
+        )}
 
-      <div className="space-y-3">
-        {skills.map((skill) => {
-          const open = openId === skill.id;
-          const detail = details[skill.id];
-          const params = paramsOf(detail);
-          return (
-            <article key={skill.id} className={CARD}>
-              <button
-                onClick={() => toggle(skill)}
-                className="flex w-full cursor-pointer items-start gap-3 text-left focus:outline-none focus:ring-1 focus:ring-primary"
+        {!loading && skills.length === 0 && (
+          <div className="n-empty">
+            <p>Скиллов пока нет.</p>
+            <p className="n-sub">Их описывают файлами в папке скиллов — на этом экране только запуск.</p>
+          </div>
+        )}
+
+        <div className="n-grid wide">
+          {skills.map((s) => {
+            const open = openId === s.id;
+            const detail = details[s.id];
+            const off = s.enabled === false;
+            const params = paramsOf(detail);
+            const running = busy === s.id;
+            return (
+              <div
+                key={s.id}
+                className={`n-card ${open ? 'open' : ''}`}
+                data-tone={off ? 'off' : running ? 'progress' : 'good'}
+                role="button"
+                tabIndex={0}
+                onClick={() => toggle(s)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggle(s);
+                  }
+                }}
               >
-                <span className="mt-0.5 rounded-md bg-primary/10 p-2">
-                  <Sparkles className="h-4 w-4 text-primary" aria-hidden />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2">
-                    <span className="font-semibold text-gray-100">{skill.name}</span>
-                    {skill.category && (
-                      <span className="rounded-full bg-gray-800 px-2 py-0.5 text-[10px] uppercase tracking-wider text-gray-400">
-                        {skill.category}
-                      </span>
-                    )}
+                <div className="n-top">
+                  <h3 className="n-title">{s.name}</h3>
+                  <span className="n-badge" data-tone={off ? 'off' : 'good'}>
+                    {off ? 'выключен' : 'включён'}
                   </span>
-                  <span className="mt-0.5 block text-sm text-gray-400">{skill.description}</span>
-                  <span className="mt-1 block font-mono text-[11px] text-gray-500">
-                    {plural(skill.steps ?? 0, 'шаг', 'шага', 'шагов')}
-                    {params.length > 0 && ` · нужны: ${params.join(', ')}`}
-                  </span>
-                </span>
-                {open ? (
-                  <ChevronDown className="h-4 w-4 shrink-0 text-gray-500" aria-hidden />
-                ) : (
-                  <ChevronRight className="h-4 w-4 shrink-0 text-gray-500" aria-hidden />
-                )}
-              </button>
-
-              {open && (
-                <div className="mt-4 border-t border-gray-800 pt-4">
-                  {/* Что произойдёт — до того, как нажал */}
-                  <h3 className="mb-2 text-xs uppercase tracking-wider text-gray-500">Что сделает</h3>
-                  <ol className="mb-4 space-y-1">
-                    {(detail?.steps ?? []).map((step, i) => (
-                      <li key={i} className="flex gap-2 text-sm text-gray-300">
-                        <span className="font-mono text-gray-600">{i + 1}.</span>
-                        <span>
-                          {ACTIONS[step.action] ?? step.action}
-                          {step.condition && step.condition !== 'always' && (
-                            <span className="text-gray-500"> — если {step.condition}</span>
-                          )}
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
-
-                  {params.length > 0 && (
-                    <div className="mb-4 grid gap-2 sm:grid-cols-2">
-                      {params.map((p) => (
-                        <label key={p} className="text-xs text-gray-400">
-                          {p}
-                          <input
-                            value={values[skill.id]?.[p] ?? ''}
-                            onChange={(e) =>
-                              setValues((prev) => ({
-                                ...prev,
-                                [skill.id]: { ...(prev[skill.id] ?? {}), [p]: e.target.value },
-                              }))
-                            }
-                            className="mt-1 w-full rounded-md border border-gray-800 bg-darker px-3 py-1.5 text-sm text-gray-100 focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary"
-                          />
-                        </label>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      onClick={() => run(skill)}
-                      disabled={busy === skill.id || skill.enabled === false}
-                      title={skill.enabled === false ? 'Скилл выключен' : undefined}
-                      className="flex cursor-pointer items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-darker transition-colors duration-200 hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <Play className="h-4 w-4" aria-hidden />
-                      {busy === skill.id ? 'Выполняю…' : 'Выполнить'}
-                    </button>
-
-                    {/* Выключение — не удаление: контракт остаётся на диске,
-                        скилл просто перестаёт запускаться. Поэтому подпись
-                        «Выключить», а не «Удалить». */}
-                    <button
-                      onClick={() => toggleEnabled(skill)}
-                      disabled={toggling === skill.id}
-                      aria-pressed={skill.enabled !== false}
-                      className="cursor-pointer rounded-md border border-gray-700 px-3 py-2 text-sm text-gray-300 transition-colors duration-200 hover:border-gray-600 hover:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-wait disabled:opacity-60"
-                    >
-                      {toggling === skill.id
-                        ? 'Переключаю…'
-                        : skill.enabled === false
-                          ? 'Включить'
-                          : 'Выключить'}
-                    </button>
-                  </div>
-
-                  {result?.id === skill.id && (
-                    <div className="mt-4 rounded-md bg-darker p-3">
-                      <h4 className="mb-2 text-xs text-gray-400">Выполнено: {result.name}</h4>
-                      <ul className="space-y-1 text-xs">
-                        {result.log.map((entry, i) => (
-                          <li key={i} className="flex gap-2">
-                            <span
-                              className={
-                                entry.status === 'ok'
-                                  ? 'text-primary'
-                                  : entry.status === 'skipped'
-                                    ? 'text-gray-500'
-                                    : 'text-red-400'
-                              }
-                            >
-                              {entry.status === 'ok' ? '✓' : entry.status === 'skipped' ? '–' : '✕'}
-                            </span>
-                            <span className="text-gray-300">
-                              {ACTIONS[entry.action] ?? entry.action}
-                              {entry.error && <span className="text-red-400"> — {entry.error}</span>}
-                              {entry.result && Object.keys(entry.result).length > 0 && (
-                                <span className="text-gray-500">
-                                  {' '}
-                                  ({Object.entries(entry.result)
-                                    .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
-                                    .join(', ')})
-                                </span>
-                              )}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
                 </div>
-              )}
-            </article>
-          );
-        })}
+
+                {s.description && (
+                  <p style={{ margin: 0, fontSize: '0.8rem', lineHeight: 1.45, color: 'var(--ink-dim)' }}>
+                    {s.description}
+                  </p>
+                )}
+
+                <div className="n-foot">
+                  <span>{plural(s.steps, 'шаг', 'шага', 'шагов')}</span>
+                  {s.category && (
+                    <>
+                      <span>·</span>
+                      <span>{s.category}</span>
+                    </>
+                  )}
+                  <span className="n-hint">{open ? 'свернуть' : 'что сделает'}</span>
+                </div>
+
+                {open && (
+                  <div className="n-body" onClick={(e) => e.stopPropagation()}>
+                    <div>
+                      <div className="n-label">Что произойдёт по шагам</div>
+                      {!detail && <p className="n-full" style={{ fontSize: '0.82rem' }}>Читаю шаги…</p>}
+                      {detail && (
+                        <ol style={{ margin: '6px 0 0', paddingLeft: 20, color: 'var(--ink)' }}>
+                          {detail.steps.map((step, i) => (
+                            <li key={i} style={{ fontSize: '0.84rem', lineHeight: 1.6 }}>
+                              {ACTIONS[step.action] ?? step.action}
+                              {step.condition && (
+                                <span style={{ color: 'var(--ink-dimmer)' }}> — если {step.condition}</span>
+                              )}
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                    </div>
+
+                    {params.length > 0 && (
+                      <div>
+                        <div className="n-label">Что нужно указать</div>
+                        <div className="n-actions" style={{ marginTop: 6 }}>
+                          {params.map((p) => (
+                            <input
+                              key={p}
+                              value={values[s.id]?.[p] ?? ''}
+                              onChange={(e) =>
+                                setValues((prev) => ({
+                                  ...prev,
+                                  [s.id]: { ...(prev[s.id] ?? {}), [p]: e.target.value },
+                                }))
+                              }
+                              placeholder={p}
+                              style={{
+                                flex: '1 1 160px',
+                                background: 'var(--panel-2)',
+                                border: '1px solid var(--line)',
+                                borderRadius: 6,
+                                color: 'var(--ink)',
+                                padding: '6px 10px',
+                                fontFamily: 'var(--p-body)',
+                                fontSize: '0.82rem',
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="n-actions">
+                      <button
+                        className="n-act"
+                        onClick={() => run(s)}
+                        disabled={off || running}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                        title={off ? 'Скилл выключен' : undefined}
+                      >
+                        <Play className="h-3 w-3" aria-hidden />
+                        {running ? 'выполняю…' : 'Выполнить'}
+                      </button>
+                      <button
+                        className="n-act n-spacer"
+                        onClick={() => toggleEnabled(s)}
+                        disabled={toggling === s.id}
+                      >
+                        {off ? 'включить' : 'выключить'}
+                      </button>
+                    </div>
+
+                    {result?.id === s.id && (
+                      <div>
+                        <div className="n-label">Что получилось</div>
+                        <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                          {result.log.map((entry, i) => (
+                            <li
+                              key={i}
+                              style={{
+                                fontSize: '0.8rem',
+                                lineHeight: 1.6,
+                                color: entry.status === 'error' ? '#d99a9a' : 'var(--ink)',
+                              }}
+                            >
+                              {ACTIONS[entry.action] ?? entry.action} — {entry.status}
+                              {entry.error && ` (${entry.error})`}
+                            </li>
+                          ))}
+                          {result.log.length === 0 && (
+                            <li style={{ fontSize: '0.8rem', color: 'var(--ink-dimmer)' }}>
+                              Скилл отработал молча.
+                            </li>
+                          )}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

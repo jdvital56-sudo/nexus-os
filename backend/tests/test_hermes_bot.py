@@ -25,10 +25,24 @@ def agent():
     return bot
 
 
-def _update(user_id=777, text="привет"):
+def _update(user_id=777, text="привет", callback_data="content:approve:abc12345"):
+    """Обновление от Telegram.
+
+    Несёт сразу и message, и callback_query: обработчики кнопок читают
+    второе, обычные команды — первое, а общий заслон от чужаков должен
+    проверяться на тех и других одинаково.
+    """
+    message = SimpleNamespace(text=text, reply_text=AsyncMock())
     return SimpleNamespace(
         effective_user=SimpleNamespace(id=user_id, username="founder"),
-        message=SimpleNamespace(text=text, reply_text=AsyncMock()),
+        message=message,
+        callback_query=SimpleNamespace(
+            data=callback_data,
+            from_user=SimpleNamespace(id=user_id, username="founder"),
+            message=message,
+            answer=AsyncMock(),
+            edit_message_text=AsyncMock(),
+        ),
     )
 
 
@@ -153,7 +167,7 @@ async def test_failure_does_not_leave_the_user_in_silence(agent):
 HANDLERS = [
     "start_command", "help_command", "status_command", "persons_command",
     "brief_command", "reset_command", "services_command",
-    "handle_message", "handle_voice",
+    "handle_message", "handle_voice", "handle_content_button",
 ]
 
 
@@ -197,3 +211,75 @@ async def test_internal_error_text_is_not_shown_to_the_user(agent):
 
     shown = update.message.reply_text.await_args.args[0]
     assert "sk-secret" not in shown
+
+
+# === Кнопки под черновиком контент-завода ===
+
+
+@pytest.mark.asyncio
+async def test_content_button_applies_decision(agent, monkeypatch):
+    """Нажатие кнопки доходит до бэкенда и показывает его ответ."""
+    from backend.services import content_approval
+
+    applied = {}
+
+    async def fake_apply(action, item_id):
+        applied["action"] = action
+        applied["item_id"] = item_id
+        return "✅ Одобрено."
+
+    monkeypatch.setattr(content_approval, "apply", fake_apply)
+
+    update = _update()
+    await agent.handle_content_button(update, None)
+
+    assert applied == {"action": "approve", "item_id": "abc12345"}
+    update.callback_query.edit_message_text.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_content_button_ignores_foreign_callback(agent, monkeypatch):
+    """Кнопка не из контент-завода не должна дёргать его логику."""
+    from backend.services import content_approval
+
+    async def fail_apply(action, item_id):
+        raise AssertionError("чужая кнопка не должна сюда доходить")
+
+    monkeypatch.setattr(content_approval, "apply", fail_apply)
+
+    update = _update(callback_data="wallet:pay:7")
+    await agent.handle_content_button(update, None)
+
+    update.callback_query.edit_message_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_content_button_refuses_stranger(agent, monkeypatch):
+    from backend.services import content_approval
+
+    async def fail_apply(action, item_id):
+        raise AssertionError("чужому нельзя одобрять черновики")
+
+    monkeypatch.setattr(content_approval, "apply", fail_apply)
+
+    agent.allowed_user_id = "777"
+    update = _update(user_id=999)
+    await agent.handle_content_button(update, None)
+
+    update.callback_query.edit_message_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_content_button_survives_backend_error(agent, monkeypatch):
+    """Упавший бэкенд не должен оставлять фаундера без ответа."""
+    from backend.services import content_approval
+
+    async def boom(action, item_id):
+        raise RuntimeError("хранилище недоступно")
+
+    monkeypatch.setattr(content_approval, "apply", boom)
+
+    update = _update()
+    await agent.handle_content_button(update, None)
+
+    update.callback_query.edit_message_text.assert_awaited_once()

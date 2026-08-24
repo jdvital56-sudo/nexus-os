@@ -377,3 +377,56 @@ def test_api_approve_reject_flow(client, monkeypatch):
 
     r = client.get(f"/api/content/{item_id}")
     assert r.status_code == 404
+
+
+# --- Отдача медиа для <img>/<audio> (23.08.2026) ---
+
+
+def test_media_is_served_to_img_tag_without_auth_header(client, monkeypatch):
+    """Найдено живым прогоном: карточка показывала <img src> на этот URL,
+    но тег не умеет слать Authorization — браузер получал 401 и на экране
+    была пустота вместо реально сгенерированной картинки. Токен из строки
+    запроса, тот же приём, что у /api/voice/say-stream."""
+    import backend.api.content_factory as api_mod
+
+    class FakeLLMService:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def generate_response(self, user_message, context="", kind="interactive", json_mode=False):
+            return '[{"script": "S", "caption": "C", "hashtags": []}]'
+
+    import backend.services.llm as llm_mod
+    monkeypatch.setattr(llm_mod, "LLMService", FakeLLMService)
+    monkeypatch.setattr(core_settings, "fal_api_key", "test-key")
+
+    async def fake_post(self, url, **kwargs):
+        return _json_response(200, {"images": [{"url": "https://fal.media/x.jpg"}]})
+
+    async def fake_get(self, url, **kwargs):
+        return _bytes_response(200, b"fake-image-bytes")
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    item_id = client.post("/api/content/plan", json={"topic": "тема", "count": 1}).json()[0]["id"]
+    client.post(f"/api/content/{item_id}/image")
+
+    # Токен в приложении включён — без него отдавать нельзя
+    monkeypatch.setattr(api_mod, "_load_token", lambda: "секрет")
+    assert client.get(f"/api/content/{item_id}/image").status_code == 401
+    assert client.get(f"/api/content/{item_id}/image?token=неверный").status_code == 401
+
+    ok = client.get(f"/api/content/{item_id}/image?token=секрет")
+    assert ok.status_code == 200
+    assert ok.content == b"fake-image-bytes"
+
+
+def test_media_is_open_when_no_token_is_configured(client, monkeypatch):
+    """Токен не настроен вообще — локальная установка без пароля, как и
+    остальные ручки в этом случае."""
+    import backend.api.content_factory as api_mod
+
+    monkeypatch.setattr(api_mod, "_load_token", lambda: None)
+    # Файла нет — важен только код ответа авторизации, не 401
+    assert client.get("/api/content/нет-такого/image").status_code != 401

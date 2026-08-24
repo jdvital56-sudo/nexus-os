@@ -12,6 +12,7 @@ import SettingsScreen from './screens/SettingsScreen';
 import DocumentsScreen from './screens/DocumentsScreen';
 import TasksScreen from './screens/TasksScreen';
 import IdeasScreen from './screens/IdeasScreen';
+import ContentScreen from './screens/ContentScreen';
 import PipelineScreen from './screens/PipelineScreen';
 import PersonasScreen from './screens/PersonasScreen';
 import WalletScreen from './screens/WalletScreen';
@@ -50,6 +51,11 @@ export default function App() {
                   <Route path="/documents" element={<DocumentsScreen />} />
                   <Route path="/tasks" element={<TasksScreen />} />
                   <Route path="/ideas" element={<IdeasScreen />} />
+                  <Route path="/content" element={<ContentScreen />} />
+                  {/* Старый Pipeline остаётся доступен по прямой ссылке, но из
+                      меню на него больше не ведёт: «Контент» в сайдбаре — это
+                      контент-завод (services/content_factory.py), а Pipeline —
+                      другая, более ранняя система со своим хранилищем. */}
                   <Route path="/pipeline" element={<PipelineScreen />} />
                   <Route path="/activity" element={<ActivityScreen />} />
                   <Route path="/settings" element={<SettingsScreen />} />

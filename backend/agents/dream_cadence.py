@@ -464,6 +464,20 @@ class DreamCadence:
             replace_existing=True,
         )
 
+        # Контент-завод: раз в 5 минут смотрит, не наступил ли срок
+        # публикации у назначенных черновиков. Отдельный планировщик заводить
+        # незачем — этот уже под межпроцессным замком, а второй прислал бы
+        # каждое напоминание дважды.
+        from ..services import content_reminder
+
+        self.scheduler.add_job(
+            content_reminder.tick,
+            trigger=IntervalTrigger(minutes=5),
+            id="content_reminder",
+            name="Content Publish Reminder",
+            replace_existing=True,
+        )
+
         self.scheduler.start()
         logger.info(
             "Dream Cadence: %s | подписки: 9:00 | автопилот: %s (каждые %d мин)",

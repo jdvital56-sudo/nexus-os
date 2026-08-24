@@ -36,7 +36,7 @@ const menuItems = [
   { path: '/ideas', label: 'Идеи', icon: Lightbulb },
   { path: '/documents', label: 'Документы', icon: FileText },
   { path: '/artifacts', label: 'Артефакты', icon: Package },
-  { path: '/pipeline', label: 'Контент', icon: Workflow },
+  { path: '/content', label: 'Контент', icon: Workflow },
   { path: '/mail', label: 'Почта', icon: Mail },
   { path: '/calendar', label: 'Календарь', icon: Calendar },
   { path: '/wallet', label: 'Подписки', icon: CreditCard },

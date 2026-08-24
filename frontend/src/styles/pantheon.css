@@ -214,3 +214,66 @@
 @media (max-width: 760px) {
   .n-grid, .n-grid.wide { grid-template-columns: 1fr; }
 }
+
+/* === Календарь контент-завода ===
+   Библиотеки календаря в проекте нет, а тащить целую ради месячной сетки
+   незачем: это семь колонок и подсветка дня. Живёт здесь, в общей теме,
+   по тому же правилу, что и карточки — одна тема на все экраны. */
+
+.n-cal { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 13px; margin-bottom: 14px; }
+.n-cal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 11px; }
+.n-cal-head .n-cal-month { font-family: var(--p-body); font-size: 0.95rem; color: var(--ink); text-transform: capitalize; }
+.n-cal-head button {
+  cursor: pointer; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-dim);
+  border-radius: 6px; padding: 3px 10px; font-size: 0.8rem; font-family: var(--p-mono);
+}
+.n-cal-head button:hover { border-color: var(--gold); color: var(--gold-bright); }
+
+.n-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.n-cal-dow { font-family: var(--p-mono); font-size: 0.66rem; color: var(--ink-dimmer); text-align: center; padding-bottom: 3px; }
+
+.n-cal-day {
+  position: relative; min-height: 52px; border: 1px solid transparent; border-radius: 6px;
+  background: var(--panel-2); color: var(--ink-dim); cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  padding: 5px 3px 3px; font-family: var(--p-mono); font-size: 0.76rem;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.n-cal-day:hover { border-color: var(--gold); }
+.n-cal-day.other { opacity: 0.32; }
+.n-cal-day.today { color: var(--gold-bright); box-shadow: inset 0 0 0 1px rgba(201,162,75,0.35); }
+.n-cal-day.selected { border-color: var(--gold); background: rgba(201,162,75,0.12); color: var(--ink); }
+
+.n-cal-dots { display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; margin-top: 5px; }
+.n-cal-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-dimmer); }
+.n-cal-dot[data-tone="progress"] { background: var(--lapis); }
+.n-cal-dot[data-tone="good"] { background: var(--gold); }
+.n-cal-dot[data-tone="warn"] { background: var(--torch); }
+.n-cal-dot[data-tone="off"] { background: #6b4a4a; }
+
+/* Полоска статусов над календарём: сколько чего в работе */
+.n-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.n-stat {
+  flex: 1 1 110px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+  padding: 9px 11px;
+}
+.n-stat .n-stat-n { font-family: var(--p-mono); font-size: 1.15rem; color: var(--gold-bright); }
+.n-stat .n-stat-l { font-family: var(--p-body); font-size: 0.72rem; color: var(--ink-dimmer); margin-top: 1px; }
+.n-stat[data-tone="progress"] .n-stat-n { color: var(--lapis); }
+.n-stat[data-tone="warn"] .n-stat-n { color: var(--torch); }
+.n-stat[data-tone="off"] .n-stat-n { color: #c98a8a; }
+
+.n-media { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 6px; }
+.n-media img { max-width: 160px; border-radius: 6px; border: 1px solid var(--line); }
+.n-media audio, .n-media video { max-width: 240px; }
+
+.n-when { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+.n-when input {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; color: var(--ink);
+  font-family: var(--p-mono); font-size: 0.8rem; padding: 5px 8px;
+}
+.n-when input:focus { outline: none; border-color: var(--gold); }
+
+@media (max-width: 760px) {
+  .n-cal-day { min-height: 44px; font-size: 0.7rem; }
+}

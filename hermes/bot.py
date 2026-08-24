@@ -14,7 +14,9 @@ from typing import Optional, Dict, Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters, ContextTypes
+)
 
 from backend.core.config import settings
 from backend.services.llm import LLMService, TranscriptionUnavailable
@@ -194,6 +196,39 @@ class HermesAgent:
         else:
             await update.message.reply_text("🧹 Нить разговора и так пуста.")
 
+    async def handle_content_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Кнопки «Одобрить»/«Отклонить» под черновиком контент-завода.
+
+        Бот здесь только транспорт: решение применяет
+        backend.services.content_approval, чтобы то же самое действие из
+        интерфейса шло по тем же правилам.
+        """
+        query = update.callback_query
+        if not self._authorize_user(query.from_user.id):
+            await query.answer("Не для вас.", show_alert=True)
+            return
+
+        from backend.services import content_approval
+
+        parsed = content_approval.parse_callback(query.data)
+        if parsed is None:
+            return  # чужая кнопка — не наше дело
+
+        action, item_id = parsed
+        await query.answer()
+        try:
+            reply = await content_approval.apply(action, item_id)
+        except Exception as e:
+            logger.exception("Не удалось применить решение по черновику %s", item_id)
+            reply = f"Не удалось применить решение: {e}"
+
+        # Правим само сообщение, а не шлём новое: кнопки должны исчезнуть,
+        # иначе по ним можно нажать повторно и получить второй ответ.
+        try:
+            await query.edit_message_text(f"{query.message.text}\n\n{reply}")
+        except Exception:
+            await query.message.reply_text(reply)
+
     async def services_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /services — за что платим и когда спишут."""
         if not self._authorize_user(update.effective_user.id):
@@ -345,6 +380,7 @@ class HermesAgent:
         self.application.add_handler(CommandHandler("brief", self.brief_command))
         self.application.add_handler(CommandHandler("services", self.services_command))
         self.application.add_handler(CommandHandler("reset", self.reset_command))
+        self.application.add_handler(CallbackQueryHandler(self.handle_content_button))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         self.application.add_handler(MessageHandler(filters.VOICE, self.handle_voice))
 

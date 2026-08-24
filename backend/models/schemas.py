@@ -131,7 +131,10 @@ class IdeaUpdate(BaseModel):
 
 class ContentStatus(str, Enum):
     DRAFT = "draft"
+    PENDING_APPROVAL = "pending_approval"  # ушло кнопками в Telegram, ждём ответа
     APPROVED = "approved"
+    SCHEDULED = "scheduled"  # одобрено и стоит на дату, ждёт напоминания
+    POSTED = "posted"  # фаундер отметил вручную, что опубликовал
     REJECTED = "rejected"
 
 
@@ -139,6 +142,7 @@ class ContentPlanRequest(BaseModel):
     topic: str
     count: int = 3
     platforms: list[str] = Field(default_factory=lambda: ["tiktok", "instagram"])
+    scheduled_at: str | None = None
 
 
 class ContentItem(BaseModel):
@@ -149,6 +153,12 @@ class ContentItem(BaseModel):
     hashtags: list[str] = Field(default_factory=list)
     platforms: list[str] = Field(default_factory=list)
     status: ContentStatus = ContentStatus.DRAFT
+    # Одно общее время на все площадки черновика: разное время под разные
+    # площадки — это по сути разные черновики (решение фаундера 23.08.2026).
+    scheduled_at: str | None = None
+    # Когда ушло напоминание «пора постить». Хранится, а не держится в
+    # памяти процесса: иначе перезапуск бэкенда присылает напоминание заново.
+    reminded_at: str | None = None
     voice_file: str | None = None
     image_file: str | None = None
     video_file: str | None = None

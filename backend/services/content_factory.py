@@ -304,6 +304,110 @@ def video_file_path(item_id: str) -> Path:
     return path
 
 
+def _parse_when(value: str) -> datetime:
+    """Разбирает время публикации, отвергая мусор вместо тихого None.
+
+    Голосовая команда доходит сюда уже в ISO — но через API дату может
+    прислать кто угодно, а расписание с непонятной датой означает, что
+    напоминание не придёт вообще.
+    """
+    if not value or not str(value).strip():
+        raise ValidationError("Нужна дата и время публикации")
+    try:
+        when = datetime.fromisoformat(str(value).strip())
+    except ValueError as e:
+        raise ValidationError(f"Не понял дату публикации «{value}»: {e}") from e
+    # Наивное время трактуем как UTC: всё хранилище живёт в UTC (_now).
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when
+
+
+def schedule_item(item_id: str, scheduled_at: str) -> ContentItem:
+    """Ставит черновик на дату публикации и переводит в SCHEDULED."""
+    when = _parse_when(scheduled_at)
+    if when < datetime.now(timezone.utc):
+        raise ValidationError(
+            f"Дата публикации «{scheduled_at}» уже прошла — напоминание не сработает"
+        )
+
+    items = _load()
+    for i in items:
+        if i["id"] == item_id:
+            i["scheduled_at"] = scheduled_at
+            i["status"] = ContentStatus.SCHEDULED.value
+            i["updated_at"] = _now()
+            _save(items)
+            logger.info("Content Factory: черновик «%s» назначен на %s", item_id, scheduled_at)
+            return ContentItem(**i)
+    raise NotFoundError("ContentItem", item_id)
+
+
+def set_platforms(item_id: str, platforms: list[str]) -> ContentItem:
+    """Меняет список площадок. Площадки здесь — намерение, а не интеграция:
+    система никуда не публикует, она только помнит, куда собирался фаундер."""
+    cleaned = [p.strip() for p in (platforms or []) if p and p.strip()]
+    if not cleaned:
+        raise ValidationError("Нужна хотя бы одна площадка")
+
+    items = _load()
+    for i in items:
+        if i["id"] == item_id:
+            i["platforms"] = cleaned
+            i["updated_at"] = _now()
+            _save(items)
+            return ContentItem(**i)
+    raise NotFoundError("ContentItem", item_id)
+
+
+def mark_posted(item_id: str) -> ContentItem:
+    """Фаундер опубликовал руками и отметил это в интерфейсе."""
+    return set_status(item_id, ContentStatus.POSTED)
+
+
+def mark_reminded(item_id: str) -> ContentItem:
+    """Отмечает, что напоминание «пора постить» ушло (см. content_reminder)."""
+    return _set_field(item_id, "reminded_at", _now())
+
+
+def due_items(now: datetime | None = None) -> list[ContentItem]:
+    """Черновики, про которые пора напомнить: срок наступил, а он ещё не
+    опубликован и не отклонён."""
+    moment = now or datetime.now(timezone.utc)
+    ripe: list[ContentItem] = []
+    for raw in _load():
+        if raw.get("status") != ContentStatus.SCHEDULED.value:
+            continue
+        when = raw.get("scheduled_at")
+        if not when:
+            continue
+        try:
+            parsed = _parse_when(when)
+        except ValidationError:
+            logger.warning("Черновик «%s» стоит на непонятной дате «%s»", raw.get("id"), when)
+            continue
+        if parsed <= moment:
+            ripe.append(ContentItem(**raw))
+    return ripe
+
+
+async def send_for_approval(item_id: str) -> ContentItem:
+    """Отправляет черновик кнопками в Telegram и ждёт ответа фаундера.
+
+    Если сообщение не ушло (Telegram не настроен или лежит), черновик
+    остаётся DRAFT: статус «ждёт подтверждения» без сообщения означал бы
+    вечное ожидание ответа, которого некому дать.
+    """
+    from . import telegram_notify
+
+    item = get_item(item_id)
+    sent = await telegram_notify.send_approval_request(item)
+    if not sent:
+        logger.warning("Черновик «%s» не ушёл в Telegram — оставляем в черновиках", item_id)
+        return item
+    return set_status(item_id, ContentStatus.PENDING_APPROVAL)
+
+
 def set_status(item_id: str, status: ContentStatus) -> ContentItem:
     items = _load()
     for i in items:
