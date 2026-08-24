@@ -1,5 +1,5 @@
 """Calendar API routes."""
-from fastapi import APIRouter, Query, Depends
+from fastapi import APIRouter, Query, Depends, HTTPException
 from pydantic import BaseModel
 from ..services import calendar as svc
 from ..core.auth import get_token_dep
@@ -15,7 +15,12 @@ def status(_=Depends(auth)):
 
 @router.get("/events")
 def get_events(days: int = 7, max_results: int = 20, _=Depends(auth)):
-    events = svc.get_upcoming_events(days=days, max_results=max_results)
+    try:
+        events = svc.get_upcoming_events(days=days, max_results=max_results)
+    except svc.CalendarAuthExpired as e:
+        # 503, а не пустой список: человек должен увидеть причину и пойти
+        # переподключить Google, а не решить, что у него нет встреч
+        raise HTTPException(status_code=503, detail=str(e))
     svc.cache_events(events)
     return {"count": len(events), "events": events}
 

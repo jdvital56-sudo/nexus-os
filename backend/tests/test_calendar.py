@@ -54,3 +54,54 @@ def test_calendar_create_event_no_credentials(client):
     assert r.status_code == 200
     data = r.json()
     assert data["created"] is False
+
+
+# --- Протухший токен ≠ «встреч нет» (23.08.2026) ---
+
+
+def test_expired_token_raises_instead_of_pretending_calendar_is_empty(monkeypatch):
+    """Фаундер смотрел на пустой экран и думал, что у него нет встреч, —
+    а токен Google был отозван. `except Exception` глотал это и молча
+    отдавал пустой кэш."""
+    import pytest
+
+    from backend.services import calendar as svc
+
+    monkeypatch.setattr(svc, "is_configured", lambda: True)
+
+    def boom(days, max_results):
+        raise RuntimeError("('invalid_grant: Token has been expired or revoked.', {...})")
+
+    monkeypatch.setattr(svc, "_fetch_from_api", boom)
+
+    with pytest.raises(svc.CalendarAuthExpired):
+        svc.get_upcoming_events()
+
+
+def test_ordinary_failure_still_falls_back_to_cache(monkeypatch):
+    """Сеть моргнула — ронять экран незачем, отдаём кэш как раньше."""
+    from backend.services import calendar as svc
+
+    monkeypatch.setattr(svc, "is_configured", lambda: True)
+    monkeypatch.setattr(svc, "_read_cached_events", lambda: [{"summary": "из кэша"}])
+
+    def boom(days, max_results):
+        raise RuntimeError("Temporary failure in name resolution")
+
+    monkeypatch.setattr(svc, "_fetch_from_api", boom)
+
+    assert svc.get_upcoming_events() == [{"summary": "из кэша"}]
+
+
+def test_api_reports_expired_token_as_503(client, monkeypatch):
+    import backend.api.calendar as calendar_api
+
+    def boom(days, max_results):
+        raise calendar_api.svc.CalendarAuthExpired("Доступ отозван — войдите заново")
+
+    monkeypatch.setattr(calendar_api.svc, "get_upcoming_events", boom)
+
+    r = client.get("/api/calendar/events")
+
+    assert r.status_code == 503
+    assert "войдите заново" in r.json()["detail"]

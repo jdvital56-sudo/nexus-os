@@ -24,11 +24,23 @@ def is_configured() -> bool:
     return google_auth.has_credentials() or google_auth.has_token()
 
 
+class CalendarAuthExpired(RuntimeError):
+    """Токен Google протух или отозван — нужен повторный вход человеком."""
+
+
 def get_upcoming_events(days: int = 7, max_results: int = 20) -> list[dict]:
     """Get upcoming calendar events.
 
-    Returns list of event dicts with: id, summary, start, end, description, attendees.
+    Returns list of event dicts with: id, summary, start, end, described, attendees.
     Falls back to reading from local cache if API not available.
+
+    23.08.2026: раньше `except Exception` глотал вообще всё и молча отдавал
+    пустой кэш. Фаундер смотрел на пустой экран и думал, что у него просто
+    нет встреч, — а на деле токен Google был отозван («invalid_grant: Token
+    has been expired or revoked»). Протухшая авторизация теперь долетает до
+    экрана отдельной ошибкой: это не «пусто», это «нужно переподключить».
+    Остальные сбои (сеть моргнула) по-прежнему уступают кэшу — ради них
+    ронять экран незачем.
     """
     if not is_configured():
         return _read_cached_events()
@@ -36,7 +48,12 @@ def get_upcoming_events(days: int = 7, max_results: int = 20) -> list[dict]:
     try:
         return _fetch_from_api(days, max_results)
     except Exception as e:
-        # Fallback to cache
+        if "invalid_grant" in str(e) or "expired or revoked" in str(e):
+            raise CalendarAuthExpired(
+                "Доступ к Google Календарю отозван или истёк — нужно войти заново. "
+                "Токен обновляю не я: это ваш аккаунт."
+            ) from e
+        logger.warning("Календарь недоступен, отдаю кэш: %s", e)
         return _read_cached_events()
 
 
