@@ -90,6 +90,8 @@ export default function ContentScreen() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [topic, setTopic] = useState('');
+  const [newWhen, setNewWhen] = useState('');
+  const [newPlatforms, setNewPlatforms] = useState<string[]>(['instagram', 'tiktok']);
   const [view, setView] = useState(() => new Date());
   const [selected, setSelected] = useState<string | null>(null);
   const palette = localStorage.getItem('pantheon-palette') || 'gold';
@@ -129,8 +131,15 @@ export default function ContentScreen() {
     if (!topic.trim()) return;
     setBusy('new');
     try {
-      await createContentPlan({ topic: topic.trim(), count: 3 });
+      await createContentPlan({
+        topic: topic.trim(),
+        count: 3,
+        platforms: newPlatforms,
+        // datetime-local отдаёт местное время без зоны — бэкенд хранит UTC
+        scheduled_at: newWhen ? new Date(newWhen).toISOString() : null,
+      });
       setTopic('');
+      setNewWhen('');
       setShowCreate(false);
       setError(null);
       load();
@@ -139,6 +148,19 @@ export default function ContentScreen() {
     } finally {
       setBusy(null);
     }
+  };
+
+  /** Клик по дню календаря: открывает создание сразу на этот день.
+   *
+   * Раньше день только подсвечивался, и «поставить контент на 27-е»
+   * означало создать без даты, найти карточку, раскрыть её и залезть в
+   * поле внизу — фаундер справедливо не понял, как это делать. */
+  const planForDay = (key: string) => {
+    setSelected(key);
+    const existing = byDay.get(key) ?? [];
+    if (existing.length > 0) return; // на этот день уже что-то есть — показываем его
+    setNewWhen(`${key}T10:00`);
+    setShowCreate(true);
   };
 
   const all = items ?? [];
@@ -359,15 +381,56 @@ export default function ContentScreen() {
       <div className="pantheon-theme" data-palette={palette}>
         {showCreate && (
           <div className="n-newbox">
+            <div className="n-label">О чём контент</div>
             <input
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
-              placeholder="Тема: например, утренние ритуалы"
+              placeholder="Например: утренние ритуалы, спа-процедуры, контрастный душ"
               autoFocus
               onKeyDown={(e) => e.key === 'Enter' && create()}
             />
+
+            <div className="n-label">Когда публикуем</div>
+            <div className="n-when">
+              <input
+                type="datetime-local"
+                value={newWhen}
+                onChange={(e) => setNewWhen(e.target.value)}
+              />
+              {newWhen ? (
+                <button className="n-act" onClick={() => setNewWhen('')}>
+                  убрать дату
+                </button>
+              ) : (
+                <span className="n-sub">можно без даты — поставите позже</span>
+              )}
+            </div>
+
+            <div className="n-label">Куда публикуем</div>
             <div className="n-actions">
-              <button className="n-act n-spacer" onClick={create} disabled={!topic.trim() || busy === 'new'}>
+              {PLATFORMS.map((p) => (
+                <button
+                  key={p}
+                  className={`n-act ${newPlatforms.includes(p) ? 'active' : ''}`}
+                  onClick={() =>
+                    setNewPlatforms(
+                      newPlatforms.includes(p)
+                        ? newPlatforms.filter((x) => x !== p)
+                        : [...newPlatforms, p],
+                    )
+                  }
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+
+            <div className="n-actions">
+              <button
+                className="n-act n-spacer"
+                onClick={create}
+                disabled={!topic.trim() || newPlatforms.length === 0 || busy === 'new'}
+              >
                 {busy === 'new' ? 'придумываю…' : 'Придумать 3 варианта'}
               </button>
               <button className="n-act" onClick={() => setShowCreate(false)}>
@@ -418,8 +481,8 @@ export default function ContentScreen() {
                 <button
                   key={key}
                   className={classes}
-                  onClick={() => setSelected(key === selected ? null : key)}
-                  title={dayItems.length ? `${dayItems.length} шт.` : 'ничего не назначено'}
+                  onClick={() => (key === selected ? setSelected(null) : planForDay(key))}
+                  title={dayItems.length ? `${dayItems.length} шт.` : 'нажмите, чтобы запланировать контент на этот день'}
                 >
                   <span>{date.getDate()}</span>
                   {dayItems.length > 0 && (
@@ -449,29 +512,31 @@ export default function ContentScreen() {
           <div className="n-empty">
             <p>Контента пока нет.</p>
             <p className="n-sub">
-              Заведите первый кнопкой выше — или скажите Джарвису: «создай контент на тему X на 27 августа,
-              выставь на инстаграм и тикток».
+              Нажмите на любой день в календаре — заведём контент сразу на эту дату. Или скажите
+              Джарвису: «создай контент на тему спа-процедуры на 27 августа, выставь на инстаграм и
+              тикток».
             </p>
           </div>
         )}
 
-        {selected && (
+        {selected && selectedItems.length > 0 && (
           <>
             <div className="n-label" style={{ marginBottom: 8 }}>
               {new Date(`${selected}T12:00:00`).toLocaleDateString('ru-RU', {
                 day: 'numeric',
                 month: 'long',
-              })}
-              {selectedItems.length === 0 && ' — ничего не назначено'}
+              })}{' '}
+              — {selectedItems.length}
             </div>
-            {selectedItems.length > 0 && <div className="n-grid">{selectedItems.map(card)}</div>}
+            <div className="n-grid">{selectedItems.map(card)}</div>
           </>
         )}
 
-        {!selected && unscheduled.length > 0 && (
+        {unscheduled.length > 0 && (
           <>
             <div className="n-label" style={{ marginBottom: 8 }}>
-              Без даты — {unscheduled.length}
+              Без даты — {unscheduled.length}. Нажмите «раскрыть» и поставьте дату, чтобы контент
+              появился в календаре.
             </div>
             <div className="n-grid">{unscheduled.map(card)}</div>
           </>

@@ -85,17 +85,32 @@ def _parse_plan(raw: str) -> list[dict]:
     return items
 
 
-async def generate_plan(topic: str, count: int = 3, platforms: list[str] | None = None, llm=None) -> list[ContentItem]:
+async def generate_plan(
+    topic: str,
+    count: int = 3,
+    platforms: list[str] | None = None,
+    llm=None,
+    scheduled_at: str | None = None,
+) -> list[ContentItem]:
     """Идея -> N черновиков сценариев через LLM.
 
     Голос синтезируется отдельным шагом (synthesize_voice), не здесь —
     чтобы медленная/упавшая озвучка одного черновика не проваливала весь
     план и не блокировала остальные.
+
+    scheduled_at ставит всем черновикам плана одну дату сразу: фаундер
+    задаёт её в форме создания («хочу контент на 27-е»), и заставлять его
+    потом проставлять дату каждому черновику руками — лишний шаг.
     """
     if not topic or not topic.strip():
         raise ValidationError("Нужна тема для плана контента")
     count = max(1, min(int(count), 10))
     platforms = platforms or ["tiktok", "instagram"]
+
+    # Дату проверяем ДО обращения к модели: иначе фаундер платит за N
+    # сценариев и получает отказ уже после генерации.
+    if scheduled_at:
+        _parse_when(scheduled_at)
 
     if llm is None:
         from .llm import LLMService
@@ -135,6 +150,8 @@ async def generate_plan(topic: str, count: int = 3, platforms: list[str] | None 
             caption=str(d.get("caption", "")).strip(),
             hashtags=[str(h) for h in d.get("hashtags", [])],
             platforms=platforms,
+            scheduled_at=scheduled_at,
+            status=ContentStatus.SCHEDULED if scheduled_at else ContentStatus.DRAFT,
         )
         items.append(item.model_dump())
         created.append(item)

@@ -48,7 +48,9 @@ def get_item(item_id: str, _=Depends(auth)):
 
 @router.post("/plan", response_model=list[ContentItem], status_code=201)
 async def create_plan(req: ContentPlanRequest, _=Depends(auth)):
-    return await svc.generate_plan(req.topic, req.count, req.platforms)
+    return await svc.generate_plan(
+        req.topic, req.count, req.platforms, scheduled_at=req.scheduled_at
+    )
 
 
 @router.post("/{item_id}/voice", response_model=ContentItem)

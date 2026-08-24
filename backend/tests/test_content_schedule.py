@@ -175,3 +175,57 @@ async def test_send_for_approval_keeps_draft_when_telegram_silent(monkeypatch):
     updated = await svc.send_for_approval(item.id)
 
     assert updated.status == ContentStatus.DRAFT
+
+
+# === Дата прямо при создании плана (из формы «Новый контент») ===
+
+@pytest.mark.asyncio
+async def test_generate_plan_accepts_schedule():
+    """Форма создания спрашивает дату — она обязана доехать до черновиков.
+
+    Поле было в ContentPlanRequest с самого начала, но молча терялось:
+    API не передавал его в generate_plan, и контент падал в «без даты».
+    """
+    when = _iso(datetime.now(timezone.utc) + timedelta(days=2))
+    items = await svc.generate_plan("тема", count=2, llm=StubLLM(), scheduled_at=when)
+
+    assert all(i.scheduled_at == when for i in items)
+    assert all(i.status == ContentStatus.SCHEDULED for i in items)
+
+
+@pytest.mark.asyncio
+async def test_generate_plan_without_schedule_stays_draft():
+    items = await svc.generate_plan("тема", count=1, llm=StubLLM())
+    assert items[0].scheduled_at is None
+    assert items[0].status == ContentStatus.DRAFT
+
+
+@pytest.mark.asyncio
+async def test_generate_plan_rejects_bad_schedule():
+    """Мусорная дата должна упасть до генерации, а не после.
+
+    Иначе фаундер платит за N сценариев от модели и получает ошибку.
+    """
+    with pytest.raises(ValidationError):
+        await svc.generate_plan("тема", count=1, llm=StubLLM(), scheduled_at="в среду вечером")
+
+
+def test_api_plan_with_date(client, monkeypatch):
+    class FakeLLMService:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def generate_response(self, user_message, context="", kind="interactive", json_mode=False):
+            return '[{"script": "S", "caption": "C", "hashtags": []}]'
+
+    import backend.services.llm as llm_mod
+    monkeypatch.setattr(llm_mod, "LLMService", FakeLLMService)
+
+    when = _iso(datetime.now(timezone.utc) + timedelta(days=3))
+    r = client.post("/api/content/plan", json={
+        "topic": "спа", "count": 1, "platforms": ["instagram"], "scheduled_at": when,
+    })
+
+    assert r.status_code == 201
+    assert r.json()[0]["scheduled_at"] == when
+    assert r.json()[0]["status"] == "scheduled"
