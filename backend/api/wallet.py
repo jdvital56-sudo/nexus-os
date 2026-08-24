@@ -31,6 +31,12 @@ class ServiceUpdate(BaseModel):
     cancel_url: str | None = None
     url: str | None = None
     balance_provider: str | None = None
+    # 23.08.2026: фаундер пожаловался, что не видит, сколько у него денег на
+    # счету. Автоматически баланс отдаёт только DeepSeek (fetch_balance);
+    # у Anthropic, fal.ai и Hetzner открытого API остатка нет, а лезть в его
+    # личные кабинеты нельзя. Значит нужен ручной ввод — без него поле
+    # balance навсегда оставалось бы пустым у трёх сервисов из четырёх.
+    balance: float | None = None
     notes: str | None = None
     status: str | None = None
 

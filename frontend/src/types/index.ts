@@ -83,8 +83,13 @@ export interface SystemStatusResponse {
 export interface WalletSummary {
   active_count: number;
   monthly_total_usd: number;
+  // Деньги на предоплаченных счетах. unknown важен не меньше total: без него
+  // «на счетах $1.98» читалось бы как полная картина, хотя это баланс одного
+  // сервиса, а про остальные просто ничего не известно (23.08.2026).
+  prepaid: { total: number; known: string[]; unknown: string[] };
   due_soon: Array<{ id: string; name: string; days_left: number; cost: number; cancel_url?: string }>;
   low_balance: Array<{ id: string; name: string; balance: number }>;
+  unknown_charge_date?: string[];
 }
 
 // Ночной прогон Dream Cadence: находки и утренний бриф

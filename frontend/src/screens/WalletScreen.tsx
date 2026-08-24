@@ -1,26 +1,43 @@
 import { useEffect, useState } from 'react';
-import { Plus, ExternalLink, XCircle } from 'lucide-react';
+import { Plus, ExternalLink } from 'lucide-react';
 import {
   cancelService,
   createService,
   getServices,
   getWalletSummary,
+  updateService,
 } from '../lib/api';
-import { BTN, BTN_GHOST, CARD, Empty, ErrorBox, INPUT, NUM, PageHeader, Pill, Skeleton } from '../components/ui';
+import { ErrorBox, PageHeader } from '../components/ui';
 import { days, money } from '../lib/format';
 import type { WalletSummary } from '../types';
+import '../styles/pantheon.css';
 
 // Реестр платных сервисов. Бэкенд считает деньги и напоминает о списаниях
-// в 9:00 с PR-26, но увидеть весь список можно было только через API.
+// в 9:00 с PR-26.
 //
-// Здесь важна не красота, а два вопроса: сколько уходит в месяц и что
-// спишется в ближайшие дни. Поэтому они стоят первыми.
+// Переписано 23.08.2026 на карточки (стиль Пантеона, см. .n-card в
+// styles/pantheon.css) по двум жалобам фаундера сразу: «это не все
+// подписки» и «не видно, сколько денег у меня на счету».
+//
+// Про деньги: автоматически баланс отдаёт только DeepSeek. У Anthropic,
+// fal.ai и Hetzner открытого API остатка нет, а лезть в его личные
+// кабинеты нельзя — поэтому баланс можно вписать руками прямо в карточке,
+// и рядом видно, когда цифра последний раз обновлялась. Неизвестные
+// балансы показываются явно, а не прячутся: «$1.98 на счетах» без
+// оговорки читалось бы как полная картина, хотя это остаток одного
+// сервиса из трёх.
 
 const PERIODS: Record<string, string> = {
   monthly: 'в месяц',
   yearly: 'в год',
   prepaid: 'предоплата',
   free: 'бесплатно',
+};
+
+const CATEGORY_TONE: Record<string, string> = {
+  hosting: 'progress',
+  ai: 'good',
+  tools: 'neutral',
 };
 
 const EMPTY_FORM = {
@@ -39,12 +56,35 @@ function whenCharged(daysLeft: number | null | undefined): string {
   return `просрочено на ${days(-daysLeft)}`;
 }
 
+function daysUntil(iso?: string | null): number | null {
+  if (!iso) return null;
+  const target = new Date(`${iso.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(target.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86400000);
+}
+
+function checkedAgo(iso?: string | null): string {
+  if (!iso) return 'не вводился';
+  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/.test(iso);
+  const d = new Date(hasZone ? iso : `${iso}Z`);
+  if (Number.isNaN(d.getTime())) return 'не вводился';
+  const hours = Math.floor((Date.now() - d.getTime()) / 3600000);
+  if (hours < 1) return 'только что';
+  if (hours < 24) return `${hours} ч назад`;
+  return `${Math.floor(hours / 24)} дн назад`;
+}
+
 export default function WalletScreen() {
   const [services, setServices] = useState<any[] | null>(null);
   const [summary, setSummary] = useState<WalletSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [balanceDraft, setBalanceDraft] = useState<Record<string, string>>({});
+  const palette = localStorage.getItem('pantheon-palette') || 'gold';
 
   const load = () => {
     Promise.all([getServices('active'), getWalletSummary()])
@@ -65,22 +105,36 @@ export default function WalletScreen() {
         name: form.name.trim(),
         cost: Number(form.cost) || 0,
         period: form.period,
-        next_charge: form.next_charge || null,
-        cancel_url: form.cancel_url,
-        notes: form.notes,
+        next_charge: form.next_charge || undefined,
+        cancel_url: form.cancel_url || undefined,
+        notes: form.notes || undefined,
       });
       setForm({ ...EMPTY_FORM });
       setShowAdd(false);
       load();
-    } catch (e: any) {
-      setError(e?.response?.data?.error ?? 'Сервис не добавился.');
+    } catch {
+      setError('Сервис не добавился.');
     }
   };
 
-  // Отмена не удаляет запись: важно помнить, что подписка была и когда её
-  // закрыли — иначе через месяц не вспомнить, за что списали
-  const cancel = async (id: string, name: string) => {
-    if (!window.confirm(`Пометить «${name}» как отменённый? Запись останется в истории.`)) return;
+  const saveBalance = async (id: string) => {
+    const raw = balanceDraft[id];
+    if (raw === undefined || raw === '') return;
+    const value = Number(raw.replace(',', '.'));
+    if (Number.isNaN(value)) {
+      setError('Баланс должен быть числом.');
+      return;
+    }
+    try {
+      await updateService(id, { balance: value });
+      setBalanceDraft((d) => ({ ...d, [id]: '' }));
+      load();
+    } catch {
+      setError('Не удалось сохранить баланс.');
+    }
+  };
+
+  const cancel = async (id: string) => {
     try {
       await cancelService(id);
       load();
@@ -89,16 +143,18 @@ export default function WalletScreen() {
     }
   };
 
-  const dueSoon = summary?.due_soon ?? [];
-  const lowBalance = summary?.low_balance ?? [];
+  const prepaid = summary?.prepaid;
 
   return (
     <div className="p-6 lg:p-8">
       <PageHeader
         title="Подписки"
-        subtitle="За что система платит и когда спишут в следующий раз. Напоминание приходит в Телеграм в 9:00."
+        subtitle="Что оплачено, когда спишется и сколько осталось на счетах."
         action={
-          <button onClick={() => setShowAdd(!showAdd)} className={BTN}>
+          <button
+            onClick={() => setShowAdd(!showAdd)}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 hover:border-gray-600"
+          >
             <Plus className="h-4 w-4" aria-hidden />
             Добавить сервис
           </button>
@@ -111,168 +167,222 @@ export default function WalletScreen() {
         </div>
       )}
 
-      {showAdd && (
-        <div className={`${CARD} mb-6 space-y-3`}>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="text-xs text-gray-400">
-              Название
-              <input
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className={`${INPUT} mt-1`}
-                placeholder="ChatGPT Plus"
-                autoFocus
-              />
-            </label>
-            <label className="text-xs text-gray-400">
-              Сколько стоит, $
+      <div className="pantheon-theme" data-palette={palette}>
+        {summary && (
+          <div className="p-stats">
+            <div className="p-stat">
+              <div className="p-k">Уходит в месяц</div>
+              <div className="p-v">{money(summary.monthly_total_usd)}</div>
+            </div>
+            <div className="p-stat">
+              <div className="p-k">На предоплаченных счетах</div>
+              <div className="p-v">{prepaid ? money(prepaid.total) : '—'}</div>
+            </div>
+            <div className="p-stat">
+              <div className="p-k">Баланс неизвестен</div>
+              <div className="p-v">{prepaid?.unknown.length ?? 0} серв.</div>
+            </div>
+            <div className="p-stat">
+              <div className="p-k">Активных</div>
+              <div className="p-v">{summary.active_count}</div>
+            </div>
+          </div>
+        )}
+
+        {prepaid && prepaid.unknown.length > 0 && (
+          <p className="p-note" style={{ marginBottom: 14 }}>
+            Баланс не вписан у: {prepaid.unknown.join(', ')}. Эти сервисы не отдают остаток по API —
+            откройте карточку и впишите цифру руками, тогда она попадёт в сумму.
+          </p>
+        )}
+
+        {showAdd && (
+          <div className="n-newbox">
+            <input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="Название сервиса"
+              autoFocus
+            />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <input
                 value={form.cost}
                 onChange={(e) => setForm({ ...form, cost: e.target.value })}
-                className={`${INPUT} mt-1`}
-                placeholder="20"
-                inputMode="decimal"
+                placeholder="Сколько стоит"
+                style={{ flex: '1 1 140px' }}
               />
-            </label>
-            <label className="text-xs text-gray-400">
-              Дата следующего списания
               <input
-                type="date"
                 value={form.next_charge}
                 onChange={(e) => setForm({ ...form, next_charge: e.target.value })}
-                className={`${INPUT} mt-1`}
+                placeholder="Дата списания (2026-09-01)"
+                style={{ flex: '1 1 200px' }}
               />
-            </label>
-            <label className="text-xs text-gray-400">
-              Ссылка на отмену
-              <input
-                value={form.cancel_url}
-                onChange={(e) => setForm({ ...form, cancel_url: e.target.value })}
-                className={`${INPUT} mt-1`}
-                placeholder="https://…"
-              />
-            </label>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {Object.entries(PERIODS).map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => setForm({ ...form, period: key })}
-                className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
-                  form.period === key
-                    ? 'border-primary/40 bg-primary/10 text-primary'
-                    : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
-                }`}
-              >
-                {label}
+            </div>
+            <div className="n-actions">
+              {Object.entries(PERIODS).map(([key, label]) => (
+                <button
+                  key={key}
+                  className={`n-act ${form.period === key ? 'active' : ''}`}
+                  onClick={() => setForm({ ...form, period: key })}
+                >
+                  {label}
+                </button>
+              ))}
+              <button className="n-act n-spacer" onClick={add} disabled={!form.name.trim()}>
+                Добавить
               </button>
-            ))}
-            <button onClick={add} className={`${BTN} ml-auto`} disabled={!form.name.trim()}>
-              Добавить
-            </button>
-            <button onClick={() => setShowAdd(false)} className={BTN_GHOST}>
-              Отмена
-            </button>
+              <button className="n-act" onClick={() => setShowAdd(false)}>
+                Отмена
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {summary && (
-        <div className="mb-6 grid gap-4 sm:grid-cols-3">
-          <div className={CARD}>
-            <h3 className="text-sm text-gray-400">Уходит в месяц</h3>
-            <p className={`mt-2 text-2xl font-bold text-gray-100 ${NUM}`}>
-              {money(summary.monthly_total_usd)}
-            </p>
-            <p className="mt-1 text-xs text-gray-500">
-              активных сервисов: {summary.active_count}
-            </p>
+        {services === null && !error && (
+          <div className="n-empty">
+            <p>Загружаю…</p>
           </div>
-          <div className={CARD}>
-            <h3 className="text-sm text-gray-400">Скоро спишут</h3>
-            <p className={`mt-2 text-2xl font-bold ${dueSoon.length ? 'text-amber-300' : 'text-gray-100'} ${NUM}`}>
-              {dueSoon.length}
-            </p>
-            <p className="mt-1 text-xs text-gray-500">
-              {dueSoon.length ? dueSoon.map((s) => s.name).join(', ') : 'в ближайшие дни ничего'}
-            </p>
+        )}
+
+        {services?.length === 0 && (
+          <div className="n-empty">
+            <p>Сервисов пока нет.</p>
+            <p className="n-sub">Добавьте первый кнопкой выше.</p>
           </div>
-          <div className={CARD}>
-            <h3 className="text-sm text-gray-400">Баланс на исходе</h3>
-            <p className={`mt-2 text-2xl font-bold ${lowBalance.length ? 'text-red-300' : 'text-gray-100'} ${NUM}`}>
-              {lowBalance.length}
-            </p>
-            <p className="mt-1 text-xs text-gray-500">
-              {lowBalance.length ? lowBalance.map((s) => s.name).join(', ') : 'везде хватает'}
-            </p>
-          </div>
-        </div>
-      )}
+        )}
 
-      {services === null && !error && <Skeleton rows={2} />}
+        <div className="n-grid wide">
+          {services?.map((s) => {
+            const open = openId === s.id;
+            const left = daysUntil(s.next_charge);
+            const isPrepaid = s.period === 'prepaid';
+            const noBalance = isPrepaid && s.balance == null;
+            const tone = noBalance ? 'warn' : CATEGORY_TONE[s.category] ?? 'neutral';
+            return (
+              <div
+                key={s.id}
+                className={`n-card ${open ? 'open' : ''}`}
+                data-tone={tone}
+                role="button"
+                tabIndex={0}
+                onClick={() => setOpenId(open ? null : s.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setOpenId(open ? null : s.id);
+                  }
+                }}
+              >
+                <div className="n-top">
+                  <h3 className="n-title">{s.name}</h3>
+                  <span className="n-badge" data-tone={tone}>
+                    {money(s.cost)} {PERIODS[s.period] ?? s.period}
+                  </span>
+                </div>
 
-      {services?.length === 0 && (
-        <Empty
-          title="Реестр пуст."
-          hint="Добавь сюда всё, за что платишь — система будет напоминать о списаниях и следить за остатками там, где это возможно."
-        />
-      )}
+                <div className="n-foot">
+                  {isPrepaid ? (
+                    <span>
+                      на счету: {s.balance != null ? money(s.balance) : 'неизвестно'}
+                    </span>
+                  ) : (
+                    <span>{whenCharged(left)}</span>
+                  )}
+                  <span className="n-hint">{open ? 'свернуть' : 'раскрыть'}</span>
+                </div>
 
-      <div className="space-y-2">
-        {services?.map((s) => {
-          const due = dueSoon.find((d) => d.id === s.id);
-          const low = lowBalance.some((l) => l.id === s.id);
-          return (
-            <article key={s.id} className={CARD}>
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h3 className="font-semibold text-gray-100">{s.name}</h3>
-                  <p className="mt-0.5 text-sm text-gray-400">
-                    {s.cost ? `${money(s.cost)} ${PERIODS[s.period] ?? s.period}` : PERIODS[s.period] ?? s.period}
-                    {s.balance != null && (
-                      <>
-                        {' · '}
-                        <span className={low ? 'text-red-300' : 'text-gray-300'}>
-                          остаток {money(s.balance)}
-                        </span>
-                      </>
+                {open && (
+                  <div className="n-body" onClick={(e) => e.stopPropagation()}>
+                    {s.notes && (
+                      <div>
+                        <div className="n-label">Заметка</div>
+                        <p className="n-full">{s.notes}</p>
+                      </div>
                     )}
-                  </p>
-                  {s.notes && <p className="mt-1 text-xs text-gray-500">{s.notes}</p>}
-                </div>
 
-                <div className="flex shrink-0 flex-wrap items-center gap-2">
-                  {due && (
-                    <Pill
-                      text={whenCharged(due.days_left)}
-                      tone={due.days_left < 0 ? 'red' : 'amber'}
-                    />
-                  )}
-                  {!due && s.next_charge && (
-                    <span className={`text-xs text-gray-500 ${NUM}`}>списание {s.next_charge}</span>
-                  )}
-                  {s.cancel_url && (
-                    <a
-                      href={s.cancel_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={BTN_GHOST}
-                      title="Открыть страницу отмены"
-                    >
-                      <ExternalLink className="h-4 w-4" aria-hidden />
-                      отменить
-                    </a>
-                  )}
-                  <button onClick={() => cancel(s.id, s.name)} className={BTN_GHOST}>
-                    <XCircle className="h-4 w-4" aria-hidden />
-                    не плачу больше
-                  </button>
-                </div>
+                    <div>
+                      <div className="n-label">Деньги на счету</div>
+                      <div className="n-foot" style={{ marginTop: 4 }}>
+                        <span>
+                          {s.balance != null ? money(s.balance) : 'не вписан'} · обновлён{' '}
+                          {checkedAgo(s.balance_checked_at)}
+                        </span>
+                      </div>
+                      <div className="n-actions" style={{ marginTop: 6 }}>
+                        <input
+                          value={balanceDraft[s.id] ?? ''}
+                          onChange={(e) => setBalanceDraft((d) => ({ ...d, [s.id]: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveBalance(s.id);
+                          }}
+                          placeholder="Сколько сейчас, напр. 12.50"
+                          style={{
+                            flex: '1 1 180px',
+                            background: 'var(--panel-2)',
+                            border: '1px solid var(--line)',
+                            borderRadius: 6,
+                            color: 'var(--ink)',
+                            padding: '6px 10px',
+                            fontFamily: 'var(--p-mono)',
+                            fontSize: '0.82rem',
+                          }}
+                        />
+                        <button
+                          className="n-act"
+                          onClick={() => saveBalance(s.id)}
+                          disabled={!balanceDraft[s.id]}
+                        >
+                          Сохранить
+                        </button>
+                      </div>
+                      {s.balance_provider && (
+                        <p className="p-note" style={{ marginTop: 4, fontSize: '0.74rem' }}>
+                          Этот сервис отдаёт баланс по API — обновляется сам.
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="n-label">Списание</div>
+                      <div className="n-foot" style={{ marginTop: 4 }}>
+                        <span>{s.next_charge ? `${s.next_charge} · ${whenCharged(left)}` : 'дата неизвестна'}</span>
+                      </div>
+                    </div>
+
+                    <div className="n-actions">
+                      {s.url && (
+                        <a
+                          className="n-act"
+                          href={s.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, textDecoration: 'none' }}
+                        >
+                          <ExternalLink className="h-3 w-3" aria-hidden />
+                          сайт
+                        </a>
+                      )}
+                      {s.cancel_url && (
+                        <a
+                          className="n-act"
+                          href={s.cancel_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ textDecoration: 'none' }}
+                        >
+                          где отменить
+                        </a>
+                      )}
+                      <button className="n-act danger n-spacer" onClick={() => cancel(s.id)}>
+                        отметить отменённой
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-            </article>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );

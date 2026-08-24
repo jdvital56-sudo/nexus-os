@@ -109,6 +109,65 @@ def test_summary_lists_services_without_known_date():
     assert wallet.summary()["unknown_charge_date"] == ["Без даты"]
 
 
+# --- Деньги на счетах: ручной ввод и сводка (23.08.2026) ---
+
+
+def test_balance_can_be_set_by_hand():
+    """У Anthropic/fal.ai/Hetzner нет API остатка — без ручного ввода поле
+    оставалось бы пустым навсегда."""
+    s = wallet.add_service("fal.ai", cost=18, period=wallet.PERIOD_PREPAID)
+
+    updated = wallet.update_service(s["id"], balance=12.5)
+
+    assert updated["balance"] == 12.5
+    assert updated["balance_checked_at"] is not None
+
+
+def test_manual_balance_stamps_the_check_time():
+    s = wallet.add_service("Anthropic", cost=24, period=wallet.PERIOD_PREPAID)
+    assert wallet.get_service(s["id"])["balance_checked_at"] is None
+
+    wallet.update_service(s["id"], balance=3.0)
+
+    assert wallet.get_service(s["id"])["balance_checked_at"] is not None
+
+
+def test_other_edits_do_not_touch_the_check_time():
+    """Правка заметки не должна выдавать старый баланс за свежий."""
+    s = wallet.add_service("DeepSeek", cost=2, period=wallet.PERIOD_PREPAID)
+    wallet.update_service(s["id"], balance=1.98)
+    stamped = wallet.get_service(s["id"])["balance_checked_at"]
+
+    wallet.update_service(s["id"], notes="просто заметка")
+
+    assert wallet.get_service(s["id"])["balance_checked_at"] == stamped
+
+
+def test_prepaid_balance_sums_only_known_amounts():
+    wallet.add_service("DeepSeek", cost=2, period=wallet.PERIOD_PREPAID)
+    wallet.add_service("fal.ai", cost=18, period=wallet.PERIOD_PREPAID)
+    wallet.add_service("Hetzner", cost=10, period=wallet.PERIOD_MONTHLY)
+    wallet.update_service("DeepSeek", balance=1.98)
+
+    prepaid = wallet.summary()["prepaid"]
+
+    assert prepaid["total"] == 1.98
+    assert prepaid["known"] == ["DeepSeek"]
+    assert prepaid["unknown"] == ["fal.ai"]  # месячный Hetzner сюда не попадает
+
+
+def test_prepaid_balance_flags_everything_unknown_when_nothing_entered():
+    """Пустая сводка не должна читаться как «денег ноль» — должно быть
+    видно, что цифры просто неизвестны."""
+    wallet.add_service("fal.ai", cost=18, period=wallet.PERIOD_PREPAID)
+
+    prepaid = wallet.summary()["prepaid"]
+
+    assert prepaid["total"] == 0
+    assert prepaid["unknown"] == ["fal.ai"]
+    assert prepaid["known"] == []
+
+
 @pytest.mark.asyncio
 async def test_unknown_provider_has_no_balance_api():
     assert await wallet.fetch_balance("midjourney", "key") is None

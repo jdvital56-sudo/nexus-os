@@ -117,6 +117,11 @@ def update_service(service_id: str, **fields) -> dict:
         for key, value in fields.items():
             if key in s and value is not None:
                 s[key] = value
+        # Баланс вписали руками — отмечаем когда, иначе на экране не отличить
+        # свежую цифру от той, что фаундер вводил месяц назад (для сервисов
+        # с API это делает refresh_balances, для остальных — только здесь)
+        if fields.get("balance") is not None:
+            s["balance_checked_at"] = _now()
         _save(services)
         return s
     raise NotFoundError("Service", service_id)
@@ -275,12 +280,38 @@ async def refresh_balances() -> list[dict]:
     return updated
 
 
+def prepaid_balance(currency: str = "USD") -> dict:
+    """Сколько всего лежит на предоплаченных счетах и по скольким сервисам
+    цифра неизвестна.
+
+    23.08.2026: фаундер сказал, что не видит, сколько у него денег. Сводка
+    показывала только monthly_total — то есть один Hetzner: три сервиса из
+    четырёх у него prepaid (Anthropic, DeepSeek, fal.ai), и деньги на них
+    в сводку не попадали вообще. `unknown` важен не меньше суммы: без него
+    «на счетах $1.98» читалось бы как полная картина, хотя это баланс
+    одного DeepSeek, а про остальные просто ничего не известно.
+    """
+    total = 0.0
+    known, unknown = [], []
+    for s in list_services():
+        if s["status"] != STATUS_ACTIVE or s["period"] != PERIOD_PREPAID:
+            continue
+        balance = s.get("balance")
+        if balance is None or s["currency"] != currency:
+            unknown.append(s["name"])
+        else:
+            total += float(balance)
+            known.append(s["name"])
+    return {"total": round(total, 2), "known": known, "unknown": unknown}
+
+
 def summary() -> dict:
     """Сводка для экрана и для утреннего брифа."""
     active = list_services()
     return {
         "active_count": len(active),
         "monthly_total_usd": monthly_total("USD"),
+        "prepaid": prepaid_balance("USD"),
         "due_soon": due_soon(),
         "low_balance": low_balance(),
         "unknown_charge_date": [s["name"] for s in active if not s.get("next_charge")],
