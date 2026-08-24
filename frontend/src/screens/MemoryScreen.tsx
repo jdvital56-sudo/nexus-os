@@ -1,39 +1,68 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { addMemoryFact, getMemoryFacts, getMemoryStats } from '../lib/api';
-import { BTN, BTN_GHOST, CARD, Empty, ErrorBox, INPUT, NUM, PageHeader, Skeleton, when } from '../components/ui';
-import { plural } from '../lib/format';
+import { ErrorBox, PageHeader } from '../components/ui';
+import '../styles/pantheon.css';
 
 // Память из четырёх слоёв: сырое, рабочее, канон и то, чему система верит
-// в первую очередь. Слой виден полосой слева и подписан словом — по цвету
-// одному его не угадать.
+// в первую очередь.
+//
+// Переписано 23.08.2026 на карточки (стиль Пантеона). По дороге вскрылось
+// то, что важнее вёрстки: вся память фаундера лежала одним слоем INBOX —
+// то есть это куски диалогов, а не проверенные факты о его делах. Отсюда
+// и жалоба «Джарвис не помнит»: система честно подмешивает в ответ то,
+// что у неё есть, а есть у неё только сырьё. Поэтому слои теперь не
+// просто фильтр, а видимая шкала: сколько сырья и сколько разобранного.
 
-const LAYERS: Record<string, { label: string; hint: string; border: string; text: string }> = {
+const LAYERS: Record<string, { label: string; hint: string; tone: string }> = {
   inbox: {
     label: 'Входящее',
     hint: 'сырое: реплики, расшифровки, всё непросмотренное',
-    border: 'border-l-gray-600',
-    text: 'text-gray-300',
+    tone: 'neutral',
   },
   operational: {
     label: 'Рабочее',
     hint: 'то, на что система ссылается в делах',
-    border: 'border-l-blue-400',
-    text: 'text-blue-300',
+    tone: 'progress',
   },
   canonical: {
     label: 'Канон',
     hint: 'методики, цены, шаблоны — редко меняется',
-    border: 'border-l-secondary',
-    text: 'text-secondary',
+    tone: 'warn',
   },
   memory: {
     label: 'Память',
     hint: 'чему система доверяет в первую очередь',
-    border: 'border-l-primary',
-    text: 'text-primary',
+    tone: 'good',
   },
 };
+
+function when(iso?: string | null): string {
+  if (!iso) return '';
+  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/.test(iso);
+  const d = new Date(hasZone ? iso : `${iso}Z`);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function sourceLabel(source?: string | null): string {
+  if (!source) return 'без источника';
+  if (source.startsWith('agent:')) return 'прогон агента';
+  if (source.startsWith('agent-sweep:')) return `обход: ${source.split(':')[1]}`;
+  if (source.startsWith('web:')) return 'веб-чат';
+  if (source.startsWith('telegram:')) return 'Telegram';
+  if (source === 'researcher') return 'находка Исследователя';
+  if (source === 'reviewer') return 'вердикт Рецензента';
+  if (source === 'builder') return 'план Строителя';
+  return source.slice(0, 30);
+}
+
+/** Диалоговые факты сохраняются как «Пользователь: … \n Персона: …» —
+ *  в карточке показываем только суть, без служебной шапки. */
+function shorten(content: string): string {
+  const withoutSpeaker = content.replace(/^Пользователь:\s*/i, '');
+  return withoutSpeaker.trim();
+}
 
 export default function MemoryScreen() {
   const [facts, setFacts] = useState<any[] | null>(null);
@@ -42,7 +71,9 @@ export default function MemoryScreen() {
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
   const [form, setForm] = useState({ content: '', layer: 'memory', source: 'вручную', confidence: 0.8 });
+  const palette = localStorage.getItem('pantheon-palette') || 'gold';
 
   const load = () => {
     const params: Record<string, string> = {};
@@ -58,37 +89,40 @@ export default function MemoryScreen() {
 
   useEffect(load, [layer]);
 
-  const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const list = facts ?? [];
-    return q ? list.filter((f) => (f.content ?? '').toLowerCase().includes(q)) : list;
-  }, [facts, query]);
-
   const add = async () => {
     if (!form.content.trim()) return;
     try {
-      await addMemoryFact(form);
-      setForm({ ...form, content: '' });
+      await addMemoryFact({ ...form, content: form.content.trim() });
+      setForm({ content: '', layer: 'memory', source: 'вручную', confidence: 0.8 });
       setShowAdd(false);
       load();
     } catch {
-      setError('Факт не записался.');
+      setError('Факт не добавился.');
     }
   };
+
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = facts ?? [];
+    if (!q) return list;
+    return list.filter((f) => f.content?.toLowerCase().includes(q));
+  }, [facts, query]);
+
+  const byLayer = stats.by_layer ?? {};
+  const rawOnly = (byLayer.inbox ?? 0) > 0 && Object.keys(byLayer).length === 1;
 
   return (
     <div className="p-6 lg:p-8">
       <PageHeader
         title="Память"
-        subtitle={
-          stats.active != null
-            ? `${plural(stats.active, 'факт', 'факта', 'фактов')} · средняя достоверность ${stats.avg_confidence ?? 0}`
-            : 'Чему система верит и откуда это узнала.'
-        }
+        subtitle="Чему система доверяет, когда отвечает. Разложена по слоям: от сырых реплик до проверенного канона."
         action={
-          <button onClick={() => setShowAdd(!showAdd)} className={BTN}>
+          <button
+            onClick={() => setShowAdd(!showAdd)}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 hover:border-gray-600"
+          >
             <Plus className="h-4 w-4" aria-hidden />
-            Записать факт
+            Добавить факт
           </button>
         }
       />
@@ -99,115 +133,167 @@ export default function MemoryScreen() {
         </div>
       )}
 
-      {showAdd && (
-        <div className={`${CARD} mb-6 space-y-3`}>
-          <textarea
-            value={form.content}
-            onChange={(e) => setForm({ ...form, content: e.target.value })}
-            placeholder="Что система должна знать"
-            rows={3}
-            className={INPUT}
-            autoFocus
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            {Object.entries(LAYERS).map(([key, l]) => (
-              <button
-                key={key}
-                onClick={() => setForm({ ...form, layer: key })}
-                className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
-                  form.layer === key
-                    ? 'border-primary/40 bg-primary/10 text-primary'
-                    : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
-                }`}
-                title={l.hint}
-              >
-                {l.label}
-              </button>
-            ))}
-            <button onClick={add} className={`${BTN} ml-auto`} disabled={!form.content.trim()}>
-              Записать
-            </button>
-            <button onClick={() => setShowAdd(false)} className={BTN_GHOST}>
-              Отмена
-            </button>
+      <div className="pantheon-theme" data-palette={palette}>
+        <div className="p-stats">
+          <div className="p-stat">
+            <div className="p-k">Всего фактов</div>
+            <div className="p-v">{stats.total ?? '—'}</div>
           </div>
+          {Object.entries(LAYERS).map(([key, l]) => (
+            <div className="p-stat" key={key}>
+              <div className="p-k">{l.label}</div>
+              <div className="p-v">{byLayer[key] ?? 0}</div>
+            </div>
+          ))}
         </div>
-      )}
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => setLayer('')}
-          className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
-            layer === ''
-              ? 'border-primary/40 bg-primary/10 text-primary'
-              : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
-          }`}
-        >
-          Все слои
-        </button>
-        {Object.entries(LAYERS).map(([key, l]) => (
-          <button
-            key={key}
-            onClick={() => setLayer(key)}
-            title={l.hint}
-            className={`cursor-pointer rounded-md border px-3 py-1.5 text-sm transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary ${
-              layer === key
-                ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-gray-800 text-gray-300 hover:border-gray-700 hover:text-gray-100'
-            }`}
-          >
-            {l.label}
-            {stats.by_layer?.[key] != null && (
-              <span className={`ml-2 text-xs text-gray-500 ${NUM}`}>{stats.by_layer[key]}</span>
-            )}
+        {rawOnly && (
+          <p className="p-note" style={{ marginBottom: 14 }}>
+            Вся память сейчас — сырое «входящее»: куски разговоров, ничего разобранного. Именно поэтому
+            система отвечает общими словами, когда спрашиваешь о твоих делах: проверенных фактов у неё
+            просто нет. Разобрать может Куратор на экране «Агенты», либо впишите ключевые факты руками
+            кнопкой выше — они лягут в слой «Память», которому система доверяет в первую очередь.
+          </p>
+        )}
+
+        {showAdd && (
+          <div className="n-newbox">
+            <textarea
+              value={form.content}
+              onChange={(e) => setForm({ ...form, content: e.target.value })}
+              placeholder="Факт: коротко и по делу. Например: «Спа-оффер стоит $1200, скидок не даём»"
+              rows={3}
+              autoFocus
+            />
+            <div className="n-actions">
+              {Object.entries(LAYERS).map(([key, l]) => (
+                <button
+                  key={key}
+                  className={`n-act ${form.layer === key ? 'active' : ''}`}
+                  onClick={() => setForm({ ...form, layer: key })}
+                  title={l.hint}
+                >
+                  {l.label}
+                </button>
+              ))}
+              <button className="n-act n-spacer" onClick={add} disabled={!form.content.trim()}>
+                Запомнить
+              </button>
+              <button className="n-act" onClick={() => setShowAdd(false)}>
+                Отмена
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="n-filters">
+          <button className={layer === '' ? 'active' : ''} onClick={() => setLayer('')}>
+            все слои · {stats.total ?? 0}
           </button>
-        ))}
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Поиск по тексту"
-          className={`${INPUT} ml-auto max-w-xs`}
-        />
-      </div>
+          {Object.entries(LAYERS).map(([key, l]) => (
+            <button key={key} className={layer === key ? 'active' : ''} onClick={() => setLayer(key)}>
+              {l.label} · {byLayer[key] ?? 0}
+            </button>
+          ))}
+        </div>
 
-      {facts === null && !error && <Skeleton />}
+        {(facts?.length ?? 0) > 0 && (
+          <div className="n-newbox" style={{ padding: 10 }}>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Поиск по фактам"
+            />
+          </div>
+        )}
 
-      {facts?.length === 0 && (
-        <Empty
-          title="Фактов пока нет."
-          hint="Память наполняется сама из разговоров с ботом — или запиши первый факт вручную."
-        />
-      )}
+        {facts === null && !error && (
+          <div className="n-empty">
+            <p>Загружаю…</p>
+          </div>
+        )}
 
-      {facts && facts.length > 0 && shown.length === 0 && (
-        <Empty title={`По запросу «${query}» ничего не нашлось.`} />
-      )}
+        {facts?.length === 0 && (
+          <div className="n-empty">
+            <p>В этом слое пусто.</p>
+            <p className="n-sub">Память наполняется сама из разговоров — или впишите факт кнопкой выше.</p>
+          </div>
+        )}
 
-      <div className="space-y-2">
-        {shown.map((f) => {
-          const l = LAYERS[f.layer] ?? LAYERS.inbox;
-          return (
-            <article key={f.id} className={`${CARD} border-l-4 ${l.border}`}>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className={`text-[11px] uppercase tracking-wider ${l.text}`}>{l.label}</span>
-                <span className={`ml-auto text-[11px] text-gray-500 ${NUM}`}>
-                  достоверность {f.confidence}
-                </span>
-              </div>
-              <p className="mt-1 whitespace-pre-wrap break-words text-sm text-gray-100">{f.content}</p>
-              <div className="mt-2 flex flex-wrap items-center gap-1">
-                {f.tags?.slice(0, 6).map((t: string) => (
-                  <span key={t} className="rounded-full bg-gray-800 px-2 py-0.5 text-[11px] text-gray-300">
-                    {t}
+        {shown.length === 0 && (facts?.length ?? 0) > 0 && (
+          <div className="n-empty">
+            <p>Ничего не нашлось.</p>
+          </div>
+        )}
+
+        <div className="n-grid wide">
+          {shown.map((f) => {
+            const l = LAYERS[f.layer] ?? LAYERS.inbox;
+            const open = openId === f.id;
+            const confidence = Math.round((f.confidence ?? 0) * 100);
+            return (
+              <div
+                key={f.id}
+                className={`n-card ${open ? 'open' : ''}`}
+                data-tone={l.tone}
+                role="button"
+                tabIndex={0}
+                onClick={() => setOpenId(open ? null : f.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setOpenId(open ? null : f.id);
+                  }
+                }}
+              >
+                <div className="n-top">
+                  <h3 className="n-title">{shorten(f.content)}</h3>
+                  <span className="n-badge" data-tone={l.tone}>
+                    {l.label}
                   </span>
-                ))}
-                <span className="ml-auto text-[11px] text-gray-500">
-                  {f.source} · {when(f.created_at)}
-                </span>
+                </div>
+
+                <div className="n-foot">
+                  <span>{sourceLabel(f.source)}</span>
+                  <span>·</span>
+                  <span>уверенность {confidence}%</span>
+                  <span className="n-hint">{open ? 'свернуть' : 'раскрыть'}</span>
+                </div>
+
+                {open && (
+                  <div className="n-body" onClick={(e) => e.stopPropagation()}>
+                    <div>
+                      <div className="n-label">Полностью</div>
+                      <p
+                        className="n-full"
+                        style={{ maxHeight: 380, overflow: 'auto', fontSize: '0.84rem' }}
+                      >
+                        {f.content}
+                      </p>
+                    </div>
+                    <div className="n-foot">
+                      <span>{l.hint}</span>
+                    </div>
+                    <div className="n-foot">
+                      <span>записано: {when(f.created_at)}</span>
+                      {f.updated_at !== f.created_at && <span>· правлено: {when(f.updated_at)}</span>}
+                      {f.ttl_hours && <span>· живёт {f.ttl_hours} ч</span>}
+                    </div>
+                    {(f.tags ?? []).length > 0 && (
+                      <div className="n-foot">
+                        {f.tags.map((t: string) => (
+                          <span key={t} className="n-badge">
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            </article>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
