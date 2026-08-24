@@ -34,6 +34,23 @@ if (authToken) {
 const data = <T>(p: Promise<{ data: T }>): Promise<T> => p.then(r => r.data);
 
 // --- Сводка системы (дашборд) ---
+/** Отчёт сторожа (Анубис): жива ли система по каждому узлу. */
+export interface HealthCheck {
+  id: string;
+  label: string;
+  ok: boolean;
+  detail: string;
+  critical: boolean;
+}
+export interface HealthReport {
+  checked_at: string;
+  healthy: boolean;
+  critical_count: number;
+  broken_count: number;
+  checks: HealthCheck[];
+}
+export const getHealthReport = () => data<HealthReport>(api.get('/system/health-report'));
+
 export const getSystemStatus = () =>
   data<SystemStatusResponse>(api.get('/system/status'));
 export const getWalletSummary = () => data<WalletSummary>(api.get('/wallet/summary'));
