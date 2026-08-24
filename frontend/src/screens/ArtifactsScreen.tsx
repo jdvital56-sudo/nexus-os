@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FolderSearch, Trash2, Undo2 } from 'lucide-react';
+import { FolderSearch } from 'lucide-react';
 import {
   adoptArtifacts,
   cancelArtifactDelete,
@@ -7,20 +7,41 @@ import {
   getArtifacts,
   requestArtifactDelete,
 } from '../lib/api';
-import { BTN, BTN_GHOST, CARD, Empty, ErrorBox, NUM, PageHeader, Pill, Skeleton, when } from '../components/ui';
+import { ErrorBox, PageHeader } from '../components/ui';
+import '../styles/pantheon.css';
 
 // Артефакты — файлы, которые система создала: отчёты, выгрузки, черновики.
 // Ключевое правило (I-2): система их не стирает. Она может только пометить
 // файл к удалению и объяснить почему — стирает человек, отдельной кнопкой.
+//
+// Карточки того же образца, что Идеи/Задачи/Контент (23-24.08.2026): клик
+// раскрывает — и здесь раскрытие ещё и подгружает содержимое файла, чтобы
+// не тянуть все тексты сразу.
 
 const KINDS: Record<string, { label: string; tone: string }> = {
-  report: { label: 'отчёт', tone: 'blue' },
-  export: { label: 'выгрузка', tone: 'violet' },
-  draft: { label: 'черновик', tone: 'amber' },
-  audio: { label: 'аудио', tone: 'green' },
-  image: { label: 'картинка', tone: 'green' },
-  other: { label: 'файл', tone: 'gray' },
+  report: { label: 'отчёт', tone: 'progress' },
+  export: { label: 'выгрузка', tone: 'progress' },
+  draft: { label: 'черновик', tone: 'neutral' },
+  audio: { label: 'аудио', tone: 'good' },
+  image: { label: 'картинка', tone: 'good' },
+  other: { label: 'файл', tone: 'neutral' },
 };
+
+const FILTERS: Array<{ value: string; label: string }> = [
+  { value: '', label: 'все' },
+  { value: 'report', label: 'отчёты' },
+  { value: 'export', label: 'выгрузки' },
+  { value: 'draft', label: 'черновики' },
+  { value: 'pending_delete', label: 'к удалению' },
+];
+
+function when(iso?: string | null): string {
+  if (!iso) return '';
+  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/.test(iso);
+  const d = new Date(hasZone ? iso : `${iso}Z`);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
 
 export default function ArtifactsScreen() {
   const [items, setItems] = useState<any[] | null>(null);
@@ -28,6 +49,8 @@ export default function ArtifactsScreen() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [content, setContent] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState('');
+  const palette = localStorage.getItem('pantheon-palette') || 'gold';
 
   const load = () => {
     getArtifacts()
@@ -40,7 +63,7 @@ export default function ArtifactsScreen() {
 
   useEffect(load, []);
 
-  const open = async (id: string) => {
+  const toggle = async (id: string) => {
     if (openId === id) {
       setOpenId(null);
       return;
@@ -79,13 +102,31 @@ export default function ArtifactsScreen() {
     }
   };
 
+  const visible = (items ?? []).filter((a) => {
+    if (!filter) return true;
+    if (filter === 'pending_delete') return a.status === 'pending_delete';
+    return a.kind === filter;
+  });
+  const counts = FILTERS.map((f) => ({
+    ...f,
+    n: !f.value
+      ? (items ?? []).length
+      : f.value === 'pending_delete'
+        ? (items ?? []).filter((a) => a.status === 'pending_delete').length
+        : (items ?? []).filter((a) => a.kind === f.value).length,
+  }));
+
   return (
     <div className="p-6 lg:p-8">
       <PageHeader
         title="Артефакты"
         subtitle="Файлы, которые система создала. Сама она их не стирает — только помечает и объясняет почему."
         action={
-          <button onClick={adopt} className={BTN_GHOST} disabled={busy}>
+          <button
+            onClick={adopt}
+            disabled={busy}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-gray-700 bg-gray-800 px-3 py-2 text-sm text-gray-100 hover:border-gray-600 disabled:opacity-50"
+          >
             <FolderSearch className="h-4 w-4" aria-hidden />
             {busy ? 'Смотрю папку…' : 'Подобрать файлы из папки'}
           </button>
@@ -98,70 +139,117 @@ export default function ArtifactsScreen() {
         </div>
       )}
 
-      {items === null && !error && <Skeleton rows={2} />}
+      <div className="pantheon-theme" data-palette={palette}>
+        {items !== null && items.length > 0 && (
+          <div className="n-filters">
+            {counts.map((f) => (
+              <button
+                key={f.value || 'all'}
+                className={filter === f.value ? 'active' : ''}
+                onClick={() => setFilter(f.value)}
+              >
+                {f.label} · {f.n}
+              </button>
+            ))}
+          </div>
+        )}
 
-      {items?.length === 0 && (
-        <Empty
-          title="Артефактов пока нет."
-          hint="Здесь появятся отчёты и выгрузки, которые система сделает по твоей просьбе."
-        />
-      )}
+        {items === null && !error && (
+          <div className="n-empty">
+            <p>Загружаю…</p>
+          </div>
+        )}
 
-      <div className="space-y-2">
-        {items?.map((a) => {
-          const kind = KINDS[a.kind] ?? KINDS.other;
-          const pending = a.status === 'pending_delete';
-          return (
-            <article key={a.id} className={`${CARD} ${pending ? 'border-amber-500/30' : ''}`}>
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <button
-                  onClick={() => open(a.id)}
-                  className="min-w-0 cursor-pointer text-left focus:outline-none focus:ring-1 focus:ring-primary"
-                >
-                  <h3 className="font-semibold text-gray-100">{a.description || a.filename}</h3>
-                  <p className={`mt-0.5 text-xs text-gray-500 ${NUM}`}>
-                    {a.filename} · {when(a.created_at)}
-                    {a.source && ` · ${a.source}`}
-                  </p>
-                </button>
+        {items?.length === 0 && (
+          <div className="n-empty">
+            <p>Артефактов пока нет.</p>
+            <p className="n-sub">
+              Здесь появятся отчёты и выгрузки, которые система сделает по вашей просьбе.
+            </p>
+          </div>
+        )}
 
-                <div className="flex shrink-0 items-center gap-2">
-                  <Pill text={kind.label} tone={kind.tone} />
-                  {pending ? (
-                    <>
-                      <Pill text="помечен к удалению" tone="amber" />
-                      <button
-                        onClick={async () => {
-                          await cancelArtifactDelete(a.id);
-                          load();
-                        }}
-                        className={BTN_GHOST}
-                      >
-                        <Undo2 className="h-4 w-4" aria-hidden />
-                        вернуть
-                      </button>
-                    </>
-                  ) : (
-                    <button onClick={() => markForDelete(a.id)} className={BTN_GHOST}>
-                      <Trash2 className="h-4 w-4" aria-hidden />
-                      пометить
-                    </button>
-                  )}
+        {visible.length === 0 && (items?.length ?? 0) > 0 && (
+          <div className="n-empty">
+            <p>В этой категории пусто.</p>
+          </div>
+        )}
+
+        <div className="n-grid wide">
+          {visible.map((a) => {
+            const kind = KINDS[a.kind] ?? KINDS.other;
+            const pending = a.status === 'pending_delete';
+            const open = openId === a.id;
+            return (
+              <div
+                key={a.id}
+                className={`n-card ${open ? 'open' : ''}`}
+                data-tone={pending ? 'warn' : kind.tone}
+                role="button"
+                tabIndex={0}
+                onClick={() => toggle(a.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggle(a.id);
+                  }
+                }}
+              >
+                <div className="n-top">
+                  <h3 className="n-title">{a.description || a.filename}</h3>
+                  <span className="n-badge" data-tone={pending ? 'warn' : kind.tone}>
+                    {pending ? 'к удалению' : kind.label}
+                  </span>
                 </div>
+
+                <div className="n-foot">
+                  <span>{a.filename}</span>
+                  <span>·</span>
+                  <span>{when(a.created_at)}</span>
+                  {a.source && (
+                    <>
+                      <span>·</span>
+                      <span>{a.source}</span>
+                    </>
+                  )}
+                  <span className="n-hint">{open ? 'свернуть' : 'раскрыть'}</span>
+                </div>
+
+                {pending && a.delete_reason && (
+                  <div className="n-foot" style={{ color: 'var(--torch)' }}>
+                    Причина: {a.delete_reason}
+                  </div>
+                )}
+
+                {open && (
+                  <div className="n-body" onClick={(e) => e.stopPropagation()}>
+                    <div>
+                      <div className="n-label">Содержимое</div>
+                      <pre className="n-pre">{content ?? 'Читаю…'}</pre>
+                    </div>
+                    <div className="n-actions">
+                      {pending ? (
+                        <button
+                          className="n-act active"
+                          onClick={async () => {
+                            await cancelArtifactDelete(a.id);
+                            load();
+                          }}
+                        >
+                          вернуть из удаления
+                        </button>
+                      ) : (
+                        <button className="n-act danger" onClick={() => markForDelete(a.id)}>
+                          пометить к удалению
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
-
-              {pending && a.delete_reason && (
-                <p className="mt-2 text-xs text-amber-200/80">Причина: {a.delete_reason}</p>
-              )}
-
-              {openId === a.id && (
-                <pre className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-darker p-3 text-xs leading-relaxed text-gray-200">
-                  {content ?? 'Читаю…'}
-                </pre>
-              )}
-            </article>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );

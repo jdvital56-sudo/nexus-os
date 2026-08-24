@@ -277,3 +277,41 @@
 @media (max-width: 760px) {
   .n-cal-day { min-height: 44px; font-size: 0.7rem; }
 }
+
+/* Длинный текст файла/лога внутри раскрытой карточки — со своей прокруткой,
+   иначе один большой артефакт растянул бы карточку на весь экран. */
+.n-pre {
+  margin: 0; max-height: 22rem; overflow-y: auto; white-space: pre-wrap; word-break: break-word;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px 12px; font-family: var(--p-mono); font-size: 0.78rem; line-height: 1.55; color: var(--ink-dim);
+}
+
+/* Панель-сводка над списком карточек (утренний бриф, итоги дня и т.п.) —
+   не карточка: её не раскрывают и не выбирают, она просто всегда открыта. */
+.n-panel { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 14px 16px; margin-bottom: 14px; }
+.n-panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.n-panel-title { display: inline-flex; align-items: center; gap: 7px; font-family: var(--display); font-size: 1rem; color: var(--gold-bright); }
+.n-panel-meta { font-family: var(--p-mono); font-size: 0.72rem; color: var(--ink-dimmer); }
+
+/* Лента событий: строки, а не сетка карточек — события короткие, их много,
+   и главное здесь порядок во времени, а не отдельная сущность в рамке.
+   Клик раскрывает сырое содержимое: описание короткое по замыслу. */
+.n-feed { display: flex; flex-direction: column; gap: 4px; }
+.n-row {
+  border: 1px solid var(--line); border-left-width: 3px; border-left-style: solid;
+  border-radius: 6px; background: var(--panel); padding: 8px 11px; cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.n-row:hover { border-color: var(--gold); background: var(--panel-2); }
+.n-row:focus-visible { outline: none; border-color: var(--gold); box-shadow: 0 0 0 2px rgba(201,162,75,0.3); }
+.n-row.open { border-color: var(--gold); }
+.n-row[data-tone="neutral"] { border-left-color: var(--ink-dimmer); }
+.n-row[data-tone="progress"] { border-left-color: var(--lapis); }
+.n-row[data-tone="good"] { border-left-color: var(--gold); }
+.n-row[data-tone="warn"] { border-left-color: var(--torch); }
+.n-row[data-tone="off"] { border-left-color: #6b4a4a; }
+.n-row-line { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.n-row-text { flex: 1 1 240px; min-width: 0; font-size: 0.84rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.n-row.open .n-row-text { white-space: normal; }
+.n-row-meta { font-family: var(--p-mono); font-size: 0.68rem; color: var(--ink-dimmer); margin-left: auto; }
+.n-row .n-pre { margin-top: 8px; max-height: 16rem; }

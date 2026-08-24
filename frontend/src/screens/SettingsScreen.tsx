@@ -4,12 +4,15 @@ import { getSystemStatus } from '../lib/api';
 import { money } from '../lib/format';
 import type { SystemStatusResponse } from '../types';
 import { useLang } from '../lib/i18n';
+import '../styles/pantheon.css';
 
 // Экран показывал три строки, вписанные в код руками: адрес, папку и версию.
 // При смене порта или папки он врал бы и не заметил этого. Теперь всё
 // приходит с бэкенда — что там на самом деле, то здесь и написано.
 
-const CARD = 'rounded-lg border border-gray-800 bg-dark p-5';
+// Панели, не карточки: настройки только читаются (ключи правятся в .env),
+// раскрывать нечего. Тема общая с остальными экранами (24.08.2026).
+const CARD = 'n-panel';
 
 function Row({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -50,8 +53,10 @@ export default function SettingsScreen() {
 
   const { runtime, autopilot, dream } = status;
 
+  const palette = localStorage.getItem('pantheon-palette') || 'gold';
+
   return (
-    <div className="p-6 lg:p-8">
+    <div className="p-6 lg:p-8 pantheon-theme" data-palette={palette}>
       <header className="mb-6">
         <h1 className="text-2xl font-bold text-gray-100 lg:text-3xl">{t('Настройки')}</h1>
         <p className="mt-1 text-sm text-gray-400">

@@ -4,6 +4,7 @@ import type { SystemStatusResponse, WalletSummary, SpendDay } from '../types';
 import { getSystemStatus, getWalletSummary, setAutopilot } from '../lib/api';
 import { days, money, plural } from '../lib/format';
 import { JarvisHudWidget } from '../components/JarvisHudWidget';
+import '../styles/pantheon.css';
 
 // Ничего придуманного: каждое число на этом экране приходит с бэкенда.
 // Раньше здесь стояли зашитые «сэкономлено $8940» и «ROI 3512%» — их никто
@@ -34,7 +35,9 @@ function ago(iso: string | null): string {
   return `${plural(Math.floor(hours / 24), 'день', 'дня', 'дней')} назад`;
 }
 
-const CARD = 'rounded-lg border border-gray-800 bg-dark p-5';
+// Панели, а не карточки: на дашборде нечего раскрывать — это числа и
+// графики, а не список объектов. Тема общая с Пантеоном (24.08.2026).
+const CARD = 'n-panel';
 const NUM = 'font-mono tabular-nums';
 
 /** Линия трат за две недели. SVG вручную: одна кривая не стоит библиотеки. */
@@ -224,8 +227,10 @@ export default function HomeScreen() {
     },
   ];
 
+  const palette = localStorage.getItem('pantheon-palette') || 'gold';
+
   return (
-    <div className="p-6 lg:p-8">
+    <div className="p-6 lg:p-8 pantheon-theme" data-palette={palette}>
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-100 lg:text-3xl">Дашборд</h1>
