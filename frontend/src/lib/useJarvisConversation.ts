@@ -254,6 +254,11 @@ export function useJarvisConversation(t: (s: string) => string, opts: JarvisConv
       return;
     }
     setError(null);
+    // Взялись за микрофон — Джарвис замолкает немедленно. 24.08.2026:
+    // фаундер жаловался, что тот не останавливается, когда он начинает
+    // говорить. Перебивание было, но только в режиме «по имени» — кнопка
+    // «Голосом» его не прерывала, и человек говорил поверх чужой речи.
+    stopSpeech();
     setState('LISTENING');
     setListening(true);
 
