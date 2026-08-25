@@ -59,7 +59,28 @@ PIPER_VOICES = [
     Voice("ru_RU-denis-medium", "Денис (локальный)", "male"),
 ]
 
-PIPER_VOICES_DIR = Path(__file__).resolve().parents[2] / "voice_engine" / "piper_voices"
+
+def _piper_voices_dir() -> Path:
+    """Где лежат модели голосов Piper.
+
+    25.08.2026 голоса переехали в общее `~/.nexsys/piper_voices`: их держит
+    в памяти не только бэкенд, но и общий сервис голоса
+    (`voice_engine/piper_server.py`), а рабочих деревьев на одном проекте
+    бывает три сразу — копия моделей по 180 МБ в каждом никому не нужна, и
+    сервис не должен зависеть от того, из какого дерева его запустили.
+    Старое место оставлено запасным: обновление не должно лишить голоса
+    установку, где переезд ещё не случился.
+    """
+    override = os.getenv("PIPER_VOICES_DIR", "")
+    if override:
+        return Path(override)
+    shared = Path.home() / ".nexsys" / "piper_voices"
+    if any(shared.glob("*.onnx")):
+        return shared
+    return Path(__file__).resolve().parents[2] / "voice_engine" / "piper_voices"
+
+
+PIPER_VOICES_DIR = _piper_voices_dir()
 
 # Отдельный процесс в своём venv (voice_engine/.venv) — держит модель в
 # памяти. Зависимости OmniVoice (torch, transformers, gradio) конфликтуют

@@ -68,7 +68,17 @@ async def say(req: SayRequest, _=Depends(auth)):
         # 503, а не 500: это не поломка, а «не настроено»
         raise HTTPException(status_code=503, detail=str(e))
 
-    return FileResponse(path, media_type="audio/mpeg", filename="voice.mp3")
+    # Тип берём из самого файла, а не зашиваем. «audio/mpeg + voice.mp3»
+    # осталось со времён edge-tts, а Piper (движок по умолчанию с
+    # 24.08.2026) отдаёт WAV — ответ врал про формат. Браузер это прощает,
+    # он нюхает содержимое; сохранённый файл получил бы неверное
+    # расширение. Замечено 25.08.2026 при переносе голосов.
+    wav = path.suffix.lower() == ".wav"
+    return FileResponse(
+        path,
+        media_type="audio/wav" if wav else "audio/mpeg",
+        filename="voice.wav" if wav else "voice.mp3",
+    )
 
 
 @router.get("/say-stream")
