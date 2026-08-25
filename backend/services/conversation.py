@@ -179,6 +179,16 @@ class ConversationService:
             self._spawn(self._remember(channel, user_id, text, skill_reply, "Skill"))
             return skill_reply
 
+        # Раньше _try_open: «включи музыку» при уже открытом плеере значит
+        # «продолжи», а не «открой вторую вкладку», и «выключи звук» не
+        # должно попадать в «включи/открой <цель>».
+        pc_reply = await self._try_pc(text, channel, user_id)
+        if pc_reply is not None:
+            self._emit_message(channel, "user", "Компьютер", text)
+            self._emit_message(channel, "assistant", "Компьютер", pc_reply)
+            await self._log_turn(channel, user_id, text, pc_reply, "Компьютер")
+            return pc_reply
+
         open_reply = await self._try_open(text)
         if open_reply is not None:
             self._emit_message(channel, "user", "Открыть", text)
@@ -288,6 +298,15 @@ class ConversationService:
             await self._log_turn(channel, user_id, text, skill_reply, "Skill")
             self._spawn(self._remember(channel, user_id, text, skill_reply, "Skill"))
             yield skill_reply
+            return
+
+        # Порядок тот же, что в handle() — см. пояснение там.
+        pc_reply = await self._try_pc(text, channel, user_id)
+        if pc_reply is not None:
+            self._emit_message(channel, "user", "Компьютер", text)
+            self._emit_message(channel, "assistant", "Компьютер", pc_reply)
+            await self._log_turn(channel, user_id, text, pc_reply, "Компьютер")
+            yield pc_reply
             return
 
         open_reply = await self._try_open(text)
@@ -690,6 +709,24 @@ class ConversationService:
             return None
         return await asyncio.to_thread(system_open.open_target, target)
 
+    async def _try_pc(self, text: str, channel: str, user_id: str) -> str | None:
+        """Команды компьютеру: плеер, громкость, окна, папки, питание.
+
+        Весь разбор — в services/pc_commands.py, здесь только вызов: этот
+        файл и так главное место конфликтов между параллельными сессиями
+        (CLAUDE.md), растить его сотнями строк регулярок нельзя.
+        """
+        from . import pc_commands
+
+        try:
+            return await pc_commands.try_command(text, confirm_key=f"{channel}:{user_id}")
+        except Exception as e:
+            # Голосовой канал не должен онеметь оттого, что WinRT или
+            # аудиоустройство ответили не так: команда не прошла — говорим
+            # об этом и живём дальше.
+            logger.exception("Команда компьютеру не выполнилась")
+            return f"Команда не выполнилась: {e}"
+
     async def _try_task(self, text: str) -> str | None:
         """Создаёт задачу по прямой команде. Не команда — возвращает None."""
         match = _TASK_TRIGGER.match(text)
@@ -860,7 +897,17 @@ class ConversationService:
 
         pending_action.clear(key)
         try:
-            if pending.kind == "click":
+            if pending.kind == "power":
+                # Сон/выключение/перезагрузка — единственное необратимое из
+                # команд компьютеру (services/pc_commands.py), поэтому идёт
+                # тем же путём, что рискованный клик: сюда доходит только
+                # после явного «подтверждаю».
+                from . import system_control
+
+                result = await asyncio.to_thread(
+                    system_control.power_confirmed, pending.payload["action"]
+                )
+            elif pending.kind == "click":
                 result = await asyncio.to_thread(
                     computer_use.click_confirmed,
                     pending.payload["x"],
