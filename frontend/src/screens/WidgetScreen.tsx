@@ -33,6 +33,7 @@ declare global {
       show: () => void;
       quit: () => void;
       contextMenu: () => void;
+      shortcut?: () => Promise<string>;
     };
   }
 }
@@ -58,6 +59,17 @@ export default function WidgetScreen() {
     },
   });
   const feed = useRef<HTMLDivElement>(null);
+
+  // Какое сочетание клавиш реально занято. Раньше в подписях стояло зашитое
+  // «Alt+J» — а оно, во-первых, умело только показать (не спрятать), и
+  // во-вторых, могло вообще не зарегистрироваться, если занято другой
+  // программой. Подпись обещала то, чего не происходило: жалоба фаундера
+  // 25.08.2026. Теперь спрашиваем у Electron правду.
+  const [shortcut, setShortcut] = useState<string | null>(null);
+
+  useEffect(() => {
+    window.nexusWidgetAPI?.shortcut?.().then(setShortcut).catch(() => setShortcut(''));
+  }, []);
 
   useEffect(() => {
     feed.current?.scrollTo({ top: feed.current.scrollHeight, behavior: 'smooth' });
@@ -100,8 +112,12 @@ export default function WidgetScreen() {
           onClick={hide}
           className="j-iconbtn"
           style={{ position: 'absolute', top: 6, right: 6, width: 24, height: 24, WebkitAppRegion: 'no-drag' } as any}
-          aria-label="Спрятать (вернуть — Alt+J)"
-          title="Спрятать. Вернуть: Alt+J из любой программы"
+          aria-label={shortcut ? `Спрятать (вернуть — ${shortcut})` : 'Спрятать'}
+          title={
+            shortcut
+              ? `Спрятать. ${shortcut} прячет и возвращает окно из любой программы`
+              : 'Спрятать. Вернуть можно голосом: «Джарвис, покажись»'
+          }
         >
           <X className="h-3.5 w-3.5" aria-hidden />
         </button>
@@ -220,9 +236,22 @@ export default function WidgetScreen() {
             {t('Скажи «Джарвис, покажись», если спрячу')}
           </p>
         )}
-        {isElectronWidget() && (
-          <p className="mt-1 truncate text-[10px]" style={{ color: 'var(--ink-dimmer)' }} title="Окно можно вернуть и без голоса — Alt+J работает из любой программы">
-            {t('Скрыл — верни Alt+J')}
+        {/* Подпись показывает то сочетание, которое Electron реально занял,
+            и молчит про клавиши, если не занял ни одного: обещать нерабочую
+            комбинацию хуже, чем не обещать ничего (жалоба 25.08.2026). */}
+        {isElectronWidget() && shortcut !== null && (
+          <p
+            className="mt-1 truncate text-[10px]"
+            style={{ color: 'var(--ink-dimmer)' }}
+            title={
+              shortcut
+                ? `${shortcut} прячет и возвращает окно из любой программы`
+                : 'Все сочетания заняты другими программами — окно возвращается голосом'
+            }
+          >
+            {shortcut
+              ? `${shortcut} — спрятать и вернуть`
+              : t('Сочетание занято — возвращай голосом')}
           </p>
         )}
       </div>

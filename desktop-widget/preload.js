@@ -12,4 +12,9 @@ contextBridge.exposeInMainWorld('nexusWidgetAPI', {
   show: () => ipcRenderer.send('widget:show'),
   quit: () => ipcRenderer.send('widget:quit'),
   contextMenu: () => ipcRenderer.send('widget:context-menu'),
+  // Какое сочетание клавиш реально занято (25.08.2026). Читать, а не
+  // зашивать в подписи: «Alt+J» могло не зарегистрироваться, и подпись
+  // обещала бы клавишу, которая ничего не делает — ровно на это фаундер и
+  // пожаловался.
+  shortcut: () => ipcRenderer.invoke('widget:shortcut'),
 });

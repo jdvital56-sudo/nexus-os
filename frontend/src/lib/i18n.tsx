@@ -53,6 +53,7 @@ const EN: Record<string, string> = {
     'Ask anything. It remembers past conversations and your notes.',
   'Сообщение…': 'Message…',
   'Отправить': 'Send',
+  'Сочетание занято — возвращай голосом': 'Hotkey taken — bring it back by voice',
   'персона по смыслу': 'persona by meaning',
   'думаю…': 'thinking…',
   'Ответ не пришёл.': 'No answer came back.',
