@@ -14,22 +14,39 @@
 import logging
 
 from ..core.config import settings
-from . import obsidian, obsidian_sync
+from . import graph_projector, memory_export, obsidian, obsidian_sync, vault_backup
 
 logger = logging.getLogger(__name__)
 
 
 async def tick() -> int:
-    """Догоняет хранилище. Возвращает, сколько заметок втянуто.
+    """Полный круг раз в час: память → хранилище → граф → GitHub.
 
-    Инкрементально: неизменившиеся файлы пропускаются по времени правки,
-    поэтому обычный тик стоит один обход каталога и ничего больше.
+    Цепочка из четырёх звеньев, и раньше автоматическим было ноль:
+    память копировали руками, синхронизацию жали руками, проекции не было
+    вовсе, отправку на GitHub тоже делали руками (последняя — 11.08.2026).
+    Порвись любое звено — фаундер теряет работу при смене компьютера.
+
+    Возвращает, сколько заметок втянуто в граф.
     """
     if not obsidian.is_configured():
         return 0
 
+    # 1. Свежая память в хранилище — иначе копия там устаревает в тот же день
+    try:
+        copied = memory_export.export_to_vault()
+        if copied:
+            logger.info("Память: обновлено %d файлов в хранилище", copied)
+    except Exception:
+        logger.exception("Не удалось обновить память в хранилище")
+
+    # 2. Хранилище в граф
+    imported = 0
     try:
         result = obsidian_sync.sync_vault(settings.obsidian_vault_path, incremental=True)
+        imported = int(result.get("imported", 0))
+        if imported:
+            logger.info("Obsidian: втянуто %d заметок, пропущено %d", imported, result.get("skipped", 0))
     except FileNotFoundError:
         # Папку унесли, переименовали или диск отключён — это не повод
         # ронять планировщик, в котором живут ночной прогон и напоминания.
@@ -37,13 +54,17 @@ async def tick() -> int:
         return 0
     except Exception:
         logger.exception("Синхронизация Obsidian сорвалась")
-        return 0
 
-    imported = int(result.get("imported", 0))
-    if imported:
-        logger.info(
-            "Obsidian: втянуто %d заметок, пропущено %d",
-            imported,
-            result.get("skipped", 0),
-        )
+    # 3. Остальные хранилища в граф — задачи, идеи, контент, память, подписки
+    try:
+        graph_projector.project_all()
+    except Exception:
+        logger.exception("Проекция хранилищ в граф сорвалась")
+
+    # 4. Отправка на GitHub — единственное, что переживёт смерть диска
+    try:
+        vault_backup.push()
+    except Exception:
+        logger.exception("Резервная копия хранилища не ушла")
+
     return imported

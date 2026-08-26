@@ -70,3 +70,53 @@ async def test_nothing_new_is_not_an_error(monkeypatch):
     )
 
     assert await obsidian_cadence.tick() == 0
+
+
+# === Заслон от утечки секретов при автоотправке ===
+
+def test_secret_scan_catches_real_keys():
+    from backend.services import vault_backup as vb
+
+    assert vb.find_secrets("ключ sk-abcdefghij0123456789xyz тут")
+    assert vb.find_secrets("AIzaSyA1234567890abcdefghijklmnopqrstu")
+    assert vb.find_secrets("token 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw")
+
+
+def test_secret_scan_ignores_variable_names():
+    """Имена переменных в памяти встречаются постоянно — это не секреты."""
+    from backend.services import vault_backup as vb
+
+    text = "Ключ лежит в .env под FAL_KEY, бот в TELEGRAM_BOT_TOKEN, DEEPSEEK_API_KEY"
+    assert vb.find_secrets(text) == []
+
+
+def test_secret_scan_does_not_echo_the_secret():
+    """Напечатать секрет в отчёте об утечке — это ещё одна утечка."""
+    from backend.services import vault_backup as vb
+
+    found = vb.find_secrets("sk-abcdefghij0123456789xyz")
+    assert found
+    assert "abcdefghij0123456789xyz" not in " ".join(found)
+
+
+def test_push_refuses_when_secret_found(monkeypatch):
+    from backend.services import vault_backup as vb
+
+    calls = []
+
+    def fake_git(*args):
+        calls.append(args)
+        import subprocess
+        out = ""
+        if args[0] == "status":
+            out = " M note.md"
+        elif args[0] == "diff":
+            out = "+ ключ sk-abcdefghij0123456789xyz"
+        return subprocess.CompletedProcess(args, 0, out, "")
+
+    monkeypatch.setattr(vb, "_git", fake_git)
+    monkeypatch.setattr(vb.settings, "obsidian_vault_path", "C:/vault", raising=False)
+
+    assert vb.push() is False
+    assert ("reset",) in calls          # снял со сцены
+    assert not any(a[0] == "push" for a in calls)   # и НЕ отправил
