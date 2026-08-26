@@ -454,6 +454,20 @@ class DreamCadence:
             replace_existing=True,
         )
 
+        # Obsidian → «Второй мозг»: раз в час догоняем заметки фаундера.
+        # Синхронизация была только по ручному нажатию, и последний раз её
+        # нажимали 12.08.2026 — граф отставал на две недели. Денег не стоит:
+        # чтение файлов и локальный теггер, без обращений к модели.
+        from ..services import obsidian_cadence
+
+        self.scheduler.add_job(
+            obsidian_cadence.tick,
+            trigger=IntervalTrigger(hours=1),
+            id="obsidian_sync",
+            name="Obsidian Vault Sync",
+            replace_existing=True,
+        )
+
         # Исследователь: утром приносит свежие темы по направлениям фаундера.
         # В 9:30, после проверки подписок — чтобы два утренних сообщения не
         # приходили одной пачкой и не читались как одно.

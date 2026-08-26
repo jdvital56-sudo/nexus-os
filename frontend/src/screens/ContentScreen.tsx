@@ -11,6 +11,7 @@ import {
   getContentItems,
   markContentPosted,
   rejectContent,
+  rewriteHook,
   scheduleContent,
   sendContentForApproval,
   setContentPlatforms,
@@ -238,6 +239,24 @@ export default function ContentScreen() {
 
         {open && (
           <div className="n-body" onClick={(e) => e.stopPropagation()}>
+            {/* Хук отдельно и первым: это те три секунды, на которых
+                решается, посмотрят остальное или пролистают. */}
+            <div>
+              <div className="n-label">Первые три секунды</div>
+              <p className="n-full" style={{ fontSize: '1rem' }}>
+                {item.hook || <span className="n-sub">хука нет — нажмите «другой хук»</span>}
+              </p>
+              <div className="n-actions" style={{ marginTop: 6 }}>
+                <button
+                  className="n-act"
+                  disabled={working}
+                  onClick={() => run(item.id, 'хук', () => rewriteHook(item.id))}
+                >
+                  {item.hook ? 'другой хук' : 'придумать хук'}
+                </button>
+              </div>
+            </div>
+
             <div>
               <div className="n-label">Сценарий</div>
               <p className="n-full">{item.script}</p>
