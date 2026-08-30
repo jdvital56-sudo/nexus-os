@@ -75,6 +75,24 @@ def download_image(item_id: str, _=Depends(_verify_query_token)):
     return FileResponse(path, filename=path.name)
 
 
+@router.post("/{item_id}/carousel", response_model=ContentItem)
+async def build_carousel(item_id: str, style: str | None = None, _=Depends(auth)):
+    """Собирает карусель из сценария. Рисование локальное, денег не стоит."""
+    import asyncio
+
+    # to_thread: отрисовка десяти слайдов 1080×1350 — это счёт на
+    # процессоре на пару сотен миллисекунд, и держать на нём event loop
+    # значит подвесить на это время весь бэкенд, включая голос.
+    return await asyncio.to_thread(svc.generate_carousel, item_id, style)
+
+
+@router.get("/{item_id}/carousel/{number}")
+def download_slide(item_id: str, number: int, _=Depends(_verify_query_token)):
+    """Один слайд по номеру — так его берёт <img> на странице контента."""
+    path = svc.carousel_slide_path(item_id, number)
+    return FileResponse(path, media_type="image/jpeg", filename=path.name)
+
+
 @router.post("/{item_id}/video", response_model=ContentItem)
 async def generate_video(item_id: str, prompt: str | None = None, _=Depends(auth)):
     return await svc.generate_video(item_id, prompt)

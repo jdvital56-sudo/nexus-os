@@ -3,7 +3,9 @@ import { Plus } from 'lucide-react';
 import {
   approveContent,
   contentImage,
+  contentCarousel,
   contentMediaUrl,
+  contentSlideUrl,
   contentVideo,
   contentVoice,
   createContentPlan,
@@ -261,6 +263,33 @@ export default function ContentScreen() {
               </div>
             )}
 
+            {/* Карусель показывается лентой в порядке слайдов — это и есть
+                то, что увидит человек в Instagram, листая пост. Одной
+                картинкой её показывать нельзя: порядок здесь несёт смысл. */}
+            {item.carousel_files?.length > 0 && (
+              <div>
+                <div className="n-label">Карусель — {item.carousel_files.length} слайдов</div>
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: 8,
+                    overflowX: 'auto',
+                    paddingBottom: 6,
+                    marginTop: 6,
+                  }}
+                >
+                  {item.carousel_files.map((_: string, i: number) => (
+                    <img
+                      key={i}
+                      src={contentSlideUrl(item.id, i + 1)}
+                      alt={`Слайд ${i + 1}`}
+                      style={{ width: 96, borderRadius: 8, flexShrink: 0 }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div>
               <div className="n-label">Сделать материалы</div>
               <div className="n-actions" style={{ marginTop: 6 }}>
@@ -272,6 +301,12 @@ export default function ContentScreen() {
                 </button>
                 <button className="n-act" disabled={working} onClick={() => run(item.id, 'видео', () => contentVideo(item.id))}>
                   {item.video_file ? 'новое видео' : 'видео'}
+                </button>
+                {/* Карусель рисуется локально: в отличие от картинки и видео
+                    она не ходит в fal.ai и не стоит денег — поэтому жать
+                    её можно сколько угодно раз. */}
+                <button className="n-act" disabled={working} onClick={() => run(item.id, 'карусель', () => contentCarousel(item.id))}>
+                  {item.carousel_files?.length ? 'пересобрать карусель' : 'карусель'}
                 </button>
               </div>
             </div>

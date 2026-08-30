@@ -259,6 +259,87 @@ async def generate_image(item_id: str, prompt: str | None = None) -> ContentItem
     return _set_field(item_id, "image_file", dest.name)
 
 
+def carousel_dir(item_id: str) -> Path:
+    """Своя папка на черновик: слайдов до десяти, и вперемешку с озвучкой и
+    видео в общей папке их было бы не разобрать ни глазом, ни кодом."""
+    path = _content_dir() / f"{item_id}-carousel"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def generate_carousel(item_id: str, style: str | None = None) -> ContentItem:
+    """Собирает карусель из сценария черновика: слайды рисуются локально.
+
+    Не async и без сети: рисование — счёт на процессоре, а не поход наружу
+    (почему не генерируем слайды моделью — в шапке services/carousel.py).
+    Ручка зовёт это через to_thread, чтобы не держать event loop.
+    """
+    from . import carousel as C
+
+    item = get_item(item_id)
+    if not item.script:
+        raise ValidationError("Нужен сценарий, чтобы собрать карусель")
+
+    chosen = style or item.carousel_style or C.DEFAULT_STYLE
+    if chosen not in C.STYLES:
+        raise ValidationError(
+            f"Неизвестный стиль «{chosen}». Есть: {', '.join(C.STYLES)}"
+        )
+
+    # Поле «хук» появилось в системе позже карусели — берём его мягко,
+    # чтобы код работал и на черновиках, созданных до него.
+    hook = (getattr(item, "hook", "") or "").strip()
+
+    deck = C.from_content(
+        topic=item.topic,
+        script=item.script,
+        hook=hook,
+        style=chosen,
+        handle=channel_handle(),
+        cover=C.cover_photo(),
+    )
+
+    out = carousel_dir(item_id)
+    # Прошлая сборка могла дать больше слайдов, чем новая: не убрав старые,
+    # получим карусель из смеси двух версий — на глаз это заметно не сразу.
+    for stale in out.glob("*.jpg"):
+        stale.unlink()
+
+    paths = C.render(deck, out, prefix="slide")
+    names = [p.name for p in paths]
+
+    items = _load()
+    for i in items:
+        if i["id"] == item_id:
+            i["carousel_files"] = names
+            i["carousel_style"] = chosen
+            i["updated_at"] = _now()
+            _save(items)
+            logger.info("Content Factory: карусель из %d слайдов для «%s»", len(names), item_id)
+            return ContentItem(**i)
+    raise NotFoundError("ContentItem", item_id)
+
+
+def channel_handle() -> str:
+    """Подпись канала в подвале слайда. Пусто — подвал остаётся без неё."""
+    import os
+
+    return os.getenv("NEXUS_CHANNEL_HANDLE", "").strip()
+
+
+def carousel_slide_path(item_id: str, number: int) -> Path:
+    """Путь к слайду по его номеру в карусели (с единицы, как на экране)."""
+    item = get_item(item_id)
+    if not item.carousel_files:
+        raise ValidationError(f"Карусель ещё не собрана для черновика «{item_id}»")
+    if not 1 <= number <= len(item.carousel_files):
+        raise NotFoundError("Слайд карусели", f"{item_id}#{number}")
+    path = carousel_dir(item_id) / item.carousel_files[number - 1]
+    if not path.is_file():
+        raise NotFoundError("Файл слайда", item.carousel_files[number - 1])
+    return path
+
+
 def image_file_path(item_id: str) -> Path:
     item = get_item(item_id)
     if not item.image_file:

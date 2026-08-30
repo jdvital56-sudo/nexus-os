@@ -302,6 +302,14 @@ export const contentMediaUrl = (id: string, kind: 'voice' | 'image' | 'video') =
   return authToken ? `${base}?token=${encodeURIComponent(authToken)}` : base;
 };
 
+export const contentCarousel = (id: string) => data<any>(api.post(`/content/${id}/carousel`));
+
+/** Слайд карусели по номеру, с единицы — как он подписан на самом слайде. */
+export const contentSlideUrl = (id: string, number: number) => {
+  const base = `${API_BASE_URL}/content/${id}/carousel/${number}`;
+  return authToken ? `${base}?token=${encodeURIComponent(authToken)}` : base;
+};
+
 // --- Документы ---
 export const getDocuments = () => data<any[]>(api.get('/documents'));
 export const createDocument = (payload: Record<string, any>) =>

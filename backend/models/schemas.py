@@ -162,6 +162,12 @@ class ContentItem(BaseModel):
     voice_file: str | None = None
     image_file: str | None = None
     video_file: str | None = None
+    # Карусель (25.08.2026) — список, а не одно поле: пост Instagram может
+    # нести до 10 карточек, и порядок в нём несёт смысл. Отдельно от
+    # image_file намеренно: одиночная картинка и карусель — разные форматы
+    # поста, а не одно и то же в разном количестве.
+    carousel_files: list[str] = Field(default_factory=list)
+    carousel_style: str = ""
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
