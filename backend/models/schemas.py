@@ -148,6 +148,10 @@ class ContentPlanRequest(BaseModel):
 class ContentItem(BaseModel):
     id: str
     topic: str
+    # Первые секунды, ради которых досматривают остальное. Отдельным полем,
+    # а не началом сценария: его видно, можно переписать одной кнопкой и
+    # сравнить варианты (роль «Автор хуков», подтверждена 24.08.2026).
+    hook: str = ""
     script: str
     caption: str = ""
     hashtags: list[str] = Field(default_factory=list)

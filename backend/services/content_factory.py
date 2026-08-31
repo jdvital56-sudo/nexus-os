@@ -135,8 +135,14 @@ async def generate_plan(
     prompt = (
         f"Придумай {count} коротких видео-сценария на тему «{topic}» "
         f"для площадок: {', '.join(platforms)}.\n"
+        "У каждого — хук: одна фраза на первые три секунды, ради которой "
+        "досмотрят остальное. Хук называет узнаваемую ситуацию или ломает "
+        "ожидание, а не объявляет тему. Плохо: «сегодня поговорим о том, как "
+        "мы отдаляемся». Хорошо: «Вы не ссоритесь. Вы просто перестали "
+        "рассказывать».\n"
         'Ответь ТОЛЬКО JSON-массивом объектов вида '
-        '{"script": "текст сценария для озвучки, 2-4 предложения", '
+        '{"hook": "фраза на первые три секунды", '
+        '"script": "текст сценария для озвучки, 2-4 предложения", '
         '"caption": "подпись к посту", "hashtags": ["тег1", "тег2"]}. '
         "Без пояснений вокруг JSON, без markdown-обрамления."
     )
@@ -149,6 +155,7 @@ async def generate_plan(
         item = ContentItem(
             id=str(uuid.uuid4())[:8],
             topic=topic,
+            hook=str(d.get("hook", "")).strip(),
             script=str(d.get("script", "")).strip(),
             caption=str(d.get("caption", "")).strip(),
             hashtags=[str(h) for h in d.get("hashtags", [])],
@@ -464,6 +471,58 @@ def set_platforms(item_id: str, platforms: list[str]) -> ContentItem:
 def mark_posted(item_id: str) -> ContentItem:
     """Фаундер опубликовал руками и отметил это в интерфейсе."""
     return set_status(item_id, ContentStatus.POSTED)
+
+
+async def rewrite_hook(item_id: str, llm=None) -> ContentItem:
+    """Автор хуков: переписывает первые три секунды отдельным проходом.
+
+    Хук приходит и вместе с планом — там он бесплатный довесок к общему
+    запросу. Но когда фаундер говорит «не цепляет», нужен вызов, где у
+    модели ровно одна задача и весь сценарий перед глазами: хук обязан
+    обещать то, что дальше действительно есть, иначе это обман зрителя.
+
+    Пустой ответ модели не затирает старый хук — лучше оставить прежний,
+    чем обнулить единственную строчку, ради которой посмотрят.
+    """
+    item = get_item(item_id)
+    material = item.script or item.caption or item.topic
+    if not material.strip():
+        raise ValidationError("Нечего цеплять: у черновика нет ни сценария, ни темы")
+
+    if llm is None:
+        from ..core.config import settings
+        from .llm import LLMService
+
+        llm = LLMService(
+            provider="deepseek", model="deepseek-chat", api_key=settings.deepseek_api_key
+        )
+
+    from . import budget
+
+    previous = f"Прежний хук: «{item.hook}». Не повторяй его.\n" if item.hook else ""
+    prompt = (
+        "Перепиши хук — первую фразу видео, ради которой досмотрят остальное.\n\n"
+        f"Тема: {item.topic}\n"
+        f"Сценарий: {item.script}\n"
+        f"{previous}\n"
+        "Хук называет узнаваемую ситуацию или ломает ожидание, а не "
+        "объявляет тему. Он обязан обещать ровно то, что есть в сценарии. "
+        "Одна фраза, до 12 слов, без эмодзи и без кавычек.\n"
+        'Ответь ТОЛЬКО JSON: {"hook": "..."}'
+    )
+    raw = await llm.generate_response(prompt, kind=budget.BACKGROUND, json_mode=True)
+
+    try:
+        data = llmjson.loads(raw)
+    except llmjson.LLMJsonError as e:
+        raise ValidationError(str(e)) from e
+
+    # Модель часто отвечает голой строкой вместо объекта — это тот же ответ
+    hook = (data if isinstance(data, str) else str(data.get("hook", ""))).strip()
+    if not hook:
+        raise ValidationError("Модель не предложила хук — прежний оставлен")
+
+    return _set_field(item_id, "hook", hook)
 
 
 def mark_reminded(item_id: str) -> ContentItem:

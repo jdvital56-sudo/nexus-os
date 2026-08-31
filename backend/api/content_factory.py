@@ -112,6 +112,12 @@ class PlatformsRequest(BaseModel):
     platforms: list[str]
 
 
+@router.post("/{item_id}/hook", response_model=ContentItem)
+async def rewrite_hook(item_id: str, _=Depends(auth)):
+    """Автор хуков: переписывает первые три секунды отдельным проходом."""
+    return await svc.rewrite_hook(item_id)
+
+
 @router.post("/{item_id}/schedule", response_model=ContentItem)
 def schedule(item_id: str, req: ScheduleRequest, _=Depends(auth)):
     return svc.schedule_item(item_id, req.scheduled_at)

@@ -276,6 +276,7 @@ export const getContentItems = (status?: string) =>
   data<any[]>(api.get('/content', { params: status ? { status } : {} }));
 export const createContentPlan = (payload: Record<string, any>) =>
   data<any[]>(api.post('/content/plan', payload));
+export const rewriteHook = (id: string) => data<any>(api.post(`/content/${id}/hook`));
 export const contentVoice = (id: string) => data<any>(api.post(`/content/${id}/voice`));
 export const contentImage = (id: string) => data<any>(api.post(`/content/${id}/image`));
 export const contentVideo = (id: string) => data<any>(api.post(`/content/${id}/video`));
