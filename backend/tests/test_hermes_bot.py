@@ -20,7 +20,13 @@ def agent():
     это лезет в сеть и к ключам. Нам нужны методы, а не окружение.
     """
     bot = object.__new__(HermesAgent)
-    bot.allowed_user_id = ""
+    # Хозяин задан — как в настоящей работе. Раньше здесь стояла пустая
+    # строка, и остальные тесты проходили только потому, что бот пускал
+    # всех подряд; после того как пустая настройка стала запирать бота
+    # (аудит 07.09.2026), фикстура обязана описывать рабочее состояние, а
+    # не то, которое считалось безопасным по недоразумению.
+    # id совпадает с умолчанием _update() ниже.
+    bot.allowed_user_id = "777"
     bot.conversation = SimpleNamespace(handle=AsyncMock(return_value="ответ"))
     return bot
 
@@ -84,9 +90,20 @@ def test_empty_input():
 # === Авторизация ===
 
 
-def test_without_restriction_everyone_passes(agent):
+def test_missing_setting_locks_the_bot_not_opens_it(agent, caplog):
+    """Раньше этот тест требовал обратного — «не настроено, значит всем
+    можно», — и закреплял дыру: бот в Telegram открыт всему интернету,
+    достаточно узнать его имя. Пустая настройка означает не «ограничений
+    нет», а «ограничения потеряны» (аудит 07.09.2026).
+
+    Теряется она тихо: .env пересоздали из .env.example, где поле пустое,
+    или перенесли проект на другую машину. Соседний crew/bot.py на этот же
+    случай отказывает всем — Гермес теперь ведёт себя так же.
+    """
     agent.allowed_user_id = ""
-    assert agent._authorize_user(12345) is True
+    with caplog.at_level("ERROR"):
+        assert agent._authorize_user(12345) is False
+    assert "TELEGRAM_ALLOWED_USER_ID" in caplog.text, "молчаливый отказ не отличить от поломки"
 
 
 def test_only_the_owner_passes(agent):

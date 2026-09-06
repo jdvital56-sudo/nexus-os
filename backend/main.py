@@ -140,12 +140,15 @@ async def startup():
     logger.info(f"Nexus OS v0.1.0 starting on {API_HOST}:{API_PORT}")
     logger.info(f"CORS allowed origins: {', '.join(CORS_ORIGINS)}")
     
-    # Only print token in development (check via environment)
-    import os
-    if os.getenv("NEXSYS_ENV", "development") == "development":
-        print(f"[Nexus OS] Auth token: {token}")
-    else:
-        print(f"[Nexus OS] Auth token initialized (check {DATA_DIR / 'auth.json'})")
+    # Токен не печатаем никогда. Раньше он уходил в консоль при каждом
+    # старте, потому что ветка «development» была умолчанием, а NEXSYS_ENV
+    # нигде не задан — то есть печатался всегда. Вместе с включённым по
+    # умолчанию LOG_FILE он оседал ещё и в ~/.nexsys/nexus.log, а логами
+    # принято делиться при разборе поломок: этим токеном открывается весь
+    # локальный API (аудит 07.09.2026).
+    #
+    # Терять его не страшно — он лежит в auth.json, и путь к файлу здесь же.
+    print(f"[Nexus OS] Auth token initialized (check {DATA_DIR / 'auth.json'})")
     
     print(f"[Nexus OS] API running at http://{API_HOST}:{API_PORT}")
     print(f"[Nexus OS] Docs available at http://{API_HOST}:{API_PORT}/api/docs")
