@@ -406,14 +406,29 @@ async def _web_search(ctx: ToolContext, args: dict) -> str:
 MAX_REDIRECTS = 5
 
 
-def _check_public_host(url: str) -> str:
-    """Отвергнуть адреса внутренней сети.
+def _resolve_public_address(url: str) -> tuple[str, str]:
+    """Проверить адрес и вернуть (имя хоста, ЗАКРЕПЛЁННЫЙ ip).
 
     Найдено аудитом: без этой проверки агент дотягивался до `127.0.0.1:8000` —
-    локального API Nexus OS, где нет авторизации и живут почта, кошелёк и
-    документы. Достаточно было строки на чужом сайте, которую агент принял
-    бы за подсказку. Второй сценарий той же дыры — вывод наружу: найденное
-    в своей же папке уезжает в query-параметре на чужой домен.
+    локального API Nexus OS, где живут почта, кошелёк и документы. Достаточно
+    было строки на чужом сайте, которую агент принял бы за подсказку. Второй
+    сценарий той же дыры — вывод наружу: найденное в своей же папке уезжает
+    в query-параметре на чужой домен.
+
+    **Почему возвращается именно IP, а не только имя** (07.09.2026). Раньше
+    функция проверяла имя и отдавала его обратно, а httpx резолвил это имя
+    ВТОРОЙ раз, уже сам, при установке соединения. Между двумя резолвами —
+    щель: домен атакующего с TTL=0 отвечает публичным адресом на проверку и
+    `127.0.0.1` на соединение (DNS rebinding). Проверка честно проходит,
+    запрос уходит во внутреннюю сеть.
+
+    Это не теория — воспроизведено на стенде: проверка сказала «публичный»,
+    запрос пришёл на локальный сервер, и его содержимое вернулось агенту.
+    Поэтому адрес, который проверили, и адрес, на который соединяются,
+    теперь обязаны быть одним и тем же объектом, а не одним именем.
+
+    Проверяются ВСЕ адреса имени, а не первый: домен может отдавать вперемешку
+    публичный и внутренний, и «повезло на первом» — не защита.
     """
     import ipaddress
     import socket
@@ -429,6 +444,8 @@ def _check_public_host(url: str) -> str:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as exc:
         raise ValueError(f"Не удалось разрешить имя {host}: {exc}") from exc
+
+    addresses = []
     for info in infos:
         address = ipaddress.ip_address(info[4][0])
         if (
@@ -442,7 +459,16 @@ def _check_public_host(url: str) -> str:
                 f"Адрес {host} ведёт во внутреннюю сеть ({address}). "
                 "Агент ходит только в публичный интернет."
             )
-    return host
+        addresses.append(address)
+
+    if not addresses:
+        raise ValueError(f"Имя {host} не дало ни одного адреса.")
+    return host, str(addresses[0])
+
+
+def _check_public_host(url: str) -> str:
+    """Только проверка, без закрепления адреса. Бросает ValueError."""
+    return _resolve_public_address(url)[0]
 
 
 async def _fetch_url(ctx: ToolContext, args: dict) -> str:
@@ -455,18 +481,46 @@ async def _fetch_url(ctx: ToolContext, args: dict) -> str:
     async with httpx.AsyncClient(timeout=45.0, follow_redirects=False) as client:
         for _ in range(MAX_REDIRECTS):
             try:
-                _check_public_host(url)
+                host, pinned_ip = _resolve_public_address(url)
             except ValueError as bad:
                 return f"Адрес отклонён: {bad}"
-            response = await client.get(
-                url, headers={"User-Agent": "Mozilla/5.0 NexusCrew/1.0"}
-            )
+
+            # Соединяемся по ПРОВЕРЕННОМУ адресу, а не по имени: иначе httpx
+            # резолвил бы имя заново и мог получить другой ответ (см. шапку
+            # _resolve_public_address про DNS rebinding). Имя при этом не
+            # теряется — уходит в заголовок Host, чтобы сайт отдал нужный
+            # виртуальный хост, и в sni_hostname, чтобы TLS-сертификат
+            # проверялся против настоящего домена, а не против цифр IP.
+            logical = httpx.URL(url)
+            try:
+                response = await client.get(
+                    logical.copy_with(host=pinned_ip),
+                    headers={
+                        "User-Agent": "Mozilla/5.0 NexusCrew/1.0",
+                        "Host": logical.netloc.decode("ascii"),
+                    },
+                    extensions={"sni_hostname": host},
+                )
+            except httpx.HTTPError as network:
+                # Сайт лежит, имя не отвечает, сертификат не сошёлся — это
+                # обычный исход похода в интернет, а не поломка инструмента.
+                # Раньше исключение улетало наружу: агент не мог ни объяснить
+                # человеку, что случилось, ни попробовать другой адрес.
+                # Стало заметно после закрепления адреса (07.09.2026):
+                # недоступный проверенный IP — теперь штатная ситуация.
+                return f"Не удалось открыть {url}: {type(network).__name__} — {network}"
             if response.is_redirect and response.headers.get("location"):
-                url = str(response.next_request.url) if response.next_request else ""
-                if not url:
-                    return "Сайт перенаправил в никуда."
+                # Считаем следующий адрес от ЛОГИЧЕСКОГО, а не от того, что
+                # с подставленным IP: относительный Location вида `/next`
+                # иначе привязался бы к цифрам, и на следующем витке мы
+                # потеряли бы имя для Host и сертификата.
+                url = str(logical.join(response.headers["location"]))
                 continue
-            response.raise_for_status()
+            if response.is_error:
+                # 404 и 500 — тоже обычный ответ интернета. `raise_for_status()`
+                # здесь бросал исключение мимо агента, ровно как сетевая
+                # ошибка выше.
+                return f"Сайт ответил {response.status_code} на {url}."
             text = response.text
             break
         else:
