@@ -52,6 +52,22 @@ function Start-Voice {
         -RedirectStandardError "$root\piper_server_stderr.log"
 }
 
+# Слово-будильник «Джарвис» (Vosk, офлайн). До 07.09.2026 сюда намеренно
+# не входил: держит микрофон открытым круглосуточно, и фаундер должен был
+# решить это сам, а не получить молча. Решил - включаем.
+#
+# Условие, на котором включили: сервер больше не пишет распознанную речь в
+# лог. За две с половиной недели туда осело 3580 расшифровок обычным
+# текстом - побочный след отладки, а не задуманное хранилище. См.
+# wakeword/server.py, _recognize_loop.
+function Start-Wakeword {
+    Start-Process -FilePath "$root\.venv\Scripts\python.exe" `
+        -ArgumentList "wakeword\server.py" `
+        -WorkingDirectory $root -WindowStyle Hidden `
+        -RedirectStandardOutput "$root\wakeword\wakeword_stdout.log" `
+        -RedirectStandardError "$root\wakeword\wakeword_stderr.log"
+}
+
 # У бота нет своего порта - присматриваем по процессу, не по сети
 function Test-Bot {
     (Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
@@ -65,6 +81,7 @@ while ($true) {
     if (-not (Test-Bot)) { Start-Bot }
     if (-not (Test-Port 5173)) { Start-Frontend }
     if (-not (Test-Port 8424)) { Start-Voice }
+    if (-not (Test-Port 8422)) { Start-Wakeword }
     Start-Sleep -Seconds $checkEverySeconds
 }
 

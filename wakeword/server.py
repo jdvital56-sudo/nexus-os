@@ -30,6 +30,7 @@ import asyncio
 import ctypes
 import json
 import logging
+import os
 import queue
 import sys
 from pathlib import Path
@@ -43,7 +44,28 @@ logger = logging.getLogger("wakeword")
 
 SetLogLevel(-1)  # Vosk-овский C++ лог очень болтливый, глушим
 
-MODEL_DIR = Path(__file__).parent / "model"
+def _model_dir() -> Path:
+    """Где лежит модель Vosk.
+
+    Порядок тот же и по той же причине, что у голосов Piper (см.
+    `voice_engine/piper_server.py`): модель на 88 МБ — машинные данные, а не
+    код проекта. Рабочих деревьев на этом репозитории бывает несколько, и
+    копия модели в каждом не нужна никому; запущенный из дерева сервер
+    молча не находил модель и не поднимался вовсе (07.09.2026).
+
+    Папка рядом со скриптом остаётся запасной: там модель лежала раньше, и
+    обновление не должно лишать будильника установку, где переезда не было.
+    """
+    override = os.getenv("VOSK_MODEL_DIR", "")
+    if override:
+        return Path(override)
+    shared = Path.home() / ".nexsys" / "vosk_model"
+    if shared.is_dir():
+        return shared
+    return Path(__file__).parent / "model"
+
+
+MODEL_DIR = _model_dir()
 SAMPLE_RATE = 16000
 PORT = 8422
 
@@ -96,7 +118,20 @@ async def _recognize_loop(model: Model) -> None:
             result = json.loads(rec.Result())
             text = (result.get("text") or "").strip()
             if text:
-                logger.info("финал: %s", text)
+                # Саму речь в лог НЕ пишем. Раньше здесь стояло
+                # `logger.info("финал: %s", text)`, и за две с половиной
+                # недели в wakeword_stderr.log осело 3580 расшифровок — 320 КБ
+                # всего, что говорилось возле компьютера, обычным текстом и
+                # навсегда. Это не было задумано: логи микрофона писались в
+                # stderr как отладка, а превратились в бессрочную запись
+                # разговоров. Фаундер согласился убрать 07.09.2026, когда
+                # будильник включали в автозапуск.
+                #
+                # Диагностику это не ломает: чтобы понять «слышит ли он
+                # вообще», достаточно знать, что распознавание случилось и
+                # какой длины фраза. Что именно сказано — знает клиент,
+                # которому текст и уходит.
+                logger.info("распознано, символов: %d", len(text))
                 await _broadcast({"type": "final", "text": text})
         else:
             partial = json.loads(rec.PartialResult())
