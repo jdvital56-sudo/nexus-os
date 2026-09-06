@@ -388,15 +388,24 @@ class DreamCadence:
         for s in summary["low_balance"]:
             alerts.append(f"🪫 {s['name']}: остаток ${s['balance']} — пора пополнить")
 
-        if not alerts:
-            return
-
-        text = "Напоминание по сервисам:\n\n" + "\n\n".join(alerts)
-        eventbus.emit(
-            "wallet.alert",
-            {"count": len(alerts), "services": [s["name"] for s in summary["due_soon"]]},
-            source=eventbus.SOURCE_SYSTEM,
-        )
+        # Раньше здесь стояло `if not alerts: return`, и фаундер не получал
+        # НИЧЕГО. Тревоги честно молчали: «скоро спишется» пусто, потому что
+        # дата списания указана только у ежемесячных подписок, а единственную
+        # такую он отменил; «низкий баланс» пусто, потому что порог считается
+        # долей от суммы пополнения и для DeepSeek выходит ниже остатка.
+        # Снаружи это неотличимо от сломанного напоминания — он две недели
+        # был уверен, что функция не работает (сказал прямо 06.09.2026).
+        #
+        # Поэтому сводка уходит ВСЕГДА: она показывает все подписки как есть,
+        # а тревожные помечает ⚠️. Пустое сообщение хуже лишнего: молчание
+        # системы нельзя отличить от её поломки.
+        text = wallet.digest_text()
+        if alerts:
+            eventbus.emit(
+                "wallet.alert",
+                {"count": len(alerts), "services": [s["name"] for s in summary["due_soon"]]},
+                source=eventbus.SOURCE_SYSTEM,
+            )
         await self.send_brief_to_telegram(text)
 
     def start(self):
@@ -492,6 +501,23 @@ class DreamCadence:
             trigger=IntervalTrigger(minutes=5),
             id="content_reminder",
             name="Content Publish Reminder",
+            replace_existing=True,
+        )
+
+        # Сторож репозиториев: раз в сутки смотрит, не лежит ли работа
+        # незакоммиченной и неотправленной. Повод — потеря 11 дней работы
+        # (07.09.2026): фаундер был уверен, что репозиторий обновляется сам,
+        # а автоотправки кода не существовало. Автокоммита здесь намеренно
+        # нет, только глаза — см. шапку services/repo_watch.py.
+        # В 10:00, после подписок и Исследователя: три утренних сообщения
+        # подряд слились бы в одно и половина осталась бы непрочитанной.
+        from ..services import repo_watch
+
+        self.scheduler.add_job(
+            repo_watch.tick,
+            trigger=CronTrigger(hour=10, minute=0),
+            id="repo_watch",
+            name="Uncommitted Work Watch",
             replace_existing=True,
         )
 

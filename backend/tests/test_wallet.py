@@ -244,3 +244,87 @@ def test_api_summary_warns_about_upcoming(client):
 def test_api_rejects_duplicate(client):
     client.post("/api/wallet", json={"name": "Figma"})
     assert client.post("/api/wallet", json={"name": "figma"}).status_code == 400
+
+
+# === Ежедневное напоминание в Telegram (07.09.2026) ========================
+#
+# Раньше `wallet_job` выходил молча, если тревог не было, и фаундер две
+# недели был уверен, что напоминания сломаны. Тревоги при этом честно
+# молчали: дата списания указана только у ежемесячных подписок, а порог
+# низкого баланса для DeepSeek выходит ниже остатка.
+#
+# Правило CLAUDE.md про обе стороны: рядом с «теперь пишет всегда» обязано
+# стоять «тревога по-прежнему объявляется». Иначе следующая правка вернёт
+# либо молчание, либо потерю сигнала о списании.
+
+
+@pytest.mark.asyncio
+async def test_daily_message_is_sent_even_without_alerts(monkeypatch):
+    """Молчание системы неотличимо от её поломки. Сводка уходит всегда."""
+    from backend.agents import dream_cadence
+    from backend.services import wallet as wallet_svc
+
+    async def no_refresh():
+        return {}
+
+    monkeypatch.setattr(wallet_svc, "refresh_balances", no_refresh)
+    monkeypatch.setattr(
+        wallet_svc, "summary", lambda: {"due_soon": [], "low_balance": [],
+                                        "monthly_total_usd": 0,
+                                        "prepaid": {"total": 0, "known": [], "unknown": []}}
+    )
+    monkeypatch.setattr(wallet_svc, "digest_text", lambda: "💳 Подписки — 3 активных")
+
+    sent = []
+    agent = dream_cadence.DreamCadence.__new__(dream_cadence.DreamCadence)
+
+    async def fake_send(self, text):
+        sent.append(text)
+
+    monkeypatch.setattr(dream_cadence.DreamCadence, "send_brief_to_telegram", fake_send)
+    await dream_cadence.DreamCadence.wallet_job(agent)
+
+    assert sent, "без тревог сообщение всё равно должно уйти"
+    assert "Подписки" in sent[0]
+
+
+@pytest.mark.asyncio
+async def test_alert_event_still_fires(monkeypatch):
+    """Обратная сторона: сигнал о скором списании не должен потеряться."""
+    from backend.agents import dream_cadence
+    from backend.core import eventbus
+    from backend.services import wallet as wallet_svc
+
+    async def no_refresh():
+        return {}
+
+    monkeypatch.setattr(wallet_svc, "refresh_balances", no_refresh)
+    monkeypatch.setattr(
+        wallet_svc,
+        "summary",
+        lambda: {
+            "due_soon": [{"name": "Hetzner", "days_left": 0, "cost": 10.09, "cancel_url": ""}],
+            "low_balance": [],
+            "monthly_total_usd": 10.09,
+            "prepaid": {"total": 0, "known": [], "unknown": []},
+        },
+    )
+    monkeypatch.setattr(wallet_svc, "digest_text", lambda: "⚠️ Hetzner")
+
+    events = []
+    monkeypatch.setattr(
+        eventbus, "emit", lambda name, payload, source=None: events.append((name, payload))
+    )
+    monkeypatch.setattr(
+        dream_cadence.DreamCadence, "send_brief_to_telegram",
+        lambda self, text: _noop(),
+    )
+
+    agent = dream_cadence.DreamCadence.__new__(dream_cadence.DreamCadence)
+    await dream_cadence.DreamCadence.wallet_job(agent)
+
+    assert ("wallet.alert", {"count": 1, "services": ["Hetzner"]}) in events
+
+
+async def _noop():
+    return None
