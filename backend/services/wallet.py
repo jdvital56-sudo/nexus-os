@@ -305,6 +305,79 @@ def prepaid_balance(currency: str = "USD") -> dict:
     return {"total": round(total, 2), "known": known, "unknown": unknown}
 
 
+def digest_text() -> str:
+    """Готовый текст сводки по ВСЕМ активным подпискам — для Telegram.
+
+    24.08.2026, прямая просьба фаундера: «сделай напоминание в телеграм,
+    причём всех подписок». Ежедневные тревоги (wallet_job) у него уже
+    были, но по факту молчали: «скоро спишется» пусто, потому что дата
+    указана только у ежемесячных, а он отменил единственную такую;
+    «низкий баланс» пусто, потому что порог считается долей от суммы
+    пополнения и для DeepSeek выходит $1.00 при остатке $1.94. Тревоги
+    честные, но человек не видит вообще ничего и думает, что напоминаний
+    нет. Сводка показывает всё как есть, тревога там или нет.
+    """
+    active = list_services()
+    if not active:
+        return "Активных подписок нет."
+
+    s = summary()
+    lines = [f"💳 Подписки — {len(active)} активных"]
+
+    monthly = s["monthly_total_usd"]
+    if monthly:
+        lines.append(f"Уходит в месяц: ${monthly}")
+
+    prepaid = s["prepaid"]
+    if prepaid["known"]:
+        lines.append(f"На предоплаченных счетах: ${prepaid['total']}")
+    if prepaid["unknown"]:
+        lines.append(f"Баланс неизвестен: {', '.join(prepaid['unknown'])}")
+
+    lines.append("")
+    alarming = {x["name"] for x in s["low_balance"]} | {x["name"] for x in s["due_soon"]}
+    for item in sorted(active, key=lambda x: x["name"].lower()):
+        mark = "⚠️ " if item["name"] in alarming else "· "
+        parts = [f"{mark}{item['name']}"]
+
+        if item["period"] == PERIOD_PREPAID:
+            balance = item.get("balance")
+            parts.append(f"остаток ${balance}" if balance is not None else "остаток неизвестен")
+        else:
+            parts.append(f"${item['cost']}/{item['period']}")
+
+        days = _days_until(item.get("next_charge"))
+        if days is not None:
+            parts.append("списание сегодня" if days == 0 else (
+                f"списание через {days} дн." if days > 0 else f"просрочено {-days} дн."
+            ))
+        lines.append(": ".join([parts[0], ", ".join(parts[1:])]) if len(parts) > 1 else parts[0])
+
+    stale = [x["name"] for x in active
+             if x["period"] == PERIOD_PREPAID and x.get("balance") is not None
+             and _days_since(x.get("balance_checked_at")) is not None
+             and _days_since(x.get("balance_checked_at")) > 7]
+    if stale:
+        lines.append("")
+        lines.append(f"Цифры не обновлялись больше недели: {', '.join(stale)}")
+
+    return "\n".join(lines)
+
+
+def _days_since(value: str | None) -> int | None:
+    """Сколько дней прошло с даты. Нужен, чтобы отличать свежую цифру
+    баланса от той, что вписали месяц назад и забыли."""
+    if not value:
+        return None
+    try:
+        when = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - when).days
+
+
 def summary() -> dict:
     """Сводка для экрана и для утреннего брифа."""
     active = list_services()

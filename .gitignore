@@ -87,3 +87,9 @@ google_token.json
 # (см. voice_engine/piper_voices/README.md). В git им делать нечего.
 voice_engine/piper_voices/*.onnx
 voice_engine/piper_voices/*.onnx.json
+
+# Graphify — граф кода (~9 МБ, генерируется из graphify update). Тест до 2026-09-03.
+graphify-out/
+
+# Песочницы продакшн-команды: рабочие файлы агентов, не исходники
+crew_workspaces/
