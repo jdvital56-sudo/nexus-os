@@ -88,3 +88,8 @@ pytest-cov==6.0.0
 # ruff==0.9.6
 # black==25.1.0
 # mypy==1.15.0
+
+# Доверять хранилищу сертификатов Windows: на машине фаундера Avast
+# перехватывает TLS, и бандла certifi недостаточно — любой HTTPS из
+# Python падает с CERTIFICATE_VERIFY_FAILED.
+truststore>=0.9

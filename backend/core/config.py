@@ -9,6 +9,26 @@ from pydantic import BaseModel
 # класса, поэтому .env, загруженный ниже по файлу, туда уже не попадёт.
 load_dotenv()
 
+# Доверять хранилищу сертификатов Windows, а не только бандлу `certifi`.
+#
+# Найдено проверкой 06.09.2026: на машине фаундера Avast перехватывает TLS и
+# подменяет сертификаты своим корнем «Avast Web/Mail Shield Root». Корень
+# лежит в хранилище Windows, поэтому браузер и curl работают, а Python — нет:
+# у него свой бандл, и падало ВСЁ разом — fal.ai, Firecrawl, ElevenLabs,
+# Google OAuth, api.deepseek.com и даже api.telegram.org, то есть сам Hermes.
+#
+# Файл выбран как точка входа потому, что его импортируют и `hermes/bot.py`,
+# и все сервисы: одно место вместо тридцати.
+#
+# Отключать проверку (`verify=False`) вместо этого нельзя — это сняло бы
+# защиту от подмены на всех вызовах, включая платные и с ключами.
+try:
+    import truststore
+
+    truststore.inject_into_ssl()
+except ImportError:  # на машине без перехвата TLS пакет не нужен
+    pass
+
 
 def env_any(*names: str, default: str = "") -> str:
     """Первое непустое значение из нескольких имён переменной.
