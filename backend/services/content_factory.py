@@ -132,8 +132,16 @@ async def generate_plan(
 
     from . import budget
 
+    from . import channels
+
+    # Голос канала идёт ПЕРЕД заданием, а не после: модель сильнее держится
+    # за начало промпта, а тон и запреты здесь важнее формата ответа —
+    # неверный формат виден сразу и чинится, а сорвавшийся тон проходит
+    # ревью незамеченным и выходит в ленту.
+    voice = channels.current().voice
     prompt = (
-        f"Придумай {count} коротких видео-сценария на тему «{topic}» "
+        (f"{voice}\n\n" if voice else "")
+        + f"Придумай {count} коротких видео-сценария на тему «{topic}» "
         f"для площадок: {', '.join(platforms)}.\n"
         "У каждого — хук: одна фраза на первые три секунды, ради которой "
         "досмотрят остальное. Хук называет узнаваемую ситуацию или ломает "
@@ -266,6 +274,76 @@ async def generate_image(item_id: str, prompt: str | None = None) -> ContentItem
     return _set_field(item_id, "image_file", dest.name)
 
 
+def cover_source_path(item_id: str) -> Path:
+    """Сгенерированный фон обложки карусели для конкретного черновика.
+
+    Лежит НЕ в папке карусели намеренно: перед каждой сборкой
+    `generate_carousel` вычищает оттуда все `*.jpg`, и фон исчезал бы вместе
+    со слайдами прошлой версии — а платили мы за него один раз.
+    """
+    return _content_dir() / f"{item_id}-cover.jpg"
+
+
+async def generate_carousel_cover(item_id: str, prompt: str | None = None) -> Path:
+    """Рисует фон обложки на fal.ai. Буквы на него кладёт Pillow, не модель.
+
+    Разделение принципиальное, а не техническое: диффузионные модели пишут
+    кириллицу с ошибками всегда — это не лечится промптом. Поэтому модель
+    рисует кадр БЕЗ единой буквы (запрет вшит в `cover_prompt` профиля), а
+    заголовок поверх рисует карусель — тем же кеглем и тем же шрифтом, что
+    и на остальных слайдах.
+
+    Один фон на карусель, а не на каждый слайд: восемь генераций на пост —
+    это тридцать в неделю за то, что пролистывают за секунду. Решает
+    обложка, дальше работает текст.
+    """
+    from . import channels
+
+    item = get_item(item_id)
+    channel = channels.current()
+    prompt = (prompt or channel.cover_prompt).strip()
+    if not prompt:
+        raise ValidationError(
+            f"У канала «{channel.label}» не задан фон обложки — генерировать нечего"
+        )
+
+    headers = _fal_headers()
+    dest = cover_source_path(item_id)
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            f"https://fal.run/{FAL_IMAGE_MODEL}",
+            headers=headers,
+            # portrait_4_3, а не portrait_16_9 как у картинки поста: слайд
+            # карусели 1080x1350, и узкий кадр пришлось бы обрезать по краям
+            # ровно там, где у кадра обычно смысл.
+            json={"prompt": prompt, "image_size": "portrait_4_3"},
+        )
+        resp.raise_for_status()
+        images = resp.json().get("images") or []
+        if not images:
+            raise ValidationError("fal.ai не вернул картинку для обложки")
+        await _fal_download(client, images[0]["url"], dest)
+
+    logger.info("Content Factory: фон обложки готов для «%s» (%s)", item_id, item.topic)
+    return dest
+
+
+def _cover_for(item_id: str) -> Path | None:
+    """Что положить под заголовок обложки: свой фон, портрет ведущей или ничего.
+
+    Отсутствие фона — не ошибка и не повод отказаться собирать карусель:
+    обложка тогда остаётся типографской. Один непришедший файл не должен
+    останавливать весь пост.
+    """
+    from . import carousel as C
+
+    generated = cover_source_path(item_id)
+    if generated.is_file():
+        return generated
+    return C.cover_photo()
+
+
 def carousel_dir(item_id: str) -> Path:
     """Своя папка на черновик: слайдов до десяти, и вперемешку с озвучкой и
     видео в общей папке их было бы не разобрать ни глазом, ни кодом."""
@@ -287,7 +365,11 @@ def generate_carousel(item_id: str, style: str | None = None) -> ContentItem:
     if not item.script:
         raise ValidationError("Нужен сценарий, чтобы собрать карусель")
 
-    chosen = style or item.carousel_style or C.DEFAULT_STYLE
+    from . import channels
+
+    # Стиль по умолчанию берётся у канала, а не глобальной константой:
+    # иначе второй канал молча выходит в фирменных цветах первого.
+    chosen = style or item.carousel_style or channels.current().carousel_style
     if chosen not in C.STYLES:
         raise ValidationError(
             f"Неизвестный стиль «{chosen}». Есть: {', '.join(C.STYLES)}"
@@ -303,7 +385,10 @@ def generate_carousel(item_id: str, style: str | None = None) -> ContentItem:
         hook=hook,
         style=chosen,
         handle=channel_handle(),
-        cover=C.cover_photo(),
+        # Сгенерированный фон этого черновика главнее портрета ведущей:
+        # у канала с ведущей в кадре его просто не бывает, а у анонимного
+        # канала портрета не бывает вовсе (carousel.cover_photo вернёт None).
+        cover=_cover_for(item_id),
     )
 
     out = carousel_dir(item_id)
@@ -328,10 +413,15 @@ def generate_carousel(item_id: str, style: str | None = None) -> ContentItem:
 
 
 def channel_handle() -> str:
-    """Подпись канала в подвале слайда. Пусто — подвал остаётся без неё."""
-    import os
+    """Подпись канала в подвале слайда. Пусто — подвал остаётся без неё.
 
-    return os.getenv("NEXUS_CHANNEL_HANDLE", "").strip()
+    Логика переехала в services/channels.py, когда каналов стало два.
+    Переменная NEXUS_CHANNEL_HANDLE по-прежнему главнее профиля — на
+    «Точке опоры» хэндл живёт в ней с самого начала.
+    """
+    from . import channels
+
+    return channels.handle()
 
 
 def carousel_slide_path(item_id: str, number: int) -> Path:
