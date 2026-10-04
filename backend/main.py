@@ -25,6 +25,9 @@ if LOG_FILE:
     logging.basicConfig(**log_config)
 else:
     logging.basicConfig(**log_config)
+# httpx пишет в INFO полный URL запроса, а в нём токен бота (telegram_notify)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 

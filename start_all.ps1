@@ -74,11 +74,33 @@ function Test-Bot {
         Where-Object { $_.CommandLine -like '*hermes\bot.py*' }) -ne $null
 }
 
+# Продакшн-команда: семь Telegram-агентов из пакета crew (06.09.2026).
+# Поднимается здесь по той же причине, что и остальные: без присмотра
+# процесс живёт до первой сетевой ошибки, а молчащий бот выглядит как
+# сломанная система, хотя сломан только процесс.
+#
+# Если ни одного токена в crew.env нет, процесс сам завершится с понятным
+# сообщением в лог - сторож попробует снова через две минуты и снова
+# запишет то же самое. Это дешевле, чем молчание.
+function Start-Crew {
+    Start-Process -FilePath "$root\.venv\Scripts\python.exe" `
+        -ArgumentList "-m","crew.bot" `
+        -WorkingDirectory $root -WindowStyle Hidden `
+        -RedirectStandardOutput "$root\crew_stdout.log" `
+        -RedirectStandardError "$root\crew_stderr.log"
+}
+
+function Test-Crew {
+    (Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like '*crew.bot*' }) -ne $null
+}
+
 Start-Sleep -Seconds 10  # дать сети и диску подняться после логина
 
 while ($true) {
     if (-not (Test-Port 8420)) { Start-Backend; Start-Sleep -Seconds 5 }
     if (-not (Test-Bot)) { Start-Bot }
+    if (-not (Test-Crew)) { Start-Crew }
     if (-not (Test-Port 5173)) { Start-Frontend }
     if (-not (Test-Port 8424)) { Start-Voice }
     if (-not (Test-Port 8422)) { Start-Wakeword }
