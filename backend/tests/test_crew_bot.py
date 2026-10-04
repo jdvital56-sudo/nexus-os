@@ -139,3 +139,33 @@ def test_every_role_has_a_distinct_token_variable():
     names = [role.env_token for role in config.ROLES]
     assert all(names), "у роли не задано имя переменной с токеном"
     assert len(names) == len(set(names)), "две роли читают один и тот же токен"
+
+
+# --- логи не должны хранить токены -----------------------------------------
+
+@pytest.fixture
+def clean_logging():
+    """Сохранить и вернуть состояние логгеров после теста."""
+    import logging
+
+    root = logging.getLogger()
+    saved = (root.handlers[:], root.level)
+    saved_levels = {n: logging.getLogger(n).level for n in ("httpx", "httpcore")}
+    yield
+    root.handlers[:] = saved[0]
+    root.setLevel(saved[1])
+    for name, level in saved_levels.items():
+        logging.getLogger(name).setLevel(level)
+
+
+def test_httpx_request_urls_with_token_are_not_logged(clean_logging):
+    import logging
+
+    # pytest вешает свои обработчики на root уже после фикстур, а при
+    # непустом root basicConfig молча ничего не делает — чистим здесь
+    logging.getLogger().handlers.clear()
+    bot.setup_logging()
+    assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+    assert logging.getLogger("httpcore").getEffectiveLevel() >= logging.WARNING
+    # и в обратную сторону: свои INFO-строки бот писать не перестал
+    assert logging.getLogger("crew.bot").isEnabledFor(logging.INFO)

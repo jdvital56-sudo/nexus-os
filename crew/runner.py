@@ -25,7 +25,7 @@ from typing import Awaitable, Callable
 
 import httpx
 
-from . import config, handoff, prompts
+from . import config, handoff, lessons, prompts
 from .tools import ToolContext, execute, specs_for
 from .workspace import Workspace
 
@@ -67,7 +67,9 @@ _DEFAULT_BASE = {
 }
 
 _DEFAULT_MODEL = {
-    "deepseek": "deepseek-chat",
+    # Имя по официальной документации (сверено 24.09.2026). Старое
+    # deepseek-chat пока принимается, но это наследие, а не обещание.
+    "deepseek": "deepseek-flash",
     "openai": "gpt-4o-mini",
     "ollama": "llama3.1:8b",
 }
@@ -128,6 +130,53 @@ def check_engine(llm) -> None:
             "DEEPSEEK_API_KEY или OPENAI_API_KEY."
         )
 
+# Повторы при обрыве связи. Живой прогон 24.09 поймал обрыв интернета
+# посреди работы: одна секунда без сети — и бот отвечал «модель
+# недоступна», хотя через десять секунд всё вернулось. Для системы,
+# которая работает без присмотра, это недопустимо. Паузы растут: сеть,
+# которая не вернулась за 2 секунды, редко возвращается через 3.
+RETRY_DELAYS = (2.0, 5.0, 10.0, 20.0)
+
+# Ответы сервера, после которых имеет смысл повторить: перегрузка и сбои.
+# 400 и 401 не повторяем — там ошибка в запросе или ключе, и повтор
+# только сожжёт время.
+RETRY_STATUSES = {429, 500, 502, 503, 504}
+
+
+async def post_with_retry(client, url: str, headers: dict, payload: dict, delays=None):
+    """POST к модели с повторами на временных сбоях. Бросает, если не вышло.
+
+    Паузы читаются при вызове, а не при определении функции: иначе значение
+    вшивается навсегда и его нельзя поменять ни настройкой, ни в тесте —
+    тест реально ждал по 2 и 5 секунд, этим и был пойман.
+    """
+    import asyncio
+
+    delays = RETRY_DELAYS if delays is None else delays
+    last: Exception | None = None
+    for attempt in range(len(delays) + 1):
+        try:
+            response = await client.post(url, headers=headers, json=payload)
+            if response.status_code in RETRY_STATUSES:
+                raise httpx.HTTPStatusError(
+                    f"сервер ответил {response.status_code}",
+                    request=response.request,
+                    response=response,
+                )
+            response.raise_for_status()
+            return response
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if isinstance(exc, httpx.HTTPStatusError) and status not in RETRY_STATUSES:
+                raise
+            last = exc
+            if attempt < len(delays):
+                logger.info("Сбой связи с моделью (%s), повтор через %.0f с", exc, delays[attempt])
+                await asyncio.sleep(delays[attempt])
+    assert last is not None
+    raise last
+
+
 # Сколько сообщений истории держим. Дальше — обрезаем середину: системный
 # промпт и последние ходы важнее, чем то, что было двадцать вызовов назад.
 HISTORY_LIMIT = 60
@@ -143,6 +192,8 @@ class RunResult:
     files: list[str] = field(default_factory=list)
     stopped_by: str = ""
     """Пусто — модель закончила сама. Иначе: iterations | time | budget | error."""
+    warnings: list[str] = field(default_factory=list)
+    """Строки из чужих данных, похожие на команды, — показываются человеку кодом."""
 
 
 class Runner:
@@ -184,7 +235,15 @@ class Runner:
 
     def system_prompt(self, project: str = "") -> str:
         base = prompts.load(self.role.key)
-        return f"{base}\n\n{self._live_context(project)}"
+        # Уроки идут ПОСЛЕ роли и ПЕРЕД обстановкой — то есть ближе к концу,
+        # где модель соблюдает написанное лучше всего. Это и есть механизм,
+        # которым агент отличается сегодня от себя вчерашнего.
+        learned = lessons.for_prompt(self.role.key)
+        parts = [base]
+        if learned:
+            parts.append(learned)
+        parts.append(self._live_context(project))
+        return "\n\n".join(parts)
 
     def _live_context(self, project: str) -> str:
         """То, что меняется между запусками. Отдельно от промпта роли, чтобы
@@ -285,26 +344,37 @@ class Runner:
                 if offer:
                     payload["tools"] = offer
                     payload["tool_choice"] = "auto"
+                # deepseek-flash по умолчанию размышляет, а старое имя
+                # deepseek-chat — та же модель без размышлений. Все оценки ролей
+                # 24.09 сняты без них; к тому же с размышлениями DeepSeek ждёт,
+                # что reasoning_content вернут в цепочке инструментов, а цикл
+                # этого не делает. Проверено живыми запросами 25.09.
+                if getattr(llm, "provider", "") == "deepseek":
+                    payload["thinking"] = {"type": "disabled"}
 
                 try:
-                    response = await client.post(url, headers=headers, json=payload)
-                    response.raise_for_status()
+                    response = await post_with_retry(client, url, headers, payload)
                 except httpx.HTTPError as exc:
-                    logger.exception("Запрос к модели не прошёл")
-                    return RunResult(
-                        text=f"Модель недоступна: {exc}",
-                        iterations=iteration,
-                        seconds=time.monotonic() - started,
-                        cost_usd=cost,
-                        tools_used=used,
-                        stopped_by="error",
+                    # Не выходим сразу: то, что агент успел сделать, и сам
+                    # разговор должны сохраниться — иначе «продолжай» после
+                    # восстановления сети начнёт с нуля.
+                    logger.warning("Модель недоступна после повторов: %s", exc)
+                    stopped_by = "network"
+                    answer = (
+                        "Связь с моделью пропала и не вернулась за минуту — "
+                        f"остановился на шаге {iteration}. То, что успел "
+                        "записать, сохранено. Напиши «продолжай», когда сеть "
+                        "вернётся."
                     )
+                    break
 
                 data = response.json()
                 for key, value in (data.get("usage") or {}).items():
                     if isinstance(value, int):
                         usage_total[key] = usage_total.get(key, 0) + value
-                cost = budget.estimate_cost(llm.model, usage_total)
+                # Модель + инструменты (картинки). Раньше потолок видел только
+                # токены — прогон с десятком кадров обходил его незаметно.
+                cost = budget.estimate_cost(llm.model, usage_total) + context.spend_usd
 
                 message = ((data.get("choices") or [{}])[0].get("message")) or {}
                 calls = message.get("tool_calls") or []
@@ -347,6 +417,7 @@ class Runner:
             tools_used=used,
             files=list(context.generated_files),
             stopped_by=stopped_by,
+            warnings=list(context.warnings),
         )
 
     def _stop_notice(self, reason: str, context: ToolContext) -> str:

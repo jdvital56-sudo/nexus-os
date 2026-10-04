@@ -363,6 +363,16 @@ def test_every_role_has_a_prompt_file():
         assert (roles_dir / f"{role.key}.md").exists(), f"нет промпта для {role.title}"
 
 
+def test_every_declared_reference_exists():
+    """Опечатка в имени справочника иначе всплыла бы только на живом ответе бота."""
+    from pathlib import Path
+
+    roles_dir = Path(__file__).resolve().parents[2] / "crew" / "roles"
+    for role in config.ROLES:
+        for name in role.references:
+            assert (roles_dir / name).exists(), f"{role.title}: нет справочника {name}"
+
+
 def test_handoff_graph_is_consistent_in_both_directions():
     """Если А передаёт Б, то Б обязана принимать от А. Иначе тупик в рантайме."""
     for role in config.ROLES:

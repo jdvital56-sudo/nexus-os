@@ -71,6 +71,13 @@ class Role:
     extra_dirs: tuple[str, ...] = field(default=())
     """Папки, создаваемые при инициализации сверх стандартных."""
 
+    references: tuple[str, ...] = field(default=())
+    """Справочники из crew/roles/, которые подмешиваются в промпт роли.
+
+    Отдельно от промпта роли намеренно: то, что меняется каждые пару месяцев
+    (форматы видеомоделей), не должно требовать правки самой роли.
+    """
+
 
 # Базовый набор файловых инструментов — есть у всех ролей без исключения.
 # Это то, что отличает агента от бота на промпте: он читает и пишет своей
@@ -83,6 +90,7 @@ _FILE_TOOLS = (
     "list_dir",
     "session_search",
     "todo",
+    "record_lesson",
 )
 
 # Передача работы. Есть у всех, кроме конечных ролей без адресата.
@@ -119,12 +127,13 @@ ROLES: tuple[Role, ...] = (
         hands_to=("producer",),
         extra_dirs=("docs/prompts", "docs/frames"),
         env_token="CREW_TOKEN_PROMPT_ENGINEER",
+        references=("ref_video_models.md",),
     ),
     Role(
         key="sound",
         title="Звукорежиссёр",
         tagline="Музыка, голос, звуковой пакет под ролик.",
-        tools=_FILE_TOOLS + _HANDOFF_TOOLS + ("web_search",),
+        tools=_FILE_TOOLS + _HANDOFF_TOOLS + ("web_search", "beat_grid"),
         accepts_from=("screenwriter",),
         hands_to=("producer",),
         extra_dirs=("docs/sound",),
@@ -164,6 +173,25 @@ ROLES: tuple[Role, ...] = (
 
 
 BY_KEY: dict[str, Role] = {r.key: r for r in ROLES}
+
+
+# Потолки на отдельные инструменты за один прогон. Держит код, а не промпт.
+#
+# Живой прогон 24.09 показал: Скаут, у которого в промпте числами написано
+# «не больше 8 загрузок и 3 поисков», сделал больше. Модель не ведёт счётчик
+# собственных вызовов — она решает задним числом. Правило, которое обязано
+# срабатывать всегда, должно жить там, где оно не может не сработать.
+TOOL_CAPS: dict[str, dict[str, int]] = {
+    "marketer": {"fetch_url": 10, "web_search": 6},
+    "scout": {"fetch_url": 8, "web_search": 3},
+    "sound": {"web_search": 4},
+    "screenwriter": {"web_search": 3},
+    "prompt_engineer": {"image_generate": 12},
+}
+
+
+def tool_cap(role_key: str, tool: str) -> int | None:
+    return TOOL_CAPS.get(role_key, {}).get(tool)
 
 
 def get_role(key: str) -> Role:

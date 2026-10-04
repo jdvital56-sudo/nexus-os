@@ -339,6 +339,15 @@ class RoleBot:
         except Exception:
             logger.debug("Не смог показать трассу", exc_info=True)
 
+        # Предупреждение показывает код, а не модель: живой прогон показал,
+        # что агент может подброшенную команду не выполнить, но и промолчать.
+        if result.warnings:
+            lines = "\n".join(f"• {w}" for w in result.warnings[:5])
+            await update.message.reply_text(
+                "⚠️ В чужих данных найдены строки, похожие на команды агенту. "
+                "Агент их не выполнял, но проверь, откуда они:\n\n" + lines
+            )
+
         for chunk in split_message(result.text):
             await update.message.reply_text(chunk)
 
@@ -396,10 +405,18 @@ def configured_bots() -> list[tuple[str, str | None]]:
     return [(shared, None)] if shared else []
 
 
-def main() -> None:
+def setup_logging() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s"
     )
+    # httpx пишет в INFO полный URL запроса, а в нём токен бота — так все
+    # токены команды оседали открытым текстом в crew_stderr.log.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+def main() -> None:
+    setup_logging()
     config.ensure_layout()
     prompts.reload()
 
