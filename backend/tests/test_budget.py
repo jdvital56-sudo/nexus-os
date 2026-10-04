@@ -32,9 +32,60 @@ def test_anthropic_usage_field_names_are_understood():
 
 
 def test_record_accumulates_spend():
-    budget.record("deepseek-chat", {"prompt_tokens": 1_000_000, "completion_tokens": 0})
-    budget.record("deepseek-chat", {"prompt_tokens": 1_000_000, "completion_tokens": 0})
-    assert budget.spent_today() == pytest.approx(0.54)
+    # Модель с фиксированной ценой: у DeepSeek цена зависит от часа суток,
+    # и тест на накопление не должен падать ночью и проходить днём.
+    budget.record("claude-3.5-sonnet", {"input_tokens": 1_000_000, "output_tokens": 0})
+    budget.record("claude-3.5-sonnet", {"input_tokens": 1_000_000, "output_tokens": 0})
+    assert budget.spent_today() == pytest.approx(6.0)
+
+
+# --- DeepSeek: кэш и часы пик (найдено сверкой с консолью 24.09.2026) ----
+
+from datetime import datetime, timezone
+
+PEAK = datetime(2026, 9, 24, 7, 0, tzinfo=timezone.utc)      # четверг, 07:00 UTC — пик
+OFF_PEAK = datetime(2026, 9, 24, 14, 0, tzinfo=timezone.utc)  # четверг, 14:00 UTC
+WEEKEND = datetime(2026, 9, 26, 7, 0, tzinfo=timezone.utc)    # суббота
+
+
+def test_deepseek_cache_hits_are_nearly_free():
+    """Фаундер поймал: моя оценка $1.45 против $0.26 в консоли. Весь вход
+    считался по полной цене, а почти весь он шёл из кэша."""
+    usage = {"prompt_tokens": 1_000_000, "prompt_cache_hit_tokens": 1_000_000,
+             "prompt_cache_miss_tokens": 0, "completion_tokens": 0}
+    assert budget.estimate_cost("deepseek-flash", usage, now=PEAK) == pytest.approx(0.006)
+
+
+def test_deepseek_cache_miss_is_full_price():
+    """Обратная сторона: то, что мимо кэша, по-прежнему стоит свои деньги."""
+    usage = {"prompt_tokens": 1_000_000, "prompt_cache_hit_tokens": 0,
+             "prompt_cache_miss_tokens": 1_000_000, "completion_tokens": 1_000_000}
+    assert budget.estimate_cost("deepseek-flash", usage, now=PEAK) == pytest.approx(0.30 + 1.20)
+
+
+def test_deepseek_off_peak_and_weekend_are_half_price():
+    usage = {"prompt_tokens": 0, "prompt_cache_miss_tokens": 1_000_000, "completion_tokens": 0}
+    assert budget.estimate_cost("deepseek-flash", usage, now=OFF_PEAK) == pytest.approx(0.15)
+    assert budget.estimate_cost("deepseek-flash", usage, now=WEEKEND) == pytest.approx(0.15)
+
+
+def test_deepseek_without_breakdown_is_counted_conservatively():
+    """Разбивки кэша нет — считаем всё мимо кэша: переоценить безопаснее."""
+    usage = {"prompt_tokens": 1_000_000, "completion_tokens": 0}
+    assert budget.estimate_cost("deepseek-flash", usage, now=PEAK) == pytest.approx(0.30)
+
+
+def test_estimate_matches_the_founders_console_order_of_magnitude():
+    """Сверка с консолью: 5,54 млн токенов за месяц — $0.26.
+
+    Агент повторяет промпт роли на каждом шаге, поэтому около 90% входа —
+    из кэша. Старая формула дала бы около $1.5; новая обязана попасть в
+    порядок консоли, а не в порядок старой ошибки.
+    """
+    usage = {"prompt_tokens": 5_390_000, "prompt_cache_hit_tokens": 4_850_000,
+             "prompt_cache_miss_tokens": 540_000, "completion_tokens": 150_000}
+    cost = budget.estimate_cost("deepseek-flash", usage, now=PEAK)
+    assert 0.1 < cost < 0.4, f"оценка {cost:.3f} не в порядке консоли ($0.26)"
 
 
 def test_interactive_call_passes_within_budget(monkeypatch):

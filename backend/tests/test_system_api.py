@@ -12,11 +12,12 @@ from backend.services import budget, dream
 
 def test_status_reports_real_spending(client, monkeypatch):
     monkeypatch.setattr(budget.settings, "daily_llm_budget_usd", 5.0)
-    budget.record("deepseek-chat", {"prompt_tokens": 1_000_000, "completion_tokens": 0})
+    # Модель с постоянной ценой: у DeepSeek цена зависит от часа суток.
+    budget.record("claude-3.5-sonnet", {"prompt_tokens": 1_000_000, "completion_tokens": 0})
 
     spend = client.get("/api/system/status").json()["spend"]
 
-    assert spend["spent_usd"] == pytest.approx(0.27)
+    assert spend["spent_usd"] == pytest.approx(3.0)
     assert spend["budget_usd"] == 5.0
     assert spend["throttled"] is False
 

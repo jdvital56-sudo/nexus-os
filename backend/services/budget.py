@@ -56,8 +56,46 @@ def _save(data: dict) -> None:
     write_json(SPEND_FILE, data)
 
 
-def estimate_cost(model: str, usage: dict) -> float:
+# DeepSeek считает вход по-разному: то, что уже было в кэше, — почти даром.
+# Цены с официальной страницы api-docs.deepseek.com/quick_start/pricing,
+# сверено 24.09.2026, модель deepseek-flash (V4.1-Flash), за миллион токенов:
+# (вход из кэша, вход мимо кэша, выход) — в пиковые часы.
+#
+# Найдено потому, что фаундер сверил мою цифру расходов со своей консолью:
+# я назвал ~$1.45 за день, консоль показывала $0.26 за месяц. Старая формула
+# брала ВЕСЬ вход по $0.27, а у агентов большой промпт роли повторяется на
+# каждом шаге и почти целиком идёт из кэша по $0.003–0.006 — оценка
+# завышалась в разы. По ней же срабатывал потолок расходов прогона.
+DEEPSEEK_PEAK_PRICES = (0.006, 0.30, 1.20)
+DEEPSEEK_MODELS = {"deepseek-flash", "deepseek-chat", "deepseek-v4-flash"}
+
+# Пиковые часы DeepSeek по UTC, пн–пт. Остальное время — половина цены.
+_PEAK_HOURS_UTC = set(range(1, 4)) | set(range(6, 10))
+
+
+def _deepseek_multiplier(now: datetime | None = None) -> float:
+    now = now or datetime.now(timezone.utc)
+    if now.weekday() < 5 and now.hour in _PEAK_HOURS_UTC:
+        return 1.0
+    return 0.5
+
+
+def estimate_cost(model: str, usage: dict, now: datetime | None = None) -> float:
     """Считает стоимость вызова по токенам. Неизвестная модель — 0."""
+    if model in DEEPSEEK_MODELS:
+        hit_price, miss_price, out_price = DEEPSEEK_PEAK_PRICES
+        prompt = usage.get("prompt_tokens") or 0
+        hit = usage.get("prompt_cache_hit_tokens")
+        miss = usage.get("prompt_cache_miss_tokens")
+        if hit is None and miss is None:
+            # Разбивки нет — считаем всё мимо кэша: лучше переоценить, чем
+            # недооценить, но только в этом случае.
+            hit, miss = 0, prompt
+        hit, miss = hit or 0, miss or 0
+        completion = usage.get("completion_tokens") or 0
+        raw = (hit * hit_price + miss * miss_price + completion * out_price) / 1_000_000
+        return raw * _deepseek_multiplier(now)
+
     prices = PRICES_PER_MTOK.get(model)
     if not prices:
         return 0.0
